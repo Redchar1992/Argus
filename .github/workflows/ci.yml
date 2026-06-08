@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (Spring Cloud)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build + test
+        working-directory: backend
+        run: mvn -B -q package
+
+  analyst-console:
+    name: Frontend (React analyst-console)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install + build
+        working-directory: frontend/analyst-console
+        run: |
+          npm install
+          npm run build
+
+  admin-console:
+    name: Frontend (Vue admin-console)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install + build
+        working-directory: frontend/admin-console
+        run: |
+          npm install
+          npm run build

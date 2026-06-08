@@ -1,0 +1,35 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: screening-tools-service
+  datasource:
+    url: jdbc:h2:mem:toolsdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+---
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  datasource:
+    url: ${ARGUS_PG_URL:jdbc:postgresql://localhost:5432/argus}
+    driver-class-name: org.postgresql.Driver
+    username: ${ARGUS_PG_USER:argus}
+    password: ${ARGUS_PG_PASSWORD:argus}
+  jpa:
+    hibernate:
+      ddl-auto: update

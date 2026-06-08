@@ -1,0 +1,52 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: agent-orchestrator-service
+  # By default the trace store is in-memory, so Mongo auto-config is excluded and
+  # the service boots with zero infra. Activate the 'mongo' profile to persist
+  # traces in MongoDB (real NoSQL).
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.mongo.MongoRepositoriesAutoConfiguration
+
+argus:
+  trace:
+    store: ${ARGUS_TRACE_STORE:memory}        # memory | mongo
+  llm:
+    provider: ${ARGUS_LLM_PROVIDER:local}     # local | anthropic
+    anthropic:
+      model: ${ARGUS_ANTHROPIC_MODEL:claude-3-5-sonnet-20241022}
+      max-tokens: 1024
+  agent:
+    max-steps: ${ARGUS_AGENT_MAX_STEPS:8}
+  tools:
+    base-url: ${ARGUS_TOOLS_URL:http://localhost:8083}
+  case:
+    base-url: ${ARGUS_CASE_URL:http://localhost:8084}
+    mirror-enabled: ${ARGUS_CASE_MIRROR:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+---
+# Activate with SPRING_PROFILES_ACTIVE=mongo (and set ARGUS_TRACE_STORE=mongo).
+spring:
+  config:
+    activate:
+      on-profile: mongo
+  autoconfigure:
+    exclude: []          # re-enable Mongo auto-config
+  data:
+    mongodb:
+      uri: ${ARGUS_MONGO_URI:mongodb://localhost:27017/argus}
+
+argus:
+  trace:
+    store: mongo

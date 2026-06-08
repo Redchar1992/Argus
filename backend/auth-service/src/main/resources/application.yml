@@ -1,0 +1,43 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+  # Default profile uses an in-memory H2 store so the service runs with zero infra.
+  # Activate the 'postgres' profile (SPRING_PROFILES_ACTIVE=postgres) to use Postgres.
+  datasource:
+    url: jdbc:h2:mem:authdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+argus:
+  jwt:
+    # Demo secret. In production this MUST come from the environment (ARGUS_JWT_SECRET).
+    secret: ${ARGUS_JWT_SECRET:argus-dev-secret-change-me-please-32bytes-minimum-length}
+    expiry-seconds: 3600
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+---
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  datasource:
+    url: ${ARGUS_PG_URL:jdbc:postgresql://localhost:5432/argus}
+    driver-class-name: org.postgresql.Driver
+    username: ${ARGUS_PG_USER:argus}
+    password: ${ARGUS_PG_PASSWORD:argus}
+  jpa:
+    hibernate:
+      ddl-auto: update

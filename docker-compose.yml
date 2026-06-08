@@ -1,0 +1,58 @@
+# Argus local infrastructure: Postgres (SQL), Mongo (NoSQL trace store), Redis.
+#
+# Quick start (databases only — services run from your IDE / java -jar):
+#   docker compose up -d postgres mongo redis
+#
+# The Spring services default to in-memory H2 + in-memory trace store, so this
+# compose file is OPTIONAL for a demo. Use it to exercise the real SQL + NoSQL
+# path:
+#   SPRING_PROFILES_ACTIVE=postgres   (auth/tools/case services)
+#   SPRING_PROFILES_ACTIVE=mongo + ARGUS_TRACE_STORE=mongo  (orchestrator)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: argus-postgres
+    environment:
+      POSTGRES_USER: argus
+      POSTGRES_PASSWORD: argus
+      POSTGRES_DB: argus
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+      - argus-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U argus"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    container_name: argus-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./infra/mongo:/docker-entrypoint-initdb.d:ro
+      - argus-mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: argus-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  argus-pg:
+  argus-mongo:
