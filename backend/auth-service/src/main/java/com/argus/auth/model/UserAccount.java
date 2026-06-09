@@ -63,6 +63,10 @@ public class UserAccount {
         return role;
     }
 
+    public void setRole(Role role) {
+        this.role = role;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }

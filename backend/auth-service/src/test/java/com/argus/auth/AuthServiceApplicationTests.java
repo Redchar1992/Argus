@@ -2,6 +2,7 @@ package com.argus.auth;
 
 import com.argus.auth.dto.AuthDtos.RegisterRequest;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
+import com.argus.auth.dto.AuthDtos.UserView;
 import com.argus.auth.model.Role;
 import com.argus.auth.service.AuthService;
 import org.junit.jupiter.api.Test;
@@ -36,9 +37,31 @@ class AuthServiceApplicationTests {
 
     @Test
     void registerThenLoginRoundTrips() {
-        authService.register(new RegisterRequest("reviewer1", "reviewer-pass", Role.ANALYST));
+        authService.register(new RegisterRequest("reviewer1", "reviewer-pass"));
         TokenResponse token = authService.login("reviewer1", "reviewer-pass");
         assertEquals("reviewer1", token.username());
         assertEquals(Role.ANALYST, token.role());
+    }
+
+    /**
+     * Privilege-escalation guard: registration must always produce the lowest privilege,
+     * regardless of what a caller tries to slip in. The DTO no longer even carries a role,
+     * so the created user is ANALYST, never ADMIN.
+     */
+    @Test
+    void selfRegistrationAlwaysLandsAtAnalystNeverAdmin() {
+        UserView created = authService.register(new RegisterRequest("escalator", "hunter2hunter2"));
+        assertEquals(Role.ANALYST, created.role());
+
+        TokenResponse token = authService.login("escalator", "hunter2hunter2");
+        assertEquals(Role.ANALYST, token.role());
+    }
+
+    /** ADMIN-only role assignment actually elevates an existing user. */
+    @Test
+    void adminCanAssignRole() {
+        authService.register(new RegisterRequest("promoteme", "promoteme-pass"));
+        UserView promoted = authService.assignRole("promoteme", Role.ADMIN);
+        assertEquals(Role.ADMIN, promoted.role());
     }
 }

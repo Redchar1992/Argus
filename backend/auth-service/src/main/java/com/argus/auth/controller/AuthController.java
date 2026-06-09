@@ -1,5 +1,6 @@
 package com.argus.auth.controller;
 
+import com.argus.auth.dto.AuthDtos.AssignRoleRequest;
 import com.argus.auth.dto.AuthDtos.LoginRequest;
 import com.argus.auth.dto.AuthDtos.RegisterRequest;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
@@ -12,7 +13,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,6 +45,17 @@ public class AuthController {
     @ResponseStatus(HttpStatus.CREATED)
     public UserView register(@Valid @RequestBody RegisterRequest request) {
         return authService.register(request);
+    }
+
+    /**
+     * ADMIN-only: assign a role to an existing user. This is the ONLY way to grant
+     * elevated privileges — self-registration always lands at ANALYST.
+     */
+    @PutMapping("/users/{username}/role")
+    @PreAuthorize("hasRole('ADMIN')")
+    public UserView assignRole(@PathVariable String username,
+                               @Valid @RequestBody AssignRoleRequest request) {
+        return authService.assignRole(username, request.role());
     }
 
     /** Returns the caller's identity decoded from a valid token. Any authenticated role. */
