@@ -10,11 +10,11 @@ const route = useRoute();
         <svg class="eye-mark" viewBox="0 0 100 100" aria-hidden="true">
           <path d="M10 50 Q50 18 90 50 Q50 82 10 50 Z" fill="none" stroke="url(#g)" stroke-width="6" />
           <circle cx="50" cy="50" r="16" fill="url(#g)" />
-          <circle cx="50" cy="50" r="6" fill="#0b0e14" />
+          <circle cx="50" cy="50" r="6" fill="#0c0a14" />
           <defs>
             <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#6aa0ff" />
-              <stop offset="1" stop-color="#9bc0ff" />
+              <stop offset="0" stop-color="#8b5cf6" />
+              <stop offset="1" stop-color="#c4b5fd" />
             </linearGradient>
           </defs>
         </svg>
@@ -41,8 +41,8 @@ const route = useRoute();
 
 <style scoped>
 .topbar {
-  background: var(--argus-panel, #151a23);
-  border-bottom: 1px solid var(--argus-line, #232a36);
+  background: var(--argus-panel, #18141f);
+  border-bottom: 1px solid var(--argus-line, #2a2336);
   color: #fff;
   display: flex;
   align-items: center;
@@ -61,7 +61,7 @@ const route = useRoute();
   font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.5px;
-  background: linear-gradient(90deg, #6aa0ff, #9bc0ff);
+  background: linear-gradient(90deg, #8b5cf6, #c4b5fd);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -70,7 +70,7 @@ const route = useRoute();
   color: var(--argus-muted, #8a93a3);
   font-size: 14px;
   font-weight: 500;
-  border-left: 1px solid var(--argus-line, #232a36);
+  border-left: 1px solid var(--argus-line, #2a2336);
   padding-left: 12px;
 }
 .sub {

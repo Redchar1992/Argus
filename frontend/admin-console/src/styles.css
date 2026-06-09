@@ -2,14 +2,14 @@
  * We drive Element Plus's built-in dark mode via CSS variable overrides rather than
  * rewriting every view, keeping the polish "light-touch" but on-brand. */
 :root {
-  --argus-bg: #0b0e14;
-  --argus-panel: #151a23;
-  --argus-panel-2: #121722;
-  --argus-line: #232a36;
+  --argus-bg: #0c0a14;
+  --argus-panel: #18141f;
+  --argus-panel-2: #14111d;
+  --argus-line: #2a2336;
   --argus-text: #e6e9ef;
   --argus-muted: #8a93a3;
-  --argus-accent: #6aa0ff;
-  --argus-accent-2: #9bc0ff;
+  --argus-accent: #8b5cf6;
+  --argus-accent-2: #c4b5fd;
 }
 
 html,
@@ -37,11 +37,11 @@ html.dark {
   --el-border-color-lighter: var(--argus-line);
   --el-border-color-extra-light: var(--argus-line);
   --el-color-primary: var(--argus-accent);
-  --el-color-primary-light-3: #4d82e0;
-  --el-color-primary-light-5: #3a5fa0;
-  --el-color-primary-light-7: #28394f;
-  --el-color-primary-light-8: #1f2c3d;
-  --el-color-primary-light-9: #161d29;
+  --el-color-primary-light-3: #6f47c4;
+  --el-color-primary-light-5: #54358f;
+  --el-color-primary-light-7: #39245c;
+  --el-color-primary-light-8: #2c1c47;
+  --el-color-primary-light-9: #1d1430;
   --el-fill-color: var(--argus-panel-2);
   --el-fill-color-light: var(--argus-panel-2);
   --el-fill-color-lighter: var(--argus-panel-2);
@@ -55,7 +55,7 @@ html.dark .el-card {
   transition: border-color 0.15s ease;
 }
 html.dark .el-card:hover {
-  border-color: #2c3647;
+  border-color: #352c47;
 }
 html.dark .el-card__header {
   border-bottom: 1px solid var(--argus-line);
@@ -67,7 +67,7 @@ html.dark .el-table {
   --el-table-bg-color: var(--argus-panel);
   --el-table-tr-bg-color: var(--argus-panel);
   --el-table-header-bg-color: var(--argus-panel-2);
-  --el-table-row-hover-bg-color: rgba(106, 160, 255, 0.06);
+  --el-table-row-hover-bg-color: rgba(139, 92, 246, 0.06);
   --el-table-border-color: var(--argus-line);
 }
 html.dark .el-table th.el-table__cell {
@@ -81,7 +81,7 @@ html.dark .el-table th.el-table__cell {
 html.dark .el-button--primary {
   background: linear-gradient(135deg, var(--argus-accent), var(--argus-accent-2));
   border: 0;
-  color: #0b0e14;
+  color: #0c0a14;
   font-weight: 700;
 }
 html.dark .el-button--primary:hover {
@@ -99,13 +99,13 @@ html.dark .el-aside {
 }
 html.dark .el-menu-item.is-active {
   color: var(--argus-accent);
-  background: rgba(106, 160, 255, 0.08);
+  background: rgba(139, 92, 246, 0.08);
 }
 
 /* info alerts read as muted hint cards */
 html.dark .el-alert--info {
-  background: rgba(106, 160, 255, 0.07);
-  border: 1px solid #2f3d57;
+  background: rgba(139, 92, 246, 0.07);
+  border: 1px solid #3a2f57;
 }
 html.dark .el-alert--info .el-alert__title {
   color: var(--argus-accent-2);

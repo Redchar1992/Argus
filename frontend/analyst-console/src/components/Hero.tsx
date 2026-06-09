@@ -9,17 +9,17 @@ function HeroArt() {
     <svg viewBox="0 0 300 180" className="hero-art-svg" role="img" aria-hidden="true">
       <defs>
         <linearGradient id="argusLg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#6aa0ff" />
-          <stop offset="1" stopColor="#bcd4ff" />
+          <stop offset="0" stopColor="#8b5cf6" />
+          <stop offset="1" stopColor="#c4b5fd" />
         </linearGradient>
         <radialGradient id="argusGlow" cx="50%" cy="50%" r="50%">
-          <stop offset="0" stopColor="#6aa0ff" stopOpacity="0.24" />
-          <stop offset="1" stopColor="#6aa0ff" stopOpacity="0" />
+          <stop offset="0" stopColor="#8b5cf6" stopOpacity="0.24" />
+          <stop offset="1" stopColor="#8b5cf6" stopOpacity="0" />
         </radialGradient>
         <radialGradient id="argusIris" cx="50%" cy="45%" r="55%">
-          <stop offset="0" stopColor="#bcd4ff" />
-          <stop offset="0.55" stopColor="#6aa0ff" />
-          <stop offset="1" stopColor="#2f4f8c" />
+          <stop offset="0" stopColor="#c4b5fd" />
+          <stop offset="0.55" stopColor="#8b5cf6" />
+          <stop offset="1" stopColor="#3b2f6b" />
         </radialGradient>
         {/* clip so the scan sweep stays inside the iris */}
         <clipPath id="irisClip">
@@ -40,17 +40,17 @@ function HeroArt() {
       {/* iris */}
       <g className="eye-iris">
         <circle cx="150" cy="90" r="34" fill="url(#argusIris)" opacity="0.9" />
-        <circle cx="150" cy="90" r="34" fill="none" stroke="#bcd4ff" strokeWidth="1.4" opacity="0.5" />
-        <circle cx="150" cy="90" r="13" fill="#0b0e14" />
-        <circle cx="144" cy="84" r="4" fill="#e8f0ff" opacity="0.85" />
+        <circle cx="150" cy="90" r="34" fill="none" stroke="#c4b5fd" strokeWidth="1.4" opacity="0.5" />
+        <circle cx="150" cy="90" r="13" fill="#0c0a14" />
+        <circle cx="144" cy="84" r="4" fill="#ede9fe" opacity="0.85" />
         {/* scanning sweep line across the iris */}
         <g clipPath="url(#irisClip)">
-          <rect className="scan-sweep" x="148" y="54" width="3" height="72" fill="#e8f0ff" opacity="0.85" />
+          <rect className="scan-sweep" x="148" y="54" width="3" height="72" fill="#ede9fe" opacity="0.85" />
         </g>
       </g>
 
       {/* "watcher" eyes / data points feeding the loop: plan → act → observe */}
-      <g fill="#9bc0ff">
+      <g fill="#c4b5fd">
         <circle className="flowdot" cx="70" cy="90" r="3.2">
           <animate attributeName="opacity" values="0.2;1;0.2" dur="2.8s" repeatCount="indefinite" />
         </circle>
