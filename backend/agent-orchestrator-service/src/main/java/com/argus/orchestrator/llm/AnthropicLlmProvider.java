@@ -158,15 +158,25 @@ public class AnthropicLlmProvider implements LlmProvider {
         return req;
     }
 
-    private List<Map<String, Object>> buildToolSchemas(List<ToolSpec> tools) {
+    /** Package-private + static so the schema shape can be unit-tested without a live client. */
+    static List<Map<String, Object>> buildToolSchemas(List<ToolSpec> tools) {
         List<Map<String, Object>> out = new ArrayList<>();
         for (ToolSpec t : tools) {
+            // Emit a CORRECTLY-TYPED JSON schema per parameter (array-of-string, integer,
+            // number, boolean, string) plus a required list — not everything-is-a-string.
             Map<String, Object> props = new LinkedHashMap<>();
-            t.parameters().forEach((k, v) -> props.put(k, Map.of("type", "string", "description", v)));
+            t.parameters().forEach((k, spec) -> props.put(k, spec.toSchemaFragment()));
+            Map<String, Object> inputSchema = new LinkedHashMap<>();
+            inputSchema.put("type", "object");
+            inputSchema.put("properties", props);
+            List<String> required = t.requiredParameterNames();
+            if (!required.isEmpty()) {
+                inputSchema.put("required", required);
+            }
             out.add(Map.of(
                     "name", t.name(),
                     "description", t.description(),
-                    "input_schema", Map.of("type", "object", "properties", props)));
+                    "input_schema", inputSchema));
         }
         // The structured finish tool.
         out.add(Map.of(
