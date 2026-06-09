@@ -1,6 +1,7 @@
 package com.argus.orchestrator.llm;
 
 import com.argus.orchestrator.agent.AgentAction;
+import com.argus.orchestrator.agent.DecisionPolicy;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -96,26 +97,70 @@ public class LocalRuleAgentProvider implements LlmProvider {
             return AgentAction.callTool(reason, "risk_rules", args);
         }
 
-        // FINISH: synthesize the decision from the risk_rules score + policy bands.
+        // FINISH: synthesize the decision from the risk_rules score + admin-editable bands.
         Map<String, Object> risk = ctx.latestObservation("risk_rules");
         int score = asInt(risk.get("riskScore"));
         String band = String.valueOf(risk.getOrDefault("riskBand", "MINIMAL"));
-        String decision = decisionFor(score, directHit);
+
+        // FAIL CLOSED: a compliance engine must never CLEAR a wallet on incomplete evidence.
+        // If a REQUIRED tool did not produce a valid observation, escalate to REVIEW and
+        // record exactly which evidence is missing.
+        List<String> missing = missingRequiredEvidence(ctx);
         List<String> factors = buildFactors(directHit, ctx.latestObservation("trace_transactions"), risk);
 
+        String decision;
+        if (!missing.isEmpty()) {
+            decision = "REVIEW";
+            factors.add(0, "Incomplete evidence: required tool(s) produced no valid observation ("
+                    + String.join(", ", missing) + "). Failing closed to REVIEW rather than CLEAR.");
+        } else {
+            decision = decisionFor(score, directHit, ctx.getDecisionPolicy());
+        }
+
         String thought = "Evidence gathering is complete. Final risk score is " + score
-                + " (" + band + "). Issuing decision: " + decision + ".";
+                + " (" + band + "). Issuing decision: " + decision + "."
+                + (missing.isEmpty() ? ""
+                        : " NOTE: failing closed because required evidence was missing: " + missing + ".");
         return AgentAction.finish(thought, decision, score, band, factors);
     }
 
-    private String decisionFor(int score, boolean directHit) {
-        if (directHit || score >= 60) {
+    /**
+     * Maps a final score onto a decision using the ADMIN-EDITABLE bands (not hardcoded).
+     * A direct sanctions hit always forces BLOCK regardless of the numeric bands.
+     */
+    private String decisionFor(int score, boolean directHit, DecisionPolicy policy) {
+        if (directHit || score >= policy.blockThreshold()) {
             return "BLOCK";
         }
-        if (score >= 30) {
+        if (score >= policy.reviewThreshold()) {
             return "REVIEW";
         }
         return "CLEAR";
+    }
+
+    /**
+     * The tools whose evidence is MANDATORY before a wallet can be cleared. If any of
+     * these did not produce a valid observation (never ran, errored, or was disabled),
+     * we must not CLEAR. {@code address_profile}/{@code trace_transactions} are not in
+     * this list because the agent legitimately skips tracing for tiny clean wallets, and
+     * profiling is supporting context rather than a gating control.
+     */
+    private static final List<String> REQUIRED_TOOLS = List.of("sanctions_screen", "risk_rules");
+
+    private List<String> missingRequiredEvidence(AgentContext ctx) {
+        List<String> missing = new ArrayList<>();
+        for (String tool : REQUIRED_TOOLS) {
+            if (!hasValidObservation(ctx, tool)) {
+                missing.add(tool);
+            }
+        }
+        return missing;
+    }
+
+    /** A valid observation exists, is non-empty, and does not carry a tool {@code error}. */
+    private boolean hasValidObservation(AgentContext ctx, String tool) {
+        Map<String, Object> obs = ctx.latestObservation(tool);
+        return obs != null && !obs.isEmpty() && !obs.containsKey("error");
     }
 
     @SuppressWarnings("unchecked")

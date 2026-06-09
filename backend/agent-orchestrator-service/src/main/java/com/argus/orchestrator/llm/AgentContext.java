@@ -16,14 +16,28 @@ public class AgentContext {
     private final String subjectAddress;
     private final List<com.argus.orchestrator.agent.ToolSpec> tools;
     private final List<ObservedCall> history = new ArrayList<>();
+    private final com.argus.orchestrator.agent.DecisionPolicy decisionPolicy;
 
     public AgentContext(String subjectAddress, List<com.argus.orchestrator.agent.ToolSpec> tools) {
+        this(subjectAddress, tools, com.argus.orchestrator.agent.DecisionPolicy.defaults());
+    }
+
+    public AgentContext(String subjectAddress,
+                        List<com.argus.orchestrator.agent.ToolSpec> tools,
+                        com.argus.orchestrator.agent.DecisionPolicy decisionPolicy) {
         this.subjectAddress = subjectAddress;
         this.tools = tools;
+        this.decisionPolicy = decisionPolicy == null
+                ? com.argus.orchestrator.agent.DecisionPolicy.defaults() : decisionPolicy;
     }
 
     public String getSubjectAddress() {
         return subjectAddress;
+    }
+
+    /** The admin-editable decision bands in effect for this investigation. */
+    public com.argus.orchestrator.agent.DecisionPolicy getDecisionPolicy() {
+        return decisionPolicy;
     }
 
     public List<com.argus.orchestrator.agent.ToolSpec> getTools() {

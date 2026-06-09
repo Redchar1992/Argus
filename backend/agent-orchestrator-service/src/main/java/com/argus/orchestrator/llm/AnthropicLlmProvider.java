@@ -57,6 +57,11 @@ public class AnthropicLlmProvider implements LlmProvider {
               CLEAR, REVIEW, or BLOCK, a 0-100 riskScore, a riskBand, and the concrete
               riskFactors that justify it. A direct sanctions hit must result in BLOCK.
 
+            FAIL CLOSED (critical): you may only return CLEAR when BOTH sanctions_screen
+            AND risk_rules have run successfully and returned valid results. If either of
+            those required tools is missing, failed, errored, or was disabled, you MUST NOT
+            return CLEAR — return REVIEW and cite the missing evidence in riskFactors.
+
             Be concise and auditable. Every tool call should have a clear purpose.
             """;
 
@@ -98,7 +103,7 @@ public class AnthropicLlmProvider implements LlmProvider {
                     .bodyToMono(String.class)
                     .timeout(Duration.ofSeconds(60))
                     .block();
-            return parseResponse(raw);
+            return failClosed(parseResponse(raw), ctx);
         } catch (Exception e) {
             log.error("Anthropic call failed, returning safe REVIEW: {}", e.getMessage());
             return AgentAction.finish(
@@ -106,6 +111,41 @@ public class AnthropicLlmProvider implements LlmProvider {
                     "REVIEW", 50, "MEDIUM",
                     List.of("Automated investigation could not complete; routed to human review."));
         }
+    }
+
+    /** Required tools that must have valid observations before a CLEAR is permitted. */
+    private static final List<String> REQUIRED_TOOLS = List.of("sanctions_screen", "risk_rules");
+
+    /**
+     * Deterministic fail-closed guard layered over whatever the model returned. Even if the
+     * LLM ignores the system instruction and tries to CLEAR on incomplete evidence, we
+     * override the decision to REVIEW. This is defence-in-depth: the prompt asks for it, the
+     * code guarantees it.
+     */
+    private AgentAction failClosed(AgentAction action, AgentContext ctx) {
+        if (action == null || action.type() != AgentAction.Type.FINISH
+                || !"CLEAR".equalsIgnoreCase(action.decision())) {
+            return action;
+        }
+        List<String> missing = new ArrayList<>();
+        for (String tool : REQUIRED_TOOLS) {
+            Map<String, Object> obs = ctx.latestObservation(tool);
+            if (obs == null || obs.isEmpty() || obs.containsKey("error")) {
+                missing.add(tool);
+            }
+        }
+        if (missing.isEmpty()) {
+            return action;
+        }
+        List<String> factors = new ArrayList<>(
+                action.riskFactors() == null ? List.of() : action.riskFactors());
+        factors.add(0, "Incomplete evidence: required tool(s) produced no valid observation ("
+                + String.join(", ", missing) + "). Overriding model CLEAR to REVIEW (fail closed).");
+        log.warn("Model returned CLEAR with missing required evidence {}; failing closed to REVIEW.",
+                missing);
+        return AgentAction.finish(action.thought(), "REVIEW",
+                action.riskScore() == null ? 50 : action.riskScore(),
+                action.riskBand() == null ? "MEDIUM" : action.riskBand(), factors);
     }
 
     private Map<String, Object> buildRequest(AgentContext ctx) {

@@ -1,6 +1,8 @@
 package com.argus.orchestrator;
 
+import com.argus.orchestrator.agent.DecisionPolicy;
 import com.argus.orchestrator.client.CaseServiceClient;
+import com.argus.orchestrator.client.PolicyClient;
 import com.argus.orchestrator.client.ToolClient;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
@@ -55,6 +57,9 @@ class OrchestratorSecurityIntegrationTest {
     @MockBean
     private CaseServiceClient caseServiceClient;
 
+    @MockBean
+    private PolicyClient policyClient;
+
     private String token(String role) throws Exception {
         SignedJWT jwt = new SignedJWT(
                 new JWSHeader(JWSAlgorithm.HS256),
@@ -78,6 +83,7 @@ class OrchestratorSecurityIntegrationTest {
 
     @Test
     void analystTokenDrivesLoopAndPropagatesBearerToTools() throws Exception {
+        when(policyClient.fetchDecisionPolicy(any())).thenReturn(DecisionPolicy.defaults());
         // Minimal stub so the local agent can complete in one screening + scoring path.
         when(toolClient.invoke(eq("sanctions_screen"), any(), any())).thenReturn(Map.of(
                 "addressesChecked", 1, "hitCount", 0, "directHit", false, "hits", List.of()));

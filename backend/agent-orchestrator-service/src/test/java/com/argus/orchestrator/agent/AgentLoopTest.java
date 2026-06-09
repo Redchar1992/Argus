@@ -1,6 +1,7 @@
 package com.argus.orchestrator.agent;
 
 import com.argus.orchestrator.client.CaseServiceClient;
+import com.argus.orchestrator.client.PolicyClient;
 import com.argus.orchestrator.client.ToolClient;
 import com.argus.orchestrator.llm.LocalRuleAgentProvider;
 import com.argus.orchestrator.model.Investigation;
@@ -13,6 +14,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,7 +35,22 @@ class AgentLoopTest {
         CaseServiceClient caseClient = mock(CaseServiceClient.class);
         doNothing().when(caseClient).mirrorCase(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
                 any(), any(), any(), any(), any());
-        return new AgentOrchestrator(new LocalRuleAgentProvider(), toolClient, store, caseClient, 8);
+        PolicyClient policyClient = mock(PolicyClient.class);
+        when(policyClient.fetchDecisionPolicy(any())).thenReturn(DecisionPolicy.defaults());
+        return new AgentOrchestrator(new LocalRuleAgentProvider(), toolClient, store, caseClient,
+                policyClient, 8);
+    }
+
+    /** Builds an orchestrator whose policy client returns the given custom bands. */
+    private AgentOrchestrator buildOrchestrator(ToolClient toolClient, DecisionPolicy policy) {
+        InvestigationStore store = new InMemoryInvestigationStore();
+        CaseServiceClient caseClient = mock(CaseServiceClient.class);
+        doNothing().when(caseClient).mirrorCase(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
+                any(), any(), any(), any(), any());
+        PolicyClient policyClient = mock(PolicyClient.class);
+        when(policyClient.fetchDecisionPolicy(any())).thenReturn(policy);
+        return new AgentOrchestrator(new LocalRuleAgentProvider(), toolClient, store, caseClient,
+                policyClient, 8);
     }
 
     @Test
@@ -91,5 +108,60 @@ class AgentLoopTest {
         assertEquals("CLEAR", inv.getDecision());
         // The judgement: tracing was NOT performed for this tiny clean wallet.
         assertFalse(inv.getSteps().stream().anyMatch(s -> "trace_transactions".equals(s.getToolName())));
+    }
+
+    /**
+     * FAIL-CLOSED (issue #3): if a REQUIRED tool (here risk_rules) returns an error instead
+     * of a valid observation, the decision must NOT be CLEAR even though score=0/directHit=false.
+     */
+    @Test
+    void missingRequiredEvidenceFailsClosedToReviewNotClear() {
+        ToolClient tools = mock(ToolClient.class);
+        when(tools.invoke(eq("sanctions_screen"), any(), any())).thenReturn(Map.of(
+                "addressesChecked", 1, "hitCount", 0, "directHit", false, "hits", List.of()));
+        when(tools.invoke(eq("address_profile"), any(), any())).thenReturn(Map.of(
+                "address", "0xq", "totalInflowUsd", 1000.0, "totalOutflowUsd", 200.0,
+                "counterpartyCount", 1, "txCount", 2));
+        // risk_rules is unavailable / disabled -> tool client surfaces an error observation.
+        when(tools.invoke(eq("risk_rules"), any(), any())).thenReturn(Map.of(
+                "error", "tool_unreachable", "tool", "risk_rules"));
+
+        AgentOrchestrator orch = buildOrchestrator(tools);
+        orch.createInvestigation("inv3", "0xq", "tester");
+        Investigation inv = orch.run("inv3");
+
+        assertNotEquals("CLEAR", inv.getDecision());
+        assertEquals("REVIEW", inv.getDecision());
+        assertTrue(inv.getRiskFactors().stream()
+                .anyMatch(f -> f.toLowerCase().contains("incomplete evidence")
+                        && f.contains("risk_rules")));
+    }
+
+    /**
+     * POLICY-DRIVEN BANDS (issue #4): the same borderline score lands in a DIFFERENT band
+     * when the admin lowers the review threshold. With defaults (review>=30) a score of 20
+     * is CLEAR; tighten the policy to review>=15 and the same wallet becomes REVIEW.
+     */
+    @Test
+    void editingPolicyMovesBorderlineScoreIntoADifferentBand() {
+        ToolClient tools = mock(ToolClient.class);
+        when(tools.invoke(eq("sanctions_screen"), any(), any())).thenReturn(Map.of(
+                "addressesChecked", 1, "hitCount", 0, "directHit", false, "hits", List.of()));
+        when(tools.invoke(eq("address_profile"), any(), any())).thenReturn(Map.of(
+                "address", "0xborder", "totalInflowUsd", 1000.0, "totalOutflowUsd", 200.0,
+                "counterpartyCount", 1, "txCount", 2));
+        when(tools.invoke(eq("risk_rules"), any(), any())).thenReturn(Map.of(
+                "address", "0xborder", "riskScore", 20, "riskBand", "LOW",
+                "firedRules", List.of(Map.of("ruleId", "R3_SOME", "description", "minor", "points", 20))));
+
+        // Default bands (60/30): score 20 < 30 -> CLEAR.
+        AgentOrchestrator defaultOrch = buildOrchestrator(tools, DecisionPolicy.defaults());
+        defaultOrch.createInvestigation("invA", "0xborder", "tester");
+        assertEquals("CLEAR", defaultOrch.run("invA").getDecision());
+
+        // Admin tightens review threshold to 15: the SAME score 20 now lands in REVIEW.
+        AgentOrchestrator strictOrch = buildOrchestrator(tools, new DecisionPolicy(60, 15));
+        strictOrch.createInvestigation("invB", "0xborder", "tester");
+        assertEquals("REVIEW", strictOrch.run("invB").getDecision());
     }
 }

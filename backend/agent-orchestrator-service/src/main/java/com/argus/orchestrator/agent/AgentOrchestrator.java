@@ -1,6 +1,7 @@
 package com.argus.orchestrator.agent;
 
 import com.argus.orchestrator.client.CaseServiceClient;
+import com.argus.orchestrator.client.PolicyClient;
 import com.argus.orchestrator.client.ToolClient;
 import com.argus.orchestrator.llm.AgentContext;
 import com.argus.orchestrator.llm.LlmProvider;
@@ -41,17 +42,20 @@ public class AgentOrchestrator {
     private final ToolClient toolClient;
     private final InvestigationStore store;
     private final CaseServiceClient caseServiceClient;
+    private final PolicyClient policyClient;
     private final int defaultMaxSteps;
 
     public AgentOrchestrator(LlmProvider llmProvider,
                              ToolClient toolClient,
                              InvestigationStore store,
                              CaseServiceClient caseServiceClient,
+                             PolicyClient policyClient,
                              @Value("${argus.agent.max-steps:8}") int defaultMaxSteps) {
         this.llmProvider = llmProvider;
         this.toolClient = toolClient;
         this.store = store;
         this.caseServiceClient = caseServiceClient;
+        this.policyClient = policyClient;
         this.defaultMaxSteps = defaultMaxSteps;
     }
 
@@ -88,7 +92,10 @@ public class AgentOrchestrator {
     public Investigation run(String investigationId, String bearerToken) {
         Investigation inv = store.findById(investigationId)
                 .orElseThrow(() -> new IllegalArgumentException("No investigation " + investigationId));
-        AgentContext ctx = new AgentContext(inv.getSubjectAddress(), ToolSpec.defaultCatalog());
+        // Load the admin-editable decision bands so the policy actually drives the decision.
+        DecisionPolicy decisionPolicy = policyClient.fetchDecisionPolicy(bearerToken);
+        AgentContext ctx = new AgentContext(
+                inv.getSubjectAddress(), ToolSpec.defaultCatalog(), decisionPolicy);
 
         try {
             for (int step = 1; step <= inv.getMaxSteps(); step++) {
