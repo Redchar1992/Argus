@@ -7,6 +7,9 @@ import com.argus.orchestrator.service.InvestigationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,21 +36,27 @@ public class InvestigationController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public ResponseEntity<SubmitResponse> submit(
             @Valid @RequestBody SubmitRequest request,
-            @RequestHeader(value = "X-Argus-User", required = false) String user) {
+            @AuthenticationPrincipal Jwt principal,
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
         boolean runSync = Boolean.TRUE.equals(request.runSync());
-        SubmitResponse response = service.submit(request.address(), runSync,
-                user == null ? "analyst" : user);
+        // The requester is the authenticated subject; the bearer token is propagated to
+        // the downstream (now-secured) tools/case services on the agent's internal calls.
+        String user = principal != null ? principal.getSubject() : "analyst";
+        SubmitResponse response = service.submit(request.address(), runSync, user, authorization);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public InvestigationView get(@PathVariable String id) {
         return service.get(id);
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public List<InvestigationView> recent(@RequestParam(defaultValue = "20") int limit) {
         return service.recent(limit);
     }

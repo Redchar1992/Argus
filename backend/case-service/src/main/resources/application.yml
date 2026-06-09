@@ -14,6 +14,11 @@ spring:
       ddl-auto: update
     open-in-view: false
 
+argus:
+  jwt:
+    # MUST match auth-service's signing secret (shared HMAC). Supplied via env in prod.
+    secret: ${ARGUS_JWT_SECRET:argus-dev-secret-change-me-please-32bytes-minimum-length}
+
 management:
   endpoints:
     web:

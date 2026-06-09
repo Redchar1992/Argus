@@ -30,11 +30,22 @@ public class ToolClient {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Invokes a screening tool, propagating the caller's bearer token so the now-secured
+     * screening-tools-service authorises the service-to-service call as the originating
+     * analyst/admin. A null/blank token means an unauthenticated call (will be rejected
+     * by the downstream service) — this keeps the end-to-end RBAC chain intact.
+     */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> invoke(String toolName, Map<String, Object> args) {
+    public Map<String, Object> invoke(String toolName, Map<String, Object> args, String bearerToken) {
         try {
             String body = webClient.post()
                     .uri("/api/tools/{tool}", toolName)
+                    .headers(h -> {
+                        if (bearerToken != null && !bearerToken.isBlank()) {
+                            h.set("Authorization", bearerToken);
+                        }
+                    })
                     .bodyValue(args == null ? Map.of() : args)
                     .retrieve()
                     .bodyToMono(String.class)

@@ -35,7 +35,8 @@ public class CaseServiceClient {
     }
 
     public void mirrorCase(String id, String subjectAddress, String decision, int riskScore,
-                           String riskBand, String summary, List<String> riskFactors, String createdBy) {
+                           String riskBand, String summary, List<String> riskFactors,
+                           String createdBy, String bearerToken) {
         if (!enabled) {
             return;
         }
@@ -51,6 +52,11 @@ public class CaseServiceClient {
                     "createdBy", createdBy == null ? "system" : createdBy);
             webClient.post()
                     .uri("/api/cases")
+                    .headers(h -> {
+                        if (bearerToken != null && !bearerToken.isBlank()) {
+                            h.set("Authorization", bearerToken);
+                        }
+                    })
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(String.class)

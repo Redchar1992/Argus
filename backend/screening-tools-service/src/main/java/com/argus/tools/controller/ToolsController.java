@@ -15,6 +15,7 @@ import com.argus.tools.service.RiskRulesService;
 import com.argus.tools.service.SanctionsScreenService;
 import com.argus.tools.service.TraceTransactionsService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -58,24 +59,28 @@ public class ToolsController {
     }
 
     @PostMapping("/sanctions_screen")
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public SanctionsScreenResponse sanctionsScreen(@RequestBody SanctionsScreenRequest req) {
         requireEnabled("sanctions_screen");
         return sanctionsScreenService.screen(req);
     }
 
     @PostMapping("/trace_transactions")
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public TraceResponse traceTransactions(@RequestBody TraceRequest req) {
         requireEnabled("trace_transactions");
         return traceTransactionsService.trace(req);
     }
 
     @PostMapping("/address_profile")
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public AddressProfileResponse addressProfile(@RequestBody AddressProfileRequest req) {
         requireEnabled("address_profile");
         return addressProfileService.profile(req);
     }
 
     @PostMapping("/risk_rules")
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public RiskRulesResponse riskRules(@RequestBody RiskRulesRequest req) {
         requireEnabled("risk_rules");
         return riskRulesService.evaluate(req);
@@ -84,11 +89,13 @@ public class ToolsController {
     // ---- catalog ----
 
     @GetMapping("/catalog")
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public List<ToolStatus> catalog() {
         return toolStatusRepository.findAll();
     }
 
     @PutMapping("/catalog/{toolId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ToolStatus setEnabled(@PathVariable String toolId, @RequestBody Map<String, Boolean> body) {
         ToolStatus status = toolStatusRepository.findById(toolId)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Unknown tool: " + toolId));

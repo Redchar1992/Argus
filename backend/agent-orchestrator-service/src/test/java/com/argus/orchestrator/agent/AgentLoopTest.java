@@ -32,24 +32,24 @@ class AgentLoopTest {
         InvestigationStore store = new InMemoryInvestigationStore();
         CaseServiceClient caseClient = mock(CaseServiceClient.class);
         doNothing().when(caseClient).mirrorCase(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
-                any(), any(), any(), any());
+                any(), any(), any(), any(), any());
         return new AgentOrchestrator(new LocalRuleAgentProvider(), toolClient, store, caseClient, 8);
     }
 
     @Test
     void sanctionedWalletIsBlockedAndChainsTools() {
         ToolClient tools = mock(ToolClient.class);
-        when(tools.invoke(eq("sanctions_screen"), any())).thenReturn(Map.of(
+        when(tools.invoke(eq("sanctions_screen"), any(), any())).thenReturn(Map.of(
                 "addressesChecked", 1, "hitCount", 1, "directHit", true,
                 "hits", List.of(Map.of("address", "0xbad", "entity", "Lazarus", "severity", 95))));
-        when(tools.invoke(eq("address_profile"), any())).thenReturn(Map.of(
+        when(tools.invoke(eq("address_profile"), any(), any())).thenReturn(Map.of(
                 "address", "0xbad", "totalInflowUsd", 500000.0, "totalOutflowUsd", 400000.0,
                 "counterpartyCount", 4, "txCount", 6));
-        when(tools.invoke(eq("trace_transactions"), any())).thenReturn(Map.of(
+        when(tools.invoke(eq("trace_transactions"), any(), any())).thenReturn(Map.of(
                 "rootAddress", "0xbad", "exposureFound", true,
                 "flaggedExposures", List.of(Map.of("flaggedAddress", "0xmix", "entity", "Mixer",
                         "hopsAway", 1, "amountUsdOnPath", 250000.0, "path", List.of()))));
-        when(tools.invoke(eq("risk_rules"), any())).thenReturn(Map.of(
+        when(tools.invoke(eq("risk_rules"), any(), any())).thenReturn(Map.of(
                 "address", "0xbad", "riskScore", 95, "riskBand", "HIGH",
                 "firedRules", List.of(Map.of("ruleId", "R1_DIRECT_SANCTIONS",
                         "description", "Address is itself on a sanctions list", "points", 60))));
@@ -73,13 +73,13 @@ class AgentLoopTest {
     @Test
     void tinyCleanWalletSkipsTraceAndClears() {
         ToolClient tools = mock(ToolClient.class);
-        when(tools.invoke(eq("sanctions_screen"), any())).thenReturn(Map.of(
+        when(tools.invoke(eq("sanctions_screen"), any(), any())).thenReturn(Map.of(
                 "addressesChecked", 1, "hitCount", 0, "directHit", false, "hits", List.of()));
         // Tiny wallet: low volume, few counterparties -> agent should SKIP tracing.
-        when(tools.invoke(eq("address_profile"), any())).thenReturn(Map.of(
+        when(tools.invoke(eq("address_profile"), any(), any())).thenReturn(Map.of(
                 "address", "0xclean", "totalInflowUsd", 1500.0, "totalOutflowUsd", 500.0,
                 "counterpartyCount", 1, "txCount", 2));
-        when(tools.invoke(eq("risk_rules"), any())).thenReturn(Map.of(
+        when(tools.invoke(eq("risk_rules"), any(), any())).thenReturn(Map.of(
                 "address", "0xclean", "riskScore", 0, "riskBand", "MINIMAL",
                 "firedRules", List.of(Map.of("ruleId", "R0_NO_FLAGS",
                         "description", "No AML rules fired", "points", 0))));

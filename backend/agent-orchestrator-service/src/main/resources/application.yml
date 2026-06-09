@@ -14,6 +14,9 @@ spring:
       - org.springframework.boot.autoconfigure.data.mongo.MongoRepositoriesAutoConfiguration
 
 argus:
+  jwt:
+    # MUST match auth-service's signing secret (shared HMAC). Supplied via env in prod.
+    secret: ${ARGUS_JWT_SECRET:argus-dev-secret-change-me-please-32bytes-minimum-length}
   trace:
     store: ${ARGUS_TRACE_STORE:memory}        # memory | mongo
   llm:

@@ -24,14 +24,14 @@ public class InvestigationService {
         this.store = store;
     }
 
-    public SubmitResponse submit(String address, boolean runSync, String requestedBy) {
+    public SubmitResponse submit(String address, boolean runSync, String requestedBy, String bearerToken) {
         String id = "inv_" + UUID.randomUUID().toString().substring(0, 12);
         orchestrator.createInvestigation(id, address, requestedBy);
         if (runSync) {
             // Synchronous: useful for tests / curl demos that want the result inline.
-            orchestrator.run(id);
+            orchestrator.run(id, bearerToken);
         } else {
-            orchestrator.runAsync(id);
+            orchestrator.runAsync(id, bearerToken);
         }
         return new SubmitResponse(id, "RUNNING");
     }
