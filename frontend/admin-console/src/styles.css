@@ -1,0 +1,112 @@
+/* Argus admin-console — dark theme matching the `lien` / analyst-console design language.
+ * We drive Element Plus's built-in dark mode via CSS variable overrides rather than
+ * rewriting every view, keeping the polish "light-touch" but on-brand. */
+:root {
+  --argus-bg: #0b0e14;
+  --argus-panel: #151a23;
+  --argus-panel-2: #121722;
+  --argus-line: #232a36;
+  --argus-text: #e6e9ef;
+  --argus-muted: #8a93a3;
+  --argus-accent: #6aa0ff;
+  --argus-accent-2: #9bc0ff;
+}
+
+html,
+body,
+#app {
+  background: var(--argus-bg);
+  color: var(--argus-text);
+  margin: 0;
+}
+body {
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+/* ── Element Plus dark-token overrides → lien palette ── */
+html.dark {
+  --el-bg-color: var(--argus-bg);
+  --el-bg-color-page: var(--argus-bg);
+  --el-bg-color-overlay: var(--argus-panel);
+  --el-fill-color-blank: var(--argus-panel);
+  --el-text-color-primary: var(--argus-text);
+  --el-text-color-regular: #cdd3de;
+  --el-text-color-secondary: var(--argus-muted);
+  --el-border-color: var(--argus-line);
+  --el-border-color-light: var(--argus-line);
+  --el-border-color-lighter: var(--argus-line);
+  --el-border-color-extra-light: var(--argus-line);
+  --el-color-primary: var(--argus-accent);
+  --el-color-primary-light-3: #4d82e0;
+  --el-color-primary-light-5: #3a5fa0;
+  --el-color-primary-light-7: #28394f;
+  --el-color-primary-light-8: #1f2c3d;
+  --el-color-primary-light-9: #161d29;
+  --el-fill-color: var(--argus-panel-2);
+  --el-fill-color-light: var(--argus-panel-2);
+  --el-fill-color-lighter: var(--argus-panel-2);
+}
+
+/* cards / panels */
+html.dark .el-card {
+  background: var(--argus-panel);
+  border: 1px solid var(--argus-line);
+  border-radius: 12px;
+  transition: border-color 0.15s ease;
+}
+html.dark .el-card:hover {
+  border-color: #2c3647;
+}
+html.dark .el-card__header {
+  border-bottom: 1px solid var(--argus-line);
+  font-weight: 600;
+}
+
+/* table zebra + hover on the dark panel */
+html.dark .el-table {
+  --el-table-bg-color: var(--argus-panel);
+  --el-table-tr-bg-color: var(--argus-panel);
+  --el-table-header-bg-color: var(--argus-panel-2);
+  --el-table-row-hover-bg-color: rgba(106, 160, 255, 0.06);
+  --el-table-border-color: var(--argus-line);
+}
+html.dark .el-table th.el-table__cell {
+  color: var(--argus-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* primary buttons → gradient accent, like analyst-console */
+html.dark .el-button--primary {
+  background: linear-gradient(135deg, var(--argus-accent), var(--argus-accent-2));
+  border: 0;
+  color: #0b0e14;
+  font-weight: 700;
+}
+html.dark .el-button--primary:hover {
+  filter: brightness(1.07);
+}
+
+/* sidebar menu */
+html.dark .el-menu {
+  background: var(--argus-panel);
+  border-right: 1px solid var(--argus-line);
+}
+html.dark .el-aside {
+  background: var(--argus-panel);
+  border-right: 1px solid var(--argus-line);
+}
+html.dark .el-menu-item.is-active {
+  color: var(--argus-accent);
+  background: rgba(106, 160, 255, 0.08);
+}
+
+/* info alerts read as muted hint cards */
+html.dark .el-alert--info {
+  background: rgba(106, 160, 255, 0.07);
+  border: 1px solid #2f3d57;
+}
+html.dark .el-alert--info .el-alert__title {
+  color: var(--argus-accent-2);
+}

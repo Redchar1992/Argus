@@ -6,7 +6,21 @@ const route = useRoute();
 <template>
   <el-container style="min-height: 100vh">
     <el-header class="topbar">
-      <span class="brand">👁️ Argus — Admin Console</span>
+      <span class="brand">
+        <svg class="eye-mark" viewBox="0 0 100 100" aria-hidden="true">
+          <path d="M10 50 Q50 18 90 50 Q50 82 10 50 Z" fill="none" stroke="url(#g)" stroke-width="6" />
+          <circle cx="50" cy="50" r="16" fill="url(#g)" />
+          <circle cx="50" cy="50" r="6" fill="#0b0e14" />
+          <defs>
+            <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#6aa0ff" />
+              <stop offset="1" stop-color="#9bc0ff" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <span class="logo">Argus</span>
+        <span class="title-sep">Admin Console</span>
+      </span>
       <span class="sub">policies · tools · cases · audit</span>
     </el-header>
     <el-container>
@@ -27,18 +41,41 @@ const route = useRoute();
 
 <style scoped>
 .topbar {
-  background: #1d2330;
+  background: var(--argus-panel, #151a23);
+  border-bottom: 1px solid var(--argus-line, #232a36);
   color: #fff;
   display: flex;
   align-items: center;
   gap: 16px;
 }
 .brand {
-  font-size: 18px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.eye-mark {
+  width: 26px;
+  height: 26px;
+}
+.logo {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: linear-gradient(90deg, #6aa0ff, #9bc0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.title-sep {
+  color: var(--argus-muted, #8a93a3);
+  font-size: 14px;
+  font-weight: 500;
+  border-left: 1px solid var(--argus-line, #232a36);
+  padding-left: 12px;
 }
 .sub {
-  color: #8a93a6;
+  color: var(--argus-muted, #8a93a3);
   margin-left: auto;
+  font-size: 13px;
 }
 </style>
