@@ -57,9 +57,10 @@ analyst-console (React/AntD)        admin-console (Vue/Element Plus)
         ▼                ▼                  ▼                ▼
    auth-service   agent-orchestrator   screening-tools    case-service
    (:8081)        (:8082) ◀── tools ──▶ (:8083)           (:8084)
-   JWT + RBAC     THE AGENT LOOP        sanctions_screen   cases + audit
-   bcrypt         trace store (NoSQL)   trace_transactions + policies (SQL)
+   JWT issue +    THE AGENT LOOP        sanctions_screen   cases + audit
+   RBAC, bcrypt   trace store (NoSQL)   trace_transactions + policies (SQL)
                   ── mirror case ─────▶ risk_rules
+   (every business service below is also JWT-validated + @PreAuthorize role-gated)
 ```
 
 Full detail: [`docs/architecture.md`](docs/architecture.md).
@@ -142,21 +143,31 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 - Three+ real tools over REST: `sanctions_screen`, `trace_transactions` (a real BFS over
   the seeded graph with path reconstruction), `address_profile`, `risk_rules` (transparent
   points-based AML rules).
-- Auth: bcrypt user store, JWT issue/parse, `@PreAuthorize` role gating — real, tested.
+- Auth + per-service RBAC: bcrypt user store, JWT issue/parse, and **every** business
+  service (orchestrator, screening-tools, case) is an OAuth2 resource server that validates
+  the shared-secret JWT and enforces `@PreAuthorize` role gating — real, tested. Self-service
+  registration is fixed at the lowest privilege; role elevation is an admin-only endpoint.
+- Fail-closed decisioning: a wallet is only CLEARED when the required tools
+  (`sanctions_screen` + `risk_rules`) produced valid evidence; missing/failed evidence
+  escalates to REVIEW (never a silent CLEAR). The admin-editable `screening_policy`
+  thresholds actually drive the agent's BLOCK/REVIEW bands.
 - Persistence: cases + audit + policies in JPA (SQL); investigation traces in a store
   with a real MongoDB implementation (NoSQL) and an in-memory default for zero-infra demos.
 - Both frontends build and render the real API shapes.
 
 **Scaffolded / simplified / TODO (called out so nothing is oversold):**
-- The gateway does **not** yet validate JWTs centrally — auth-service enforces RBAC on its
-  own endpoints; gateway is routing + CORS only. (A JWT filter at the gateway is the next step.)
+- The gateway does **not** validate JWTs centrally — it is routing + CORS only. Enforcement
+  is **per-service**: each service is an OAuth2 resource server validating the same
+  shared-secret JWT and applying `@PreAuthorize`. (A JWT filter at the gateway would add
+  defence-in-depth but is not the enforcement boundary — the services are.)
+- Service-to-service calls (orchestrator → screening-tools / case) propagate the **caller's**
+  bearer token, so internal calls are authorised as the originating analyst/admin. A dedicated
+  service credential would be a cleaner production design; token propagation is the current,
+  working approach.
 - The on-chain data is **seeded/synthetic**, not a live chain indexer. The graph and
   sanctions list are illustrative fixtures (no real OFAC addresses).
 - **Redis** is provisioned in compose but not yet used by application code (documented in
   `infra/redis/README.md`).
-- Decision thresholds live in `screening_policy` and are editable in the admin console,
-  but the local agent currently uses fixed cutoffs (60/30) rather than reading them live —
-  wiring policy → agent is a clean follow-up.
 - No Dockerfiles for the services yet (compose covers the DBs); services run via `java -jar`.
 
 See [`docs/agent-design.md`](docs/agent-design.md) for the prompt, tool schema, and the

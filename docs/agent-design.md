@@ -38,6 +38,11 @@ The agent is offered a fixed catalog (kept in sync with `screening-tools-service
 | `trace_transactions` | BFS the graph N hops; surface flagged exposure + path | `address`, `maxHops` |
 | `risk_rules` | Turn gathered facts into a 0-100 AML score | `address`, volumes, `sanctionsDirectHit`, `minHopsToFlagged` |
 
+Each parameter carries a real JSON-schema type (`ToolSpec.ParamSpec`: `type`, `itemsType`,
+`description`, `required`), so the emitted Anthropic `input_schema` is correctly typed —
+`addresses` is an array of strings, `maxHops` is an integer, volumes are numbers — rather
+than everything coerced to `string`. A `required` list is emitted per tool.
+
 Each tool returns structured JSON the brain reasons over. `trace_transactions` does a
 **real** breadth-first walk with path reconstruction, so the exposure it reports is backed
 by an actual chain of edges.
@@ -55,8 +60,16 @@ accumulated observations and decides the next action:
      rather than a fixed pipeline.
 4. No `risk_rules` yet → score using everything gathered (including `minHopsToFlagged`
    derived from the trace).
-5. Otherwise → `FINISH` with a decision derived from the score and policy bands
-   (`>=60 ⇒ BLOCK`, `>=30 ⇒ REVIEW`, else `CLEAR`; a direct sanctions hit forces BLOCK).
+5. Otherwise → `FINISH` with a decision derived from the score and the **admin-editable**
+   policy bands loaded from case-service (`>= blockThreshold ⇒ BLOCK`,
+   `>= reviewThreshold ⇒ REVIEW`, else `CLEAR`; a direct sanctions hit forces BLOCK).
+   Editing the `screening_policy` in the admin console changes these bands live — they are
+   not hardcoded.
+
+**Fail closed.** Before a `CLEAR` is allowed, the required tools (`sanctions_screen` and
+`risk_rules`) must each have produced a valid observation. If a required tool never ran,
+errored, or was disabled, the agent does **not** CLEAR — it escalates to `REVIEW` and adds a
+risk factor naming the missing evidence. A compliance engine must fail closed, never open.
 
 Because step 3 branches on prior observations, two wallets take genuinely different paths
 (verified in `AgentLoopTest` and by live curl — see README table).
@@ -96,8 +109,17 @@ Method:
   CLEAR, REVIEW, or BLOCK, a 0-100 riskScore, a riskBand, and the concrete
   riskFactors that justify it. A direct sanctions hit must result in BLOCK.
 
+FAIL CLOSED (critical): you may only return CLEAR when BOTH sanctions_screen
+AND risk_rules have run successfully and returned valid results. If either of
+those required tools is missing, failed, errored, or was disabled, you MUST NOT
+return CLEAR — return REVIEW and cite the missing evidence in riskFactors.
+
 Be concise and auditable. Every tool call should have a clear purpose.
 ```
+
+A deterministic guard in `AnthropicLlmProvider` enforces the same fail-closed rule in code:
+if the model returns `CLEAR` while a required tool's observation is missing/errored, the
+provider overrides the decision to `REVIEW`. Prompt + code = defence-in-depth.
 
 ## The honest tradeoff
 
