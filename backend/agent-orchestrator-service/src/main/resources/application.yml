@@ -22,7 +22,7 @@ argus:
   llm:
     provider: ${ARGUS_LLM_PROVIDER:local}     # local | anthropic
     anthropic:
-      model: ${ARGUS_ANTHROPIC_MODEL:claude-3-5-sonnet-20241022}
+      model: ${ARGUS_ANTHROPIC_MODEL:claude-sonnet-4-6}
       max-tokens: 1024
   agent:
     max-steps: ${ARGUS_AGENT_MAX_STEPS:8}
