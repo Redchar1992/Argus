@@ -73,7 +73,7 @@ public class AnthropicLlmProvider implements LlmProvider {
     public AnthropicLlmProvider(
             @Value("${argus.llm.anthropic.base-url:https://api.anthropic.com}") String baseUrl,
             @Value("${ARGUS_ANTHROPIC_API_KEY:${argus.llm.anthropic.api-key:}}") String apiKey,
-            @Value("${argus.llm.anthropic.model:claude-3-5-sonnet-20241022}") String model,
+            @Value("${argus.llm.anthropic.model:claude-sonnet-4-6}") String model,
             @Value("${argus.llm.anthropic.max-tokens:1024}") int maxTokens,
             ObjectMapper mapper) {
         this.model = model;
