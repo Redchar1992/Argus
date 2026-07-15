@@ -1,13 +1,21 @@
-# Argus — Agentic Crypto-Compliance Screening
+# Argus — Agentic Crypto-Compliance: Transaction Monitoring, Sanctions Screening & Case Management
 
-> Named after the hundred-eyed guardian. Given a wallet, an AI **agent** autonomously
-> investigates it — planning, calling compliance tools, observing results, reasoning,
-> and repeating — then issues an **auditable** compliance decision with the full
-> reasoning + tool-call trace persisted.
+> Named after the hundred-eyed guardian. Give it a wallet and an AI **agent** runs the
+> compliance investigation end-to-end — **sanctions screening**, **transaction-graph tracing
+> (transaction monitoring)**, an AML **risk-rule** engine, and a **CLEAR / REVIEW / BLOCK**
+> decision — with every reasoning step and tool call persisted to an **audit trail** and the
+> completed case mirrored into **case management**.
+>
+> The design principle is the one crypto compliance-engineering roles keep asking for: a
+> **probabilistic AI agent kept behind deterministic, fail-closed compliance logic**. The agent
+> *plans* the investigation, but a wallet is never silently CLEARed and the BLOCK/REVIEW bands
+> come from admin-editable policy — not from the model.
 
-This is a portfolio project. The README is deliberately **honest**: it claims only
-what is built and runs. See [`docs/jd-mapping.md`](docs/jd-mapping.md) for how each
-requirement maps to code, and the "What's real vs scaffolded" section below.
+Portfolio project — **Java 17 · Spring Cloud · React + Vue**. The README is deliberately
+**honest**: it claims only what is built and runs. [`docs/jd-mapping.md`](docs/jd-mapping.md)
+maps each JD requirement to code; a pluggable third-party-screening design (real OFAC SDN +
+Chainalysis/TRM/Elliptic adapters) is in [`docs/wallet-screening-providers.md`](docs/wallet-screening-providers.md);
+and the "What's real vs scaffolded" section below draws the line precisely.
 
 ---
 
@@ -147,10 +155,11 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
   service (orchestrator, screening-tools, case) is an OAuth2 resource server that validates
   the shared-secret JWT and enforces `@PreAuthorize` role gating — real, tested. Self-service
   registration is fixed at the lowest privilege; role elevation is an admin-only endpoint.
-- Fail-closed decisioning: a wallet is only CLEARED when the required tools
-  (`sanctions_screen` + `risk_rules`) produced valid evidence; missing/failed evidence
-  escalates to REVIEW (never a silent CLEAR). The admin-editable `screening_policy`
-  thresholds actually drive the agent's BLOCK/REVIEW bands.
+- **Deterministic compliance logic around a probabilistic agent** (fail-closed decisioning):
+  a wallet is only CLEARED when the required tools (`sanctions_screen` + `risk_rules`) produced
+  valid evidence; missing/failed evidence escalates to REVIEW (never a silent CLEAR). The
+  admin-editable `screening_policy` thresholds — not the model — drive the BLOCK/REVIEW bands.
+  This is the "boundary between probabilistic AI and deterministic compliance logic" made concrete.
 - Persistence: cases + audit + policies in JPA (SQL); investigation traces in a store
   with a real MongoDB implementation (NoSQL) and an in-memory default for zero-infra demos.
 - Both frontends build and render the real API shapes.

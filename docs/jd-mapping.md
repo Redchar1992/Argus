@@ -12,6 +12,7 @@ concrete code in this repo. Kept honest: where something is partial, it says so.
 | **Integration with AI model APIs** | `agent-orchestrator-service/.../llm/AnthropicLlmProvider.java` — real Anthropic Messages API tool-use (correct request/response shape, `input_schema` tools, env-supplied key, conversation replay). | Built + wired; runs when a key is supplied |
 | **"Agentic flows … from scratch"** | `AgentOrchestrator` — a real bounded plan→act→observe loop with persisted, auditable steps. Two `LlmProvider` impls (local rule agent + Anthropic) behind `@ConditionalOnProperty`. Verified end-to-end. | **Centerpiece**, built + tested |
 | **Compliance systems from scratch** | `screening-tools-service` tools: `sanctions_screen`, `trace_transactions` (real BFS over a tx graph), `address_profile`, `risk_rules` (transparent AML rule engine). Decisions are CLEAR/REVIEW/BLOCK with risk factors. | Built + tested |
+| **Integration with third-party compliance/screening APIs** | A pluggable `ScreeningProvider` design — real **OFAC SDN** ingest plus **Chainalysis / TRM / Elliptic** adapters normalised into one risk model, fail-closed federation — mirroring the existing swappable `LlmProvider`. See [`docs/wallet-screening-providers.md`](wallet-screening-providers.md). | **Designed, not yet built** (OFAC ingest is step 1) |
 | **SQL** | JPA entities in auth/tools/case services (Postgres in prod profile, H2 default). `infra/postgres/*.sql` documents the canonical schema + seed. | Built |
 | **NoSQL** | `agent-orchestrator-service` persists investigation traces in **MongoDB** (`investigations` collection) via `MongoInvestigationStore`; in-memory default for zero-infra demos. `infra/mongo/01-init.js`. | Built (Mongo impl + memory default) |
 | **Auth / RBAC** | bcrypt (cost 12) user store, JWT (HS256) with role claim. RBAC is enforced **per service**: auth-service plus orchestrator, screening-tools and case-service are all OAuth2 resource servers validating the same shared-secret JWT with `@EnableMethodSecurity` + `@PreAuthorize`. Self-registration is fixed at the lowest privilege; role elevation is an admin-only endpoint. Tested per service (401/200/403 with real signed tokens). | Built + tested |
@@ -29,7 +30,9 @@ concrete code in this repo. Kept honest: where something is partial, it says so.
   originating analyst/admin). A dedicated machine/service credential would be a cleaner
   production design.
 - On-chain data is **seeded/synthetic** fixtures, not a live chain indexer; addresses are
-  illustrative (no real OFAC entries).
+  illustrative (no real OFAC entries **yet** — the pluggable `ScreeningProvider` design in
+  [`docs/wallet-screening-providers.md`](wallet-screening-providers.md) adds real OFAC SDN
+  ingest + Chainalysis/TRM/Elliptic adapters; OFAC ingest is the first build step).
 - Redis is provisioned but not yet used by application code.
 - No per-service Dockerfiles yet (compose covers the databases).
 
