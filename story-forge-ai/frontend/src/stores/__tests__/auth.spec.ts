@@ -6,7 +6,9 @@ import { useStoryStore } from '@/stores/story'
 import {
   getStoredAuth,
   getTopicSession,
+  getWorkflowSession,
   saveTopicSession,
+  saveWorkflowSession,
   setStoredAuth,
 } from '@/utils/storage'
 
@@ -29,6 +31,17 @@ describe('auth logout cleanup', () => {
         keywords: '复仇',
       },
     })
+    saveWorkflowSession({
+      taskId: 90001,
+      storyId: 42,
+      topicId: 1,
+      status: 'RUNNING',
+      currentNode: 'generate_outline',
+      progress: 42,
+      revisionCount: 0,
+      maxRevisions: 2,
+      events: [],
+    })
 
     const storyStore = useStoryStore()
     storyStore.$patch({
@@ -48,6 +61,7 @@ describe('auth logout cleanup', () => {
 
     expect(getStoredAuth()).toBeNull()
     expect(getTopicSession(42)).toBeNull()
+    expect(getWorkflowSession(90001)).toBeNull()
     expect(storyStore.stories).toEqual([])
     expect(storyStore.loaded).toBe(false)
   })

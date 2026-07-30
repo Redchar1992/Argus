@@ -58,3 +58,5 @@ jobs:
             story-forge-ai/ai-service/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: pytest
+      - run: ruff check .
+      - run: pip check

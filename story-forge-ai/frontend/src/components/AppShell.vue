@@ -21,8 +21,17 @@ const router = useRouter()
 const pageTitle = computed(() => {
   if (route.name === 'story-create') return '新建故事'
   if (route.name === 'story-detail') return '故事方案'
+  if (route.name === 'workflow-progress') return 'AI 工作流'
+  if (route.name === 'workflow-review') return '大纲审核'
   return '我的作品'
 })
+
+const showCreateButton = computed(
+  () =>
+    !['story-create', 'workflow-progress', 'workflow-review'].includes(
+      String(route.name),
+    ),
+)
 
 function logout() {
   authStore.logout()
@@ -55,10 +64,10 @@ function logout() {
       </nav>
 
       <div class="sidebar-tip">
-        <div class="tip-icon">01</div>
+        <div class="tip-icon">02</div>
         <div>
-          <strong>本周创作目标</strong>
-          <p>从一个方向，生成并保存第一组故事方案。</p>
+          <strong>AI 编剧工作流</strong>
+          <p>人物 → 20 节点大纲 → 五维评分 → 人工审核。</p>
         </div>
       </div>
     </aside>
@@ -74,7 +83,7 @@ function logout() {
         </div>
         <div class="topbar-actions">
           <el-button
-            v-if="route.name !== 'story-create'"
+            v-if="showCreateButton"
             class="create-button"
             type="primary"
             :icon="Plus"

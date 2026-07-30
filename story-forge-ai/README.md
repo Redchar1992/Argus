@@ -1,6 +1,6 @@
 # StoryForge AI
 
-StoryForge AI 是一个只验证“AI 生成的故事方向是否有价值”的 7 天 MVP。
+StoryForge AI 是一个用两周验证“AI 生成的结构化故事方案是否有价值”的 MVP。
 
 第一周闭环：
 
@@ -13,6 +13,13 @@ StoryForge AI 是一个只验证“AI 生成的故事方向是否有价值”的
   → 从「我的作品」再次查看
 ```
 
+第二周在已选方案上增加一条可暂停、可恢复的工作流：
+
+```text
+人物卡 → 20 节点大纲 → 五维评分 → 最多两轮自动修订
+       → 人工批准 / 提出意见 → 版本化保存
+```
+
 本目录是现有仓库中的独立应用，沿用仓库 Git 历史，并在 `develop` 分支开发。
 
 ## 目录
@@ -21,18 +28,21 @@ StoryForge AI 是一个只验证“AI 生成的故事方向是否有价值”的
 story-forge-ai/
 ├── frontend/       # Vue 3 + TypeScript + Element Plus
 ├── backend/        # Spring Boot 3 + Spring Security + MyBatis Plus
-├── ai-service/     # FastAPI + Topic Agent + Score Agent
-├── deploy/         # Docker Compose 本地部署
+├── ai-service/     # FastAPI + LangGraph Agents + Redis Worker
+├── deploy/         # MySQL / Redis / 三服务 / Worker
 └── docs/           # 架构、API、验收说明
 ```
 
-## 快速启动（零外部基础设施）
+## 快速启动
 
-本地开发默认使用：
+第一周选题链路默认使用：
 
 - 后端：H2 内存数据库
-- AI：无密钥时使用明确标记为 `local-template` 的本地结构化生成器
+- AI：无密钥时使用明确标记为 `local-template` 的确定性结构化生成器
 - 前端：Vite 开发服务器
+
+第二周异步工作流需要 Redis。最省事的完整启动方式是使用下方 Docker
+Compose；分别启动服务时还需运行 `python -m app.workers.story_worker`。
 
 需要 Node.js 20+、JDK 17+、Maven 3.9+、Python 3.11+。
 
@@ -65,7 +75,8 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:5173`，注册后即可体验完整闭环。
+打开 `http://localhost:5173`，注册后即可体验选题闭环。若要运行第二周工作流，
+请同时启动 Redis 和 Worker。
 
 ## 使用真实 LLM
 
@@ -91,7 +102,7 @@ openssl rand -hex 32
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build
 ```
 
-服务地址：
+Compose 会同时启动 HTTP AI 服务和异步 AI Worker。服务地址：
 
 | 服务 | 地址 |
 |---|---|
@@ -100,6 +111,16 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build
 | AI Service | http://localhost:8000 |
 | MySQL | localhost:3306 |
 | Redis | localhost:6379 |
+
+服务全部健康后，可执行一次真实的“生成 → 退回修改 → 再审核 → 批准”冒烟：
+
+```bash
+python3 deploy/smoke_workflow.py
+```
+
+第二周本地 MVP 按计划使用内存 checkpointer。请在一次“生成 → 审核 → 批准”
+演示期间保持 AI Worker 运行；生产环境需要改用持久化 checkpointer 才能跨
+Worker 重启恢复。
 
 ## 验证
 
@@ -119,15 +140,15 @@ cd story-forge-ai/frontend && npm test -- --run && npm run build
 - [架构与数据流](docs/architecture.md)
 - [API 契约](docs/api.md)
 - [第一周验收清单](docs/week-1-acceptance.md)
+- [第二周验收清单](docs/week-2-acceptance.md)
 
-## 明确不在第一周范围内
+## 当前明确不做
 
-- 正文生成
-- 富文本编辑器
+- 正文生成和长文本记忆
 - 视频生成
 - 社区
-- 支付
 - 推荐系统
-- 第二周的人物卡和 20 节点大纲
+- 爆款知识库检索和多模型路由
+- WebSocket、支付、额度扣减和自动投稿
 
-第一周只收集创作方向、结构化选题、评分和用户最终选择。
+当前产品只收集创作方向、结构化选题、人物、大纲、评分、版本和人工审核结果。

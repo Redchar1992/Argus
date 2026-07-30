@@ -7,7 +7,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-story_forge_dev}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-story_forge_root_dev}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - story-forge-mysql:/var/lib/mysql
     healthcheck:
@@ -24,7 +24,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - story-forge-redis:/data
     healthcheck:
@@ -40,8 +40,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OPENAI_CREATIVE_MODEL: ${OPENAI_CREATIVE_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      OPENAI_REVIEW_MODEL: ${OPENAI_REVIEW_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "${AI_SERVICE_PORT:-8000}:8000"
     healthcheck:
       test:
         [
@@ -54,6 +57,29 @@ services:
       timeout: 5s
       retries: 12
 
+  ai-worker:
+    build:
+      context: ../ai-service
+    command: ["python", "-m", "app.workers.story_worker"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OPENAI_CREATIVE_MODEL: ${OPENAI_CREATIVE_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      OPENAI_REVIEW_MODEL: ${OPENAI_REVIEW_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      REDIS_URL: redis://redis:6379/0
+      REDIS_REQUEST_STREAM: story:workflow:requests
+      REDIS_EVENT_STREAM: story:workflow:events
+      REDIS_CONSUMER_GROUP: story-workflow-workers
+    depends_on:
+      redis:
+        condition: service_healthy
+    # The shared image checks the FastAPI HTTP port by default; this container
+    # intentionally runs only the Redis worker process.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   backend:
     build:
       context: ../backend
@@ -64,12 +90,19 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-story_forge_dev}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
+      WORKFLOW_REDIS_ENABLED: "true"
+      WORKFLOW_REQUEST_STREAM: story:workflow:requests
+      WORKFLOW_EVENT_STREAM: story:workflow:events
+      WORKFLOW_EVENT_GROUP: storyforge-backend
+      WORKFLOW_EVENT_CONSUMER: backend-1
+      WORKFLOW_RECLAIM_INTERVAL_MS: ${WORKFLOW_RECLAIM_INTERVAL_MS:-10000}
       AI_SERVICE_URL: http://ai-service:8000
       AI_READ_TIMEOUT: 45s
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       JWT_SECRET: ${JWT_SECRET:?Set a random JWT_SECRET in deploy/.env}
       JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:8080"
     depends_on:
       mysql:
         condition: service_healthy
@@ -82,9 +115,9 @@ services:
     build:
       context: ../frontend
       args:
-        VITE_API_BASE_URL: http://localhost:8080
+        VITE_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8080}
     ports:
-      - "5173:80"
+      - "${FRONTEND_PORT:-5173}:80"
     depends_on:
       - backend
 

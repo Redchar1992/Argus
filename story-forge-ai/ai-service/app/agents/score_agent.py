@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 from app.models import CriterionScore, ProviderTopic, ScoreReasons, TopicItem
 
@@ -105,3 +106,65 @@ class ScoreAgent:
         digest = hashlib.sha256(f"{name}:{title}:{topic_id}".encode()).digest()[0]
         variation = digest % 3
         return max(0, min(100, 68 + min(matches, 5) * 6 + variation))
+
+
+# Keep the first-week ScoreAgent above stable. The second-week commercial score
+# has a separate class and Pydantic contract so existing topic generation does
+# not change behavior.
+class CommercialScoreAgent:
+    """Score a complete outline on five 0-20 dimensions."""
+
+    def __init__(self, model: Any = None) -> None:
+        from app.infrastructure.llm_factory import get_review_model
+        from app.prompts import load_prompt
+
+        self.model = model or get_review_model()
+        self.prompt = load_prompt("score")
+
+    async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
+        from app.agents.workflow_utils import artifact, invoke_structured, progress
+        from app.schemas.score import StoryScore, build_score_result
+
+        generation, call = await invoke_structured(
+            self.model,
+            StoryScore,
+            node="score_outline",
+            prompt_name="score",
+            prompt=self.prompt,
+            payload={
+                "topic": state["topic"],
+                "characters": state["characters"],
+                "outline": state["outline"],
+                "revision_count": int(state.get("revision_count", 0)),
+            },
+            purpose="score",
+        )
+        score = build_score_result(generation.value)
+        score_data = score.model_dump(mode="json")
+        version_no = int(state.get("revision_count", 0)) + 1
+        return {
+            "score": score_data,
+            "current_node": "score_outline",
+            "progress_events": [
+                progress(
+                    "score_outline",
+                    f"大纲评分完成：{score.total}分",
+                    revision_no=version_no,
+                )
+            ],
+            "artifacts": [
+                artifact(
+                    artifact_type="SCORE",
+                    version_no=version_no,
+                    status="DRAFT",
+                    content=score_data,
+                    prompt_name="score",
+                    model_name=generation.model_name,
+                )
+            ],
+            "model_calls": [call],
+        }
+
+
+async def score_outline(state: dict[str, Any]) -> dict[str, Any]:
+    return await CommercialScoreAgent()(state)

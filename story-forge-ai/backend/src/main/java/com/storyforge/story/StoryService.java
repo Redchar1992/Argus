@@ -9,6 +9,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.common.validation.CreativeDirectionValidator;
+import com.storyforge.task.AiTask;
+import com.storyforge.task.AiTaskMapper;
+import com.storyforge.task.AiTaskStatus;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,10 +22,16 @@ import org.springframework.util.StringUtils;
 public class StoryService {
 
     private final StoryProjectMapper storyMapper;
+    private final AiTaskMapper taskMapper;
     private final ObjectMapper objectMapper;
 
-    public StoryService(StoryProjectMapper storyMapper, ObjectMapper objectMapper) {
+    public StoryService(
+            StoryProjectMapper storyMapper,
+            AiTaskMapper taskMapper,
+            ObjectMapper objectMapper
+    ) {
         this.storyMapper = storyMapper;
+        this.taskMapper = taskMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -59,7 +68,52 @@ public class StoryService {
 
     @Transactional
     public StoryResponse selectTopic(Long userId, Long storyId, SelectTopicRequest request) {
-        StoryProject story = requireOwned(userId, storyId);
+        StoryProject story = requireOwnedForUpdate(userId, storyId);
+        if (taskMapper.selectLatestWorkflowTaskId(storyId) != null) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "WORKFLOW_TOPIC_LOCKED",
+                    "工作流已绑定选题，不能重新选择"
+            );
+        }
+        JsonNode selected = findGeneratedTopic(story, request.topicId());
+        applySelection(story, selected, StoryStatus.SELECTED);
+        return toResponse(story);
+    }
+
+    /**
+     * Repairs the story projection after a concurrent START request loses the
+     * task idempotency-key race. The persisted winning task is authoritative.
+     */
+    @Transactional
+    public void restoreWorkflowSelection(
+            Long userId,
+            Long storyId,
+            Long taskId,
+            JsonNode winningTopic
+    ) {
+        StoryProject story = requireOwnedForUpdate(userId, storyId);
+        AiTask winningStart = taskMapper.selectById(taskId);
+        if (winningStart == null
+                || !storyId.equals(winningStart.getStoryId())
+                || !userId.equals(winningStart.getUserId())
+                || !"STORY_WORKFLOW".equals(winningStart.getTaskType())) {
+            throw new IllegalStateException("原始工作流任务与故事不一致");
+        }
+        Long latestTaskId = taskMapper.selectLatestWorkflowTaskId(storyId);
+        if (latestTaskId == null) {
+            throw new IllegalStateException("故事缺少最新工作流任务");
+        }
+        AiTask statusAuthority = taskId.equals(latestTaskId)
+                ? winningStart
+                : taskMapper.selectById(latestTaskId);
+        if (statusAuthority == null) {
+            throw new IllegalStateException("故事缺少最新工作流任务");
+        }
+        applySelection(story, winningTopic, storyStatusFor(statusAuthority));
+    }
+
+    private JsonNode findGeneratedTopic(StoryProject story, JsonNode topicId) {
         JsonNode generatedTopics = parseJson(story.getGeneratedTopics());
         if (generatedTopics == null || !generatedTopics.isArray()) {
             throw new ApiException(
@@ -69,7 +123,7 @@ public class StoryService {
             );
         }
 
-        String requestedId = scalarText(request.topicId());
+        String requestedId = scalarText(topicId);
         JsonNode selected = null;
         for (JsonNode topic : generatedTopics) {
             JsonNode id = topic.get("id");
@@ -81,16 +135,40 @@ public class StoryService {
         if (selected == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "TOPIC_NOT_FOUND", "选题不存在");
         }
+        return selected;
+    }
 
+    private void applySelection(StoryProject story, JsonNode selected, String status) {
         story.setSelectedTopic(writeJson(selected));
-        story.setStatus(StoryStatus.SELECTED);
+        story.setStatus(status);
         story.setUpdatedTime(LocalDateTime.now());
         storyMapper.updateById(story);
-        return toResponse(story);
+    }
+
+    private String storyStatusFor(AiTask task) {
+        return switch (task.getStatus()) {
+            case AiTaskStatus.WAITING -> StoryStatus.SELECTED;
+            case AiTaskStatus.RUNNING -> StoryStatus.WORKFLOW_RUNNING;
+            case AiTaskStatus.REVIEW_REQUIRED -> StoryStatus.WORKFLOW_REVIEW_REQUIRED;
+            case AiTaskStatus.SUCCESS -> StoryStatus.WORKFLOW_COMPLETED;
+            case AiTaskStatus.FAILED -> StoryStatus.WORKFLOW_FAILED;
+            default -> throw new IllegalStateException("不支持的工作流任务状态: " + task.getStatus());
+        };
     }
 
     public StoryProject requireOwned(Long userId, Long storyId) {
         StoryProject story = storyMapper.selectById(storyId);
+        if (story == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "STORY_NOT_FOUND", "故事不存在");
+        }
+        if (!story.getUserId().equals(userId)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "STORY_FORBIDDEN", "无权访问该故事");
+        }
+        return story;
+    }
+
+    private StoryProject requireOwnedForUpdate(Long userId, Long storyId) {
+        StoryProject story = storyMapper.selectByIdForUpdate(storyId);
         if (story == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "STORY_NOT_FOUND", "故事不存在");
         }

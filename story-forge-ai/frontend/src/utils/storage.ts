@@ -1,7 +1,8 @@
-import type { EntityId, TopicSession } from '@/types'
+import type { EntityId, TopicSession, WorkflowSession, WorkflowTask } from '@/types'
 
 const AUTH_STORAGE_KEY = 'story-forge.auth'
 const TOPIC_STORAGE_PREFIX = 'story-forge.topic-sessions'
+const WORKFLOW_STORAGE_PREFIX = 'story-forge.workflow-sessions'
 const MAX_CACHED_SESSIONS = 50
 
 export interface StoredAuth {
@@ -89,6 +90,62 @@ export function clearTopicSessions() {
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index)
     if (key?.startsWith(TOPIC_STORAGE_PREFIX)) keysToRemove.push(key)
+  }
+  keysToRemove.forEach((key) => window.localStorage.removeItem(key))
+}
+
+function workflowStorageKey() {
+  const userId = getStoredAuth()?.userId
+  return `${WORKFLOW_STORAGE_PREFIX}.${String(userId ?? 'anonymous')}`
+}
+
+function getWorkflowSessions(): Record<string, WorkflowSession> {
+  return readJson<Record<string, WorkflowSession>>(workflowStorageKey(), {})
+}
+
+export function saveWorkflowSession(task: WorkflowTask) {
+  if (task.taskId === '' || task.storyId === undefined) return
+  const sessions = getWorkflowSessions()
+  sessions[String(task.taskId)] = {
+    taskId: task.taskId,
+    storyId: task.storyId,
+    topicId: task.topicId,
+    threadId: task.threadId,
+    status: task.status,
+    currentNode: task.currentNode,
+    progress: task.progress,
+    updatedAt: task.updatedTime || new Date().toISOString(),
+  }
+  const limited = Object.entries(sessions)
+    .sort(
+      ([, left], [, right]) =>
+        new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+    )
+    .slice(0, MAX_CACHED_SESSIONS)
+  writeJson(workflowStorageKey(), Object.fromEntries(limited))
+}
+
+export function getWorkflowSession(taskId: EntityId): WorkflowSession | null {
+  return getWorkflowSessions()[String(taskId)] ?? null
+}
+
+export function getLatestStoryWorkflow(storyId: EntityId): WorkflowSession | null {
+  return (
+    Object.values(getWorkflowSessions())
+      .filter((session) => String(session.storyId) === String(storyId))
+      .sort(
+        (left, right) =>
+          new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+      )[0] ?? null
+  )
+}
+
+export function clearWorkflowSessions() {
+  if (!canUseStorage()) return
+  const keysToRemove: string[] = []
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index)
+    if (key?.startsWith(WORKFLOW_STORAGE_PREFIX)) keysToRemove.push(key)
   }
   keysToRemove.forEach((key) => window.localStorage.removeItem(key))
 }

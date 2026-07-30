@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowLeft,
+  ArrowRight,
   Check,
   CircleCheck,
   EditPen,
@@ -15,17 +16,26 @@ import { getStory, saveTopicSelection } from '@/api/story'
 import EmptyState from '@/components/EmptyState.vue'
 import TopicCard from '@/components/TopicCard.vue'
 import { useStoryStore } from '@/stores/story'
-import type { StoryProject, TopicOption, TopicSession } from '@/types'
+import { useWorkflowStore } from '@/stores/workflow'
+import type {
+  StoryProject,
+  TopicOption,
+  TopicSession,
+  WorkflowSession,
+  WorkflowTask,
+} from '@/types'
 import { canUseOfflineFallback, getErrorMessage } from '@/utils/error'
 import { formatDate } from '@/utils/format'
 import {
   getTopicSession,
   saveTopicSession,
 } from '@/utils/storage'
+import { workflowStatusLabel } from '@/utils/workflow'
 
 const route = useRoute()
 const router = useRouter()
 const storyStore = useStoryStore()
+const workflowStore = useWorkflowStore()
 const loading = ref(true)
 const loadError = ref('')
 const story = ref<StoryProject>()
@@ -33,6 +43,7 @@ const cachedSession = ref<TopicSession | null>(null)
 const choosing = ref(false)
 const saving = ref(false)
 const pendingTopicId = ref('')
+const latestWorkflow = ref<WorkflowSession | WorkflowTask | null>(null)
 
 const storyId = computed(() => String(route.params.id))
 const topics = computed(() => story.value?.topics ?? cachedSession.value?.topics ?? [])
@@ -42,6 +53,26 @@ const selectedTopicId = computed(
 const selectedTopic = computed(() =>
   topics.value.find((topic) => topic.id === selectedTopicId.value),
 )
+const matchingWorkflow = computed(() => latestWorkflow.value)
+const workflowLocked = computed(() => Boolean(latestWorkflow.value))
+const lockedTopic = computed(() => {
+  const topicId = latestWorkflow.value?.topicId
+  if (topicId === undefined) return undefined
+  return topics.value.find((topic) => String(topic.id) === String(topicId))
+})
+const workflowTopicMatchesSelection = computed(() => {
+  const topicId = latestWorkflow.value?.topicId
+  if (topicId === undefined || !selectedTopic.value) return true
+  return String(topicId) === String(selectedTopic.value.id)
+})
+const workflowActionLabel = computed(() => {
+  const session = matchingWorkflow.value
+  if (!session) return '启动 AI 创作工作流'
+  if (session.status === 'FAILED') return '重试 AI 创作工作流'
+  if (session.status === 'REVIEW_REQUIRED') return '继续审核大纲'
+  if (session.status === 'SUCCESS') return '查看正式创作方案'
+  return '查看生成进度'
+})
 
 function buildCachedStory(session: TopicSession): StoryProject {
   return {
@@ -83,9 +114,23 @@ async function loadStory() {
   try {
     const remote = await getStory(storyId.value)
     story.value = mergeWithCache(remote, cachedSession.value)
+    const cachedWorkflow = workflowStore.latestStorySession(storyId.value)
+    try {
+      const latestTask = await workflowStore.fetchLatestStoryTask(storyId.value)
+      latestWorkflow.value = latestTask
+    } catch (error) {
+      if (!canUseOfflineFallback(error)) throw error
+      latestWorkflow.value = cachedWorkflow
+      ElMessage.warning(
+        cachedWorkflow
+          ? '暂时无法同步工作流状态，已显示本机最近记录'
+          : '暂时无法同步工作流状态，请稍后重试',
+      )
+    }
   } catch (error) {
     if (cachedSession.value && canUseOfflineFallback(error)) {
       story.value = buildCachedStory(cachedSession.value)
+      latestWorkflow.value = workflowStore.latestStorySession(storyId.value)
       ElMessage.warning('当前为离线视图；服务恢复后可同步最新结果')
     } else {
       loadError.value = getErrorMessage(error, '故事详情加载失败。')
@@ -95,18 +140,66 @@ async function loadStory() {
   }
 }
 
+async function startOrResumeWorkflow() {
+  if (!story.value) return
+
+  const existing = matchingWorkflow.value
+  if (existing && existing.status !== 'FAILED') {
+    await router.push({
+      name:
+        existing.status === 'REVIEW_REQUIRED' || existing.status === 'SUCCESS'
+          ? 'workflow-review'
+          : 'workflow-progress',
+      params: {
+        storyId: story.value.id,
+        taskId: existing.taskId,
+      },
+    })
+    return
+  }
+
+  const workflowTopicId = existing?.topicId ?? selectedTopic.value?.id
+  if (workflowTopicId === undefined) {
+    ElMessage.warning('请先选择并保存一个主方案')
+    return
+  }
+
+  try {
+    const task = await workflowStore.start({
+      storyId: story.value.id,
+      topicId: workflowTopicId,
+    })
+    latestWorkflow.value = workflowStore.latestStorySession(story.value.id)
+    await router.push({
+      name: 'workflow-progress',
+      params: { storyId: story.value.id, taskId: task.taskId },
+    })
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '工作流启动失败，请稍后重试。'))
+  }
+}
+
 function beginChoosing() {
+  if (workflowLocked.value) {
+    ElMessage.info('V1 工作流启动后会锁定原选题，当前故事不能更换主方案')
+    return
+  }
   pendingTopicId.value = selectedTopicId.value
   choosing.value = true
 }
 
 function chooseTopic(topic: TopicOption) {
-  if (!choosing.value) return
+  if (!choosing.value || workflowLocked.value) return
   pendingTopicId.value = topic.id
 }
 
 async function saveSelection() {
   if (!story.value || !pendingTopicId.value) return
+  if (workflowLocked.value) {
+    choosing.value = false
+    ElMessage.info('V1 工作流已锁定原选题，不能保存新的主方案')
+    return
+  }
 
   saving.value = true
   try {
@@ -179,7 +272,7 @@ onMounted(loadStory)
           <div class="hero-facts">
             <div>
               <strong>{{ topics.length }}</strong>
-              <span>故事方案</span>
+              <span>候选选题</span>
             </div>
             <div>
               <strong>{{ selectedTopic?.score || '—' }}</strong>
@@ -203,7 +296,48 @@ onMounted(loadStory)
           <h3>{{ selectedTopic.title }}</h3>
           <p>{{ selectedTopic.hook }}</p>
         </div>
-        <el-button :icon="EditPen" @click="beginChoosing">更换主方案</el-button>
+        <el-button v-if="!workflowLocked" :icon="EditPen" @click="beginChoosing">
+          更换主方案
+        </el-button>
+        <span
+          v-else
+          class="topic-lock"
+          :class="{ warning: !workflowTopicMatchesSelection }"
+        >
+          {{
+            workflowTopicMatchesSelection
+              ? 'V1 工作流已锁定该选题'
+              : `V1 工作流已锁定原选题：${lockedTopic?.title || `#${matchingWorkflow?.topicId}`}`
+          }}
+        </span>
+      </section>
+
+      <section v-if="selectedTopic || matchingWorkflow" class="workflow-entry">
+        <div class="workflow-copy">
+          <span class="workflow-kicker">WEEK 02 · AGENT WORKFLOW</span>
+          <h3>把选题推进成可审核的完整方案</h3>
+          <p>
+            AI 将依次生成人物卡、恰好 20 个剧情节点和五维商业评分；低于 80
+            分时最多自动修改两轮。
+          </p>
+          <div v-if="matchingWorkflow" class="workflow-state">
+            <i :class="matchingWorkflow.status.toLowerCase()" />
+            已有任务 #{{ matchingWorkflow.taskId }} ·
+            {{ workflowStatusLabel(matchingWorkflow.status) }}
+          </div>
+        </div>
+        <div class="workflow-path" aria-label="AI 工作流步骤">
+          <span>人物</span><i /><span>大纲</span><i /><span>评分</span><i /><span>审核</span>
+        </div>
+        <el-button
+          type="primary"
+          size="large"
+          :loading="workflowStore.starting"
+          @click="startOrResumeWorkflow"
+        >
+          {{ workflowActionLabel }}
+          <el-icon><ArrowRight /></el-icon>
+        </el-button>
       </section>
 
       <section v-if="topics.length" class="all-topics">
@@ -472,6 +606,144 @@ onMounted(loadStory)
   border-radius: 9px;
 }
 
+.topic-lock {
+  max-width: 230px;
+  padding: 7px 10px;
+  border: 1px solid #d9d2ed;
+  border-radius: 9px;
+  color: #6659ae;
+  background: #f3f0ff;
+  font-size: 8px;
+  font-weight: 750;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.topic-lock.warning {
+  border-color: #efcfb9;
+  color: #a65e3d;
+  background: #fff6ef;
+}
+
+.workflow-entry {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  grid-template-columns: minmax(0, 1.2fr) minmax(250px, 0.8fr) auto;
+  gap: 24px;
+  align-items: center;
+  padding: 23px 24px;
+  border: 1px solid #d8d0ef;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 88% 20%, rgba(111, 89, 221, 0.08), transparent 25%),
+    linear-gradient(112deg, #f7f4ff, #fff);
+}
+
+.workflow-entry::after {
+  position: absolute;
+  right: -45px;
+  bottom: -90px;
+  width: 160px;
+  height: 160px;
+  border: 1px solid rgba(92, 73, 213, 0.07);
+  border-radius: 50%;
+  box-shadow: 0 0 0 28px rgba(92, 73, 213, 0.025);
+  content: '';
+  pointer-events: none;
+}
+
+.workflow-copy {
+  position: relative;
+  z-index: 1;
+}
+
+.workflow-kicker {
+  color: var(--sf-primary);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+}
+
+.workflow-copy h3 {
+  margin: 6px 0 5px;
+  color: var(--sf-ink-strong);
+  font-family: 'STSong', 'Songti SC', serif;
+  font-size: 18px;
+}
+
+.workflow-copy > p {
+  max-width: 580px;
+  margin: 0;
+  color: var(--sf-ink-muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.workflow-state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 9px;
+  color: #655d74;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.workflow-state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7865df;
+}
+
+.workflow-state i.review_required {
+  background: #d87958;
+}
+
+.workflow-state i.success {
+  background: #309774;
+}
+
+.workflow-state i.failed {
+  background: #c45450;
+}
+
+.workflow-path {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+}
+
+.workflow-path span {
+  display: grid;
+  width: 37px;
+  height: 37px;
+  flex: 0 0 37px;
+  place-items: center;
+  border: 1px solid #d8d2e5;
+  border-radius: 11px;
+  color: #6e6778;
+  background: #fff;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.workflow-path i {
+  width: 18px;
+  height: 1px;
+  background: linear-gradient(90deg, #c8c0df, #e5e0ec);
+}
+
+.workflow-entry > .el-button {
+  position: relative;
+  z-index: 1;
+  min-width: 165px;
+  border-radius: 11px;
+  box-shadow: 0 10px 23px rgba(79, 59, 185, 0.17);
+}
+
 .all-topics {
   display: grid;
   gap: 18px;
@@ -527,6 +799,14 @@ onMounted(loadStory)
 }
 
 @media (max-width: 1150px) {
+  .workflow-entry {
+    grid-template-columns: 1fr auto;
+  }
+
+  .workflow-path {
+    display: none;
+  }
+
   .topic-list {
     grid-template-columns: 1fr;
   }
@@ -551,8 +831,21 @@ onMounted(loadStory)
     grid-template-columns: 42px 1fr;
   }
 
-  .selected-overview > .el-button {
+  .selected-overview > .el-button,
+  .selected-overview > .topic-lock {
     grid-column: 1 / -1;
+  }
+
+  .selected-overview > .topic-lock {
+    max-width: none;
+  }
+
+  .workflow-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-entry > .el-button {
+    width: 100%;
   }
 
   .section-header {

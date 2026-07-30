@@ -31,6 +31,18 @@ const router = createRouter({
           meta: { title: '新建故事' },
         },
         {
+          path: 'stories/:storyId/workflow/:taskId',
+          name: 'workflow-progress',
+          component: () => import('@/views/WorkflowProgressView.vue'),
+          meta: { title: 'AI 工作流进度' },
+        },
+        {
+          path: 'stories/:storyId/workflow/:taskId/review',
+          name: 'workflow-review',
+          component: () => import('@/views/WorkflowReviewView.vue'),
+          meta: { title: '大纲审核' },
+        },
+        {
           path: 'stories/:id',
           name: 'story-detail',
           component: () => import('@/views/StoryDetailView.vue'),

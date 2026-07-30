@@ -3,10 +3,12 @@ import { computed, ref } from 'vue'
 
 import * as authApi from '@/api/auth'
 import { useStoryStore } from '@/stores/story'
+import { useWorkflowStore } from '@/stores/workflow'
 import type { AuthCredentials, EntityId } from '@/types'
 import {
   clearStoredAuth,
   clearTopicSessions,
+  clearWorkflowSessions,
   getStoredAuth,
   setStoredAuth,
 } from '@/utils/storage'
@@ -50,7 +52,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   function logout() {
     useStoryStore().reset()
+    useWorkflowStore().reset()
     clearTopicSessions()
+    clearWorkflowSessions()
     token.value = ''
     userId.value = null
     username.value = ''

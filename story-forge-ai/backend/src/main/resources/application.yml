@@ -7,6 +7,11 @@ spring:
     default-property-inclusion: non_null
   data:
     redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: ${REDIS_TIMEOUT:3s}
       repositories:
         enabled: false
 
@@ -31,6 +36,18 @@ app:
     read-timeout: ${AI_READ_TIMEOUT:45s}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  workflow:
+    redis-enabled: ${WORKFLOW_REDIS_ENABLED:false}
+    request-stream: ${WORKFLOW_REQUEST_STREAM:story:workflow:requests}
+    event-stream: ${WORKFLOW_EVENT_STREAM:story:workflow:events}
+    event-group: ${WORKFLOW_EVENT_GROUP:storyforge-backend}
+    event-consumer: ${WORKFLOW_EVENT_CONSUMER:backend-1}
+    poll-timeout: ${WORKFLOW_POLL_TIMEOUT:2s}
+    batch-size: ${WORKFLOW_BATCH_SIZE:10}
+    reclaim-idle: ${WORKFLOW_RECLAIM_IDLE:60s}
+    # @Scheduled string delays require a numeric millisecond value in Spring 6.1.
+    reclaim-interval-ms: ${WORKFLOW_RECLAIM_INTERVAL_MS:10000}
+    reclaim-batch-size: ${WORKFLOW_RECLAIM_BATCH_SIZE:20}
 
 logging:
   level:

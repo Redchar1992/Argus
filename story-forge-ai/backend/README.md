@@ -1,8 +1,9 @@
 # Story Forge AI Backend
 
-Spring Boot 3 / Java 17 backend for the first-week Story Forge MVP. It provides JWT
-authentication, per-user story persistence, and synchronous orchestration of the
-FastAPI topic-generation service.
+Spring Boot 3 / Java 17 backend for the two-week Story Forge MVP. It provides JWT
+authentication, per-user persistence, synchronous topic generation, and an
+asynchronous Redis Streams workflow for characters, outlines, scoring, and
+human review.
 
 ## Scope
 
@@ -11,12 +12,17 @@ FastAPI topic-generation service.
 - Create, list, and reopen stories
 - Generate topics through the AI service and persist every task/result
 - Select a generated topic by ID
+- Start, poll, review, and resume the week-two story workflow
+- Version characters, outlines, scores, and final workflow artifacts
+- Redis Streams request publishing and transactional event persistence
 - Unified JSON errors, CORS, and ownership checks
 - H2 local profile with no MySQL or Redis process required
 - MySQL profile for deployment
 
 Redis is included as a project dependency for later work, but the first-week flow
-does not connect to Redis.
+does not connect to Redis. The week-two async workflow enables Redis explicitly
+with `WORKFLOW_REDIS_ENABLED=true`; the default remains disabled so the local H2
+profile can still start with no external services.
 
 ## Run locally
 
@@ -55,7 +61,8 @@ JWT_SECRET="$(openssl rand -hex 32)" \
 mvn spring-boot:run
 ```
 
-Flyway creates `sys_user`, `story_project`, and `ai_task`.
+Flyway creates `sys_user`, `story_project`, `ai_task`, and versioned
+`story_artifact` records.
 
 ## API
 
@@ -147,6 +154,112 @@ PUT /api/story/{id}/selection
 ```
 
 The exact matching generated topic is saved in `selectedTopic`.
+Once a workflow task exists, this endpoint returns HTTP `409` with
+`WORKFLOW_TOPIC_LOCKED`; it cannot change either the selected topic or story
+status.
+
+## Week-two workflow API
+
+The async workflow uses these task states only:
+
+```text
+WAITING -> RUNNING -> REVIEW_REQUIRED -> SUCCESS
+              \----> FAILED ------> RUNNING / REVIEW_REQUIRED / SUCCESS
+```
+
+`REVIEW_REQUIRED` and `SUCCESS` never regress when delayed events arrive. A
+`FAILED` delivery remains retryable because Redis pending-message recovery can
+resume the same operation.
+
+Start from one of the story's generated topics:
+
+```http
+POST /api/stories/{storyId}/workflow
+
+{"topicId":1}
+```
+
+The accepted response is `{"taskId":90001,"status":"WAITING"}`. Poll it with:
+
+```http
+GET /api/ai-tasks/{taskId}
+```
+
+The response contains the immutable original `topicId`, `storyId`, `status`,
+`currentNode`, `progress`, `threadId`, `score`, `revisionCount`, `maxRevisions`,
+structured `progressEvents`, and explicit error fields. Starting an existing
+workflow with another topic returns HTTP `409` and `WORKFLOW_TOPIC_LOCKED`;
+numeric and string representations of the same topic ID are equivalent.
+
+After logout or on another browser, rediscover the canonical latest task with:
+
+```http
+GET /api/stories/{storyId}/workflow/latest
+```
+
+Once status is `REVIEW_REQUIRED`, retrieve the current material and all outline
+versions:
+
+```http
+GET /api/ai-tasks/{taskId}/review
+```
+
+The response preserves the complete outline object (`title`, `coreConflict`,
+`endingType`, and `nodes`). It displays only the highest version that has both
+an outline and score, returns only same-version pairs in `versions`, and prefers
+the approved `WORKFLOW_FINAL` content after success.
+
+Approve or request a revision:
+
+```http
+POST /api/ai-tasks/{taskId}/review
+
+{"approved":false,"notes":"请提前铺垫反派的利益动机。"}
+```
+
+Every review command creates a new `ai_task` with the same LangGraph `threadId`.
+Its deterministic key progresses from `storyId:v1:START:0` to
+`storyId:v1:RESUME:1`, `RESUME:2`, and so on, independently of queue-delivery
+attempt counts.
+
+## Redis Stream contract
+
+Enable the integration with `WORKFLOW_REDIS_ENABLED=true`. The backend writes to
+`story:workflow:requests` using string fields:
+
+```text
+taskId, storyId, threadId, action, payloadVersion, idempotencyKey,
+topic (JSON), approved, notes
+```
+
+It consumes `story:workflow:events` using:
+
+```text
+taskId, storyId, threadId, status, currentNode, progress, attemptNo,
+revisionCount, maxRevisions, idempotencyKey, artifacts (JSON array),
+progressEvents (JSON array), inputTokens, outputTokens, modelName,
+promptVersion, durationMs, modelCalls (JSON array), errorCode, errorMessage
+```
+
+Each artifact is shaped as:
+
+```json
+{
+  "artifactType": "OUTLINE",
+  "versionNo": 2,
+  "status": "REVIEW",
+  "content": {},
+  "promptVersion": "outline-v1",
+  "modelName": "model-name"
+}
+```
+
+Event persistence and task/story updates run in one database transaction. `XACK`
+is issued only after that transaction returns successfully. Stream event IDs and
+the unique `(story_id, artifact_type, version_no)` key make redelivery idempotent.
+An `XPENDING` + `XCLAIM` recovery loop reclaims events that remain unacknowledged
+beyond `WORKFLOW_RECLAIM_IDLE`. Configure its scheduler with the numeric
+millisecond value `WORKFLOW_RECLAIM_INTERVAL_MS` (default `10000`).
 
 ## Error format
 

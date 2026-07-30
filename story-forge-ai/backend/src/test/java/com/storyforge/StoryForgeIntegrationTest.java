@@ -57,6 +57,7 @@ class StoryForgeIntegrationTest {
         while (AI_SERVER.takeRequest(1, TimeUnit.MILLISECONDS) != null) {
             // MockWebServer keeps recorded requests across test methods.
         }
+        jdbcTemplate.update("DELETE FROM story_artifact");
         jdbcTemplate.update("DELETE FROM ai_task");
         jdbcTemplate.update("DELETE FROM story_project");
         jdbcTemplate.update("DELETE FROM sys_user");
