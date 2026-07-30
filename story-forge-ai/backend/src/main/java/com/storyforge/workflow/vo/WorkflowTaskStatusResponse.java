@@ -15,6 +15,9 @@ public record WorkflowTaskStatusResponse(
         Integer maxRevisions,
         JsonNode progressEvents,
         String errorCode,
-        String errorMessage
+        String errorMessage,
+        String taskType,
+        Long chapterId,
+        JsonNode result
 ) {
 }

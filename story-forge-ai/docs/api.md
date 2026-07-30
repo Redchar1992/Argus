@@ -221,6 +221,235 @@ Content-Type: application/json
 审核会恢复原 LangGraph `threadId`。服务端为这次 `RESUME` 留下独立任务记录，
 响应中的 `taskId` 可能是新的任务 ID；客户端必须改为轮询响应返回的 ID。
 
+## 第三周章节 API
+
+章节接口只接受已批准人物与大纲的故事。第 2 章及以后还要求上一章已经批准。
+
+### 章节目录与详情
+
+```http
+GET /api/stories/{storyId}/chapters
+GET /api/stories/{storyId}/chapters/{chapterNo}
+GET /api/chapters/{chapterId}
+```
+
+章节详情包含计划、计划哈希、状态、当前不可变版本和已批准摘要：
+
+```json
+{
+  "id":701,
+  "storyId":5001,
+  "chapterNo":1,
+  "title":"第1章 失控的证据",
+  "status":"REVIEW_REQUIRED",
+  "planStatus":"APPROVED",
+  "plan":{"scenes":[]},
+  "planHash":"<sha256>",
+  "wordCount":1280,
+  "rowVersion":3,
+  "currentVersionId":3003,
+  "currentVersion":{"id":3003,"sourceType":"AI_REVISION","content":"..."}
+}
+```
+
+### 生成并确认章节计划
+
+```http
+POST /api/stories/{storyId}/chapters/{chapterNo}/plan
+Content-Type: application/json
+
+{"targetLength":1600}
+```
+
+返回 `202 Accepted`：
+
+```json
+{"taskId":10001,"chapterId":701,"status":"WAITING"}
+```
+
+任务完成后通过章节详情取得 3～6 个场景，并使用服务端返回的哈希确认：
+
+```http
+POST /api/stories/{storyId}/chapters/{chapterNo}/plan/approve
+Content-Type: application/json
+
+{"planHash":"<sha256>"}
+```
+
+计划变化时旧哈希返回 `409 CHAPTER_PLAN_CONFLICT`。
+
+### 流式生成正文
+
+```http
+POST /api/stories/{storyId}/chapters/{chapterNo}/generate
+```
+
+计划必须已经确认。响应仍为 `202` 的任务引用。通用任务查询接口现在也会为章节
+任务返回 `taskType`、`chapterId` 和最后一个事件的 `result`：
+
+```http
+GET /api/ai-tasks/{taskId}
+```
+
+正文流使用带 JWT Header 的 `fetch`，不要把 Token 放在查询参数中：
+
+```http
+GET /api/ai-tasks/{taskId}/events
+Accept: text/event-stream
+Authorization: Bearer <token>
+Last-Event-ID: 1712345678-1
+```
+
+每个 SSE frame 的 `id` 是可恢复游标，`event` 是下列类型之一：
+
+```text
+TASK_STARTED
+CONTEXT_LOADED
+CHAPTER_PLAN_READY
+GENERATION_STARTED
+TOKEN_DELTA
+DRAFT_READY
+REVIEW_READY
+REVISION_STARTED
+REVISION_READY
+HUMAN_REVIEW_REQUIRED
+REWRITE_PROPOSAL_READY
+SUMMARY_READY
+MEMORY_UPDATE_READY
+FINAL_READY
+TASK_RETRYING
+TASK_FAILED
+```
+
+`data` 为统一事件对象：
+
+```json
+{
+  "eventId":"1712345678-1",
+  "taskId":10001,
+  "storyId":5001,
+  "chapterId":701,
+  "chapterNo":1,
+  "type":"TOKEN_DELTA",
+  "sequence":27,
+  "status":"RUNNING",
+  "currentNode":"write_chapter",
+  "progress":30,
+  "data":{"text":"林晚盯着那张转账记录，","phase":"chapter_write"}
+}
+```
+
+后端在发送前持久化事件。非流式客户端和测试可以读取同一历史：
+
+```http
+GET /api/ai-tasks/{taskId}/events/history?after={eventId}
+```
+
+如果游标已经被裁剪，第一条为 `STREAM_RESET`，客户端应以随后保存的完整草稿或
+最终版本重建编辑器，不能继续盲目拼接 Token。
+
+### 保存人工编辑
+
+```http
+PUT /api/chapters/{chapterId}/content
+Content-Type: application/json
+
+{
+  "baseVersionId":3001,
+  "baseContentHash":"<sha256>",
+  "content":"用户编辑后的完整正文"
+}
+```
+
+成功创建 `USER_EDIT` 版本。基础版本不是当前版本时返回
+`409 CHAPTER_VERSION_CONFLICT`，不会覆盖新内容。
+
+### 局部 AI 改写
+
+```http
+POST /api/chapters/{chapterId}/rewrite-selection
+Content-Type: application/json
+
+{
+  "chapterVersionId":3002,
+  "startOffset":520,
+  "endOffset":920,
+  "selectedText":"原始选中文本",
+  "selectedTextHash":"<sha256>",
+  "action":"ENHANCE_CONFLICT",
+  "customInstruction":"增加反派的具体阻止行动"
+}
+```
+
+响应是异步任务。`REWRITE_PROPOSAL_READY` 后可读取建议；建议不会直接覆盖正文：
+
+```http
+GET /api/chapters/{chapterId}/rewrite-proposals
+GET /api/chapters/{chapterId}/rewrite-proposals/{proposalId}
+```
+
+```json
+{
+  "id":9001,
+  "baseVersionId":3002,
+  "startOffset":520,
+  "endOffset":920,
+  "originalText":"原始选中文本",
+  "originalTextHash":"<sha256>",
+  "replacementText":"AI 建议文本",
+  "replacementTextHash":"<sha256>",
+  "reason":"增加了对手阻止调查的可见行动",
+  "status":"READY"
+}
+```
+
+处理提案：
+
+```http
+POST /api/chapters/{chapterId}/rewrite-proposals/{proposalId}/accept
+POST /api/chapters/{chapterId}/rewrite-proposals/{proposalId}/reject
+POST /api/chapters/{chapterId}/rewrite-proposals/{proposalId}/regenerate
+```
+
+接受请求可重复提供 `baseVersionId` 和 `baseContentHash`。服务端会再次验证版本、
+偏移和选区哈希；过期提案返回冲突。接受会创建 `AI_SELECTION_REWRITE` 版本，拒绝
+只改变提案状态，再次生成返回新的异步任务。
+
+### 版本历史、对比与恢复
+
+```http
+GET /api/chapters/{chapterId}/versions
+GET /api/chapters/{chapterId}/versions/compare?fromVersionId=3001&toVersionId=3002
+POST /api/chapters/{chapterId}/versions/{versionId}/restore
+```
+
+对比响应给出共同前后缀长度以及双方变化文本。恢复不会移动旧记录，而是创建新的
+`RESTORE` 版本。恢复只在章节批准前开放；章节一旦进入 `APPROVED`，正文和已经写入
+的长期记忆都保持不可变，恢复请求返回 `409 CHAPTER_LOCKED`。MVP 不提供长期记忆回滚。
+
+### 批准或退回章节
+
+```http
+POST /api/chapters/{chapterId}/approve
+Content-Type: application/json
+
+{"approved":true,"notes":""}
+```
+
+返回新的 `FINALIZE` 任务。批准时恢复原章节线程，生成摘要和 MemoryUpdate，并在
+一个数据库事务中创建 `APPROVED` 版本、更新章节状态、Canon Facts、人物关系、
+剧情线和伏笔。若要求继续修改，使用：
+
+```json
+{"approved":false,"notes":"第二场需要补足女主保全证据的具体动作。"}
+```
+
+修改意见不能为空；工作流定向修订后再次进入 `HUMAN_REVIEW_REQUIRED`。
+
+计划、正文生成、局部改写或定稿任务失败后，用户重复提交同一请求会创建新的任务
+尝试。新任务使用独立 `taskId` 和重试幂等键，`parentTaskId` 指向上一失败尝试，
+`attemptNo` 递增；运行中或已经成功的同一请求仍返回原任务。
+
 ## AI Service API（仅后端调用）
 
 ### 健康检查

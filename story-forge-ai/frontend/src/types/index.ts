@@ -208,3 +208,5 @@ export interface WorkflowSession {
   progress: number
   updatedAt: string
 }
+
+export * from './chapter'

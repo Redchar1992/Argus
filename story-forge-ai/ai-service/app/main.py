@@ -21,13 +21,23 @@ from app.workflow import (
 
 def _build_agent(settings: Settings) -> TopicAgent:
     local = LocalTemplateProvider()
-    if not settings.openai_api_key:
+    provider = settings.model_provider
+    use_remote = provider in {"openai-compatible", "ollama"} or (
+        provider == "auto" and bool(settings.openai_api_key)
+    )
+    if not use_remote:
         return TopicAgent(provider=local)
 
     remote = OpenAICompatibleProvider(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url,
-        model=settings.openai_model,
+        api_key=settings.openai_api_key or "ollama",
+        base_url=(
+            settings.ollama_base_url
+            if provider == "ollama"
+            else settings.openai_base_url
+        ),
+        model=(
+            settings.ollama_model if provider == "ollama" else settings.openai_model
+        ),
         timeout_seconds=settings.openai_timeout_seconds,
     )
     return TopicAgent(

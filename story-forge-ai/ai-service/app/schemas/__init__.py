@@ -1,5 +1,21 @@
-"""Validated contracts for the second-week story workflow."""
+"""Validated contracts for story and chapter workflows."""
 
+from app.schemas.chapter import (
+    ChapterCommand,
+    ChapterCommandAction,
+    ChapterDecision,
+    ChapterPlan,
+    ChapterReview,
+    ChapterReviewResult,
+    ChapterRunResponse,
+    ChapterRunStatus,
+    ChapterSummary,
+    MemoryUpdate,
+    ReviewDimension,
+    RewriteProposal,
+    ScenePlan,
+    build_chapter_review,
+)
 from app.schemas.character import CharacterCard, CharacterPack, CharacterRole
 from app.schemas.outline import (
     OutlineNode,
@@ -29,6 +45,20 @@ from app.schemas.workflow import (
 )
 
 __all__ = [
+    "ChapterCommand",
+    "ChapterCommandAction",
+    "ChapterDecision",
+    "ChapterPlan",
+    "ChapterReview",
+    "ChapterReviewResult",
+    "ChapterRunResponse",
+    "ChapterRunStatus",
+    "ChapterSummary",
+    "MemoryUpdate",
+    "ReviewDimension",
+    "RewriteProposal",
+    "ScenePlan",
+    "build_chapter_review",
     "ArtifactRecord",
     "CharacterCard",
     "CharacterPack",

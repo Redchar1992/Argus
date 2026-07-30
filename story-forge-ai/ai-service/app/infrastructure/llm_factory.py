@@ -8,6 +8,7 @@ while keeping agents independent from any one model SDK.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -15,6 +16,15 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
+from app.schemas.chapter import (
+    ChapterPlan,
+    ChapterReview,
+    ChapterSummary,
+    MemoryUpdate,
+    ReviewDimension,
+    RewriteProposal,
+    ScenePlan,
+)
 from app.schemas.character import CharacterCard, CharacterPack
 from app.schemas.outline import OutlineNode, OutlineResult
 from app.schemas.score import ScoreDimension, StoryScore
@@ -46,6 +56,30 @@ class StructuredModel(Protocol):
         purpose: str,
     ) -> StructuredGeneration[SchemaT]:
         """Return one Pydantic-validated structured value."""
+
+
+@dataclass(frozen=True, slots=True)
+class TextDelta:
+    """One ordinary-text model delta with optional final usage metadata."""
+
+    text: str
+    model_name: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    done: bool = False
+
+
+class TextModel(Protocol):
+    model_name: str
+
+    def stream_text(
+        self,
+        *,
+        system_prompt: str,
+        payload: dict[str, Any],
+        purpose: str,
+    ) -> AsyncIterator[TextDelta]:
+        """Stream ordinary prose without wrapping it in structured JSON."""
 
 
 def _stage(node_no: int) -> str:
@@ -81,6 +115,16 @@ class LocalStructuredModel:
                 value = self._outline(payload, revised=purpose == "revise")
             elif schema is StoryScore:
                 value = self._score(payload)
+            elif schema is ChapterPlan:
+                value = self._chapter_plan(payload)
+            elif schema is ChapterReview:
+                value = self._chapter_review(payload)
+            elif schema is ChapterSummary:
+                value = self._chapter_summary(payload)
+            elif schema is MemoryUpdate:
+                value = self._memory_update(payload)
+            elif schema is RewriteProposal:
+                value = self._rewrite_proposal(payload)
             else:
                 raise WorkflowModelError(f"local model does not support {purpose}")
         except (ValidationError, ValueError, KeyError, TypeError) as exc:
@@ -95,6 +139,36 @@ class LocalStructuredModel:
             model_name=self.model_name,
             input_tokens=max(1, len(encoded_input) // 4),
             output_tokens=max(1, len(encoded_output) // 4),
+        )
+
+    async def stream_text(
+        self,
+        *,
+        system_prompt: str,
+        payload: dict[str, Any],
+        purpose: str,
+    ) -> AsyncIterator[TextDelta]:
+        del system_prompt
+        if purpose not in {"chapter_write", "chapter_revision"}:
+            raise WorkflowModelError(f"local model does not support {purpose}")
+        content = self._chapter_text(
+            payload,
+            revised=purpose == "chapter_revision",
+        )
+        encoded_input = json.dumps(payload, ensure_ascii=False)
+        # Sentence-sized chunks mimic real token streams without delaying tests.
+        chunk_size = 24
+        for start in range(0, len(content), chunk_size):
+            yield TextDelta(
+                text=content[start : start + chunk_size],
+                model_name=self.model_name,
+            )
+        yield TextDelta(
+            text="",
+            model_name=self.model_name,
+            input_tokens=max(1, len(encoded_input) // 4),
+            output_tokens=max(1, len(content) // 4),
+            done=True,
         )
 
     def _characters(self, payload: dict[str, Any]) -> CharacterPack:
@@ -197,9 +271,7 @@ class LocalStructuredModel:
                     stage=stage,  # type: ignore[arg-type]
                     event=event,
                     conflict=conflict,
-                    protagonist_goal=(
-                        "保全证据、查清真相，并避免无辜者成为反击代价"
-                    ),
+                    protagonist_goal=("保全证据、查清真相，并避免无辜者成为反击代价"),
                     emotional_target=(
                         "释放压抑后的尊严与新生"
                         if node_no == 20
@@ -261,6 +333,353 @@ class LocalStructuredModel:
                 "让关键证据在前半段至少出现两次",
                 "压缩只表达情绪而不推动事件的片段",
             ],
+        )
+
+    def _chapter_plan(self, payload: dict[str, Any]) -> ChapterPlan:
+        characters = payload.get("characters") or []
+        names = [
+            str(item.get("name", "")).strip()
+            for item in characters
+            if isinstance(item, dict) and item.get("name")
+        ]
+        if not names:
+            names = ["林晚", "顾承泽", "苏晴"]
+        protagonist = next(
+            (str(item["name"]) for item in characters if item.get("role") == "主角"),
+            names[0],
+        )
+        opponent = next(
+            (str(item["name"]) for item in characters if item.get("role") == "反派"),
+            names[1] if len(names) > 1 else names[0],
+        )
+        ally = names[2] if len(names) > 2 else protagonist
+        chapter_no = int(payload.get("chapter_no", 1))
+        target = min(5000, max(800, int(payload.get("target_length", 1200))))
+        current_nodes = payload.get("currentOutlineNodes") or payload.get(
+            "outlineNodes"
+        )
+        if not isinstance(current_nodes, list) or len(current_nodes) != 2:
+            raise ValueError(
+                "chapter planning requires exactly two current outline nodes"
+            )
+
+        def node_field(node: dict[str, Any], camel: str, snake: str) -> str:
+            return str(node.get(camel, node.get(snake, ""))).strip()
+
+        def anchor(value: str) -> str:
+            return "".join(value.split())[:24]
+
+        outline_contract = [
+            {
+                "event": anchor(node_field(node, "event", "event")),
+                "goal": anchor(
+                    node_field(node, "protagonistGoal", "protagonist_goal")
+                ),
+                "information": node_field(
+                    node, "newInformation", "new_information"
+                ),
+                "cliffhanger": node_field(node, "cliffhanger", "cliffhanger"),
+            }
+            for node in current_nodes
+            if isinstance(node, dict)
+        ]
+        if len(outline_contract) != 2 or any(
+            not item["event"] or not item["goal"] for item in outline_contract
+        ):
+            raise ValueError("current outline nodes require event and protagonistGoal")
+        scene_functions = ("建立", "升级", "反转", "高潮")
+        scenes = []
+        for index, scene_function in enumerate(scene_functions, start=1):
+            beat = outline_contract[0 if index <= 2 else 1]
+            scene_characters = (
+                [protagonist, opponent] if index in {1, 4} else [protagonist, ally]
+            )
+            scenes.append(
+                ScenePlan(
+                    scene_no=index,
+                    location=("集团会议室" if index == 1 else f"线索地点{index}"),
+                    time=("清晨" if index == 1 else "当天稍后"),
+                    characters=list(dict.fromkeys(scene_characters)),
+                    protagonist_goal=beat["goal"],
+                    opposing_force=f"{opponent}安排的现实阻碍",
+                    visible_conflict=f"落实大纲事件：{beat['event']}，并突破现场阻拦",
+                    information_revealed=(
+                        beat["information"] or f"第{index}条线索改变人物判断"
+                    ),
+                    emotional_change="由迟疑转为主动，并承担行动代价",
+                    setup_or_payoff=(
+                        "埋下账本来源疑点" if index < 4 else "回收前一场的证据异常"
+                    ),
+                    exit_hook=(
+                        beat["cliffhanger"]
+                        or f"新的记录指向第{index + 1}层利益关系"
+                    ),
+                    scene_function=scene_function,  # type: ignore[arg-type]
+                )
+            )
+        return ChapterPlan(
+            chapter_title=f"第{chapter_no}章 {outline_contract[0]['event'][:18]}",
+            chapter_goal=(
+                f"完成事件「{outline_contract[0]['event']}」与目标「{outline_contract[0]['goal']}」；"
+                f"完成事件「{outline_contract[1]['event']}」与目标「{outline_contract[1]['goal']}」"
+            ),
+            opening_hook=f"{outline_contract[0]['event']}突然打破原有局面",
+            ending_hook=(
+                outline_contract[1]["cliffhanger"]
+                or f"{outline_contract[1]['event']}带来新的未解后果"
+            ),
+            target_length=target,
+            scenes=scenes,
+        )
+
+    def _chapter_text(
+        self,
+        payload: dict[str, Any],
+        *,
+        revised: bool,
+    ) -> str:
+        plan = payload.get("chapter_plan") or payload.get("chapterPlan") or {}
+        characters = payload.get("characters") or []
+        names = [
+            str(item.get("name", "")).strip()
+            for item in characters
+            if isinstance(item, dict) and item.get("name")
+        ]
+        protagonist = next(
+            (str(item["name"]) for item in characters if item.get("role") == "主角"),
+            names[0] if names else "林晚",
+        )
+        opponent = next(
+            (str(item["name"]) for item in characters if item.get("role") == "反派"),
+            names[1] if len(names) > 1 else "顾承泽",
+        )
+        target = min(
+            5000,
+            max(
+                800,
+                int(
+                    plan.get("target_length")
+                    or plan.get("targetLength")
+                    or payload.get("target_length", 1200)
+                ),
+            ),
+        )
+        scenes = plan.get("scenes") or [{} for _ in range(4)]
+        paragraphs = [
+            (
+                f"{protagonist}推开会议室的门时，墙上的投影忽然闪了一下。原本的议程被一张转账记录取代，红色数字压在她的名字旁边。众人的手机同时震动，议论声还没成形，{opponent}已经伸手去拔数据线。她先一步按住接口：‘谁删掉原件，谁就承认看过它。’空气在这一刻彻底改变。"
+            )
+        ]
+        for index, scene in enumerate(scenes, start=1):
+            location = scene.get("location", f"线索地点{index}")
+            goal = scene.get(
+                "protagonist_goal",
+                scene.get("protagonistGoal", "查清证据来源"),
+            )
+            conflict = scene.get(
+                "visible_conflict",
+                scene.get("visibleConflict", "对手试图阻止调查"),
+            )
+            revealed = scene.get(
+                "information_revealed",
+                scene.get("informationRevealed", "线索指向新的利益关系"),
+            )
+            extra = (
+                "她没有用一句判断替代证据，而是逐项核对时间、签名与门禁记录。"
+                if revised
+                else "她压住立刻质问的冲动，把每个动作记在心里。"
+            )
+            paragraphs.append(
+                f"在{location}，{protagonist}要{goal}。{conflict}。她看见对方手指停在删除键上，便将备份发送给在场三人，让任何一次销毁都留下痕迹。{extra}{revealed}，先前看似无关的沉默因此有了具体代价。"
+            )
+            paragraphs.append(
+                f"第{index}次交锋中，{opponent}把声音压得很低，要求她立刻"
+                f"离开。{protagonist}没有后退，只把记录的生成时间念了出来。"
+                "门外脚步突然停住，有人显然听见了不该听见的名字。她改变"
+                "原计划，故意放出一条不完整的信息，等待真正害怕的人先行动。"
+            )
+        ending = str(
+            plan.get("ending_hook")
+            or plan.get("endingHook")
+            or "记录最后的收款人姓名，竟属于她最信任的人"
+        )
+        paragraphs.append(
+            f"电梯门合拢前，备份文件终于解密。{protagonist}盯着最后一行，指尖停在屏幕上——{ending}。与此同时，身后那部本应关机的手机，亮起了正在通话的红点。"
+        )
+        content = "\n\n".join(paragraphs)
+        filler = (
+            f"\n\n{protagonist}重新排列证据，把亲眼所见、他人转述和仍待"
+            "核验的部分分开。每一处时间差都对应一个人的行动，她不允许愤怒"
+            "替自己补完缺失的因果。走廊尽头传来门锁声，提醒她留给真相的"
+            "时间正在减少。"
+        )
+        while len(content) < target * 0.9:
+            content += filler
+        return content[: int(target * 1.08)]
+
+    def _chapter_review(self, payload: dict[str, Any]) -> ChapterReview:
+        revision = int(payload.get("revision_count", 0))
+        if revision == 0:
+            scores = (15, 16, 15, 11, 11, 8)
+        else:
+            scores = (18, 18, 17, 13, 12, 8)
+        names = (
+            ("outline_completion", 20),
+            ("continuity", 20),
+            ("conflict_progression", 20),
+            ("emotion_and_visuals", 15),
+            ("hooks", 15),
+            ("language_quality", 10),
+        )
+        dimensions = {
+            name: ReviewDimension(
+                score=score,
+                max_score=maximum,  # type: ignore[arg-type]
+                evidence=["正文包含对应的具体行动、阻力或信息变化"],
+                problems=(["局部因果或画面仍可增强"] if revision == 0 else []),
+                suggestions=["用可观察动作替代概括，并提前呈现行动代价"],
+            )
+            for (name, maximum), score in zip(names, scores, strict=True)
+        }
+        return ChapterReview(
+            **dimensions,  # type: ignore[arg-type]
+            fatal_problems=[],
+            rewrite_instructions=(
+                ["保留场景顺序，补足第二场阻力和证据核验动作"]
+                if revision == 0
+                else ["压缩少量重复情绪表达"]
+            ),
+            should_rewrite=revision == 0,
+        )
+
+    def _chapter_summary(self, payload: dict[str, Any]) -> ChapterSummary:
+        chapter_no = int(payload.get("chapter_no", 1))
+        return ChapterSummary(
+            chapter_no=chapter_no,
+            summary="主角在公开冲突中保全异常转账记录，通过时间与门禁证据锁定新的利益关联，并在章末发现可信之人可能牵涉其中。",
+            main_events=[
+                "异常转账记录在会议现场曝光",
+                "主角完成证据备份并用核验行动阻止销毁",
+                "解密记录指向意外关联人",
+            ],
+            character_changes=["主角从被动防守转为主动设置验证陷阱"],
+            new_facts=[
+                {
+                    "factKey": f"chapter_{chapter_no}_transfer_record",
+                    "factType": "EVIDENCE",
+                    "subject": "异常转账记录",
+                    "predicate": "已被备份",
+                    "value": "主角和两名见证人持有副本",
+                    "visibility": "PUBLIC",
+                    "sourceChapter": chapter_no,
+                    "locked": False,
+                }
+            ],
+            opened_threads=[
+                {
+                    "threadKey": f"chapter_{chapter_no}_recipient",
+                    "description": "意外收款人与核心事件的真实关系",
+                    "introducedChapter": chapter_no,
+                    "status": "OPEN",
+                    "knownClues": ["解密后的收款人姓名"],
+                }
+            ],
+            resolved_threads=[],
+            ending_hook="本应关机的手机正在向未知对象通话",
+        )
+
+    def _memory_update(self, payload: dict[str, Any]) -> MemoryUpdate:
+        chapter_no = int(payload.get("chapter_no", 1))
+        characters = payload.get("characters") or []
+        protagonist = next(
+            (str(item["name"]) for item in characters if item.get("role") == "主角"),
+            "林晚",
+        )
+        opponent = next(
+            (str(item["name"]) for item in characters if item.get("role") == "反派"),
+            "顾承泽",
+        )
+        facts = payload.get("canon_facts") or payload.get("canonFacts") or []
+        locked = {
+            str(item.get("factKey") or item.get("fact_key"))
+            for item in facts
+            if isinstance(item, dict) and item.get("locked")
+        }
+        warnings = (
+            [f"锁定事实保持不变：{key}" for key in sorted(locked)] if locked else []
+        )
+        return MemoryUpdate(
+            new_facts=[
+                {
+                    "factKey": f"chapter_{chapter_no}_evidence_backup",
+                    "factType": "EVIDENCE",
+                    "subject": "异常转账记录",
+                    "predicate": "持有状态",
+                    "value": "存在多个可核验副本",
+                    "visibility": "PUBLIC",
+                    "sourceChapter": chapter_no,
+                    "locked": False,
+                }
+            ],
+            changed_relationships=[
+                {
+                    "characterA": protagonist,
+                    "characterB": opponent,
+                    "relation": "公开对抗",
+                    "trust": 0,
+                    "conflict": 90,
+                    "updatedAtChapter": chapter_no,
+                }
+            ],
+            opened_threads=[
+                {
+                    "threadKey": f"chapter_{chapter_no}_recipient",
+                    "description": "调查意外收款人的真实立场",
+                    "introducedChapter": chapter_no,
+                    "status": "OPEN",
+                }
+            ],
+            updated_threads=[],
+            resolved_threads=[],
+            new_foreshadowing=[
+                {
+                    "foreshadowKey": f"chapter_{chapter_no}_phone_call",
+                    "setup": "关机手机出现通话红点",
+                    "setupChapter": chapter_no,
+                    "status": "SETUP",
+                }
+            ],
+            paid_off_foreshadowing=[],
+            character_state_changes=[
+                {
+                    "character": protagonist,
+                    "field": "evidenceCopies",
+                    "newValue": "掌握异常转账记录的多个副本",
+                    "updatedAtChapter": chapter_no,
+                }
+            ],
+            continuity_warnings=warnings,
+        )
+
+    def _rewrite_proposal(self, payload: dict[str, Any]) -> RewriteProposal:
+        original = str(payload["selected_text"])
+        action = str(payload.get("action", "CUSTOM"))
+        if action == "COMPRESS":
+            replacement = original.replace("非常", "").replace("开始", "")
+        elif action == "EXPAND_DETAIL":
+            replacement = (
+                original + " 她听见纸页擦过桌面的细响，看到对方拇指在签名处停了半秒。"
+            )
+        else:
+            replacement = (
+                original + " 对方没有退让，反而伸手切断出口，让这次冲突产生了现实代价。"
+            )
+        return RewriteProposal(
+            chapter_version_id=int(payload["chapter_version_id"]),
+            original_text=original,
+            replacement_text=replacement,
+            reason=f"按{action}要求在选中范围内强化可见行动",
+            selected_text_hash=str(payload["selected_text_hash"]),
         )
 
 
@@ -329,9 +748,7 @@ class OpenAICompatibleStructuredModel:
             TypeError,
             ValueError,
         ) as exc:
-            raise WorkflowModelError(
-                f"model returned invalid {purpose} JSON"
-            ) from exc
+            raise WorkflowModelError(f"model returned invalid {purpose} JSON") from exc
 
         usage = api_payload.get("usage")
         usage = usage if isinstance(usage, dict) else {}
@@ -356,6 +773,122 @@ class OpenAICompatibleStructuredModel:
             return await self._client.post(url, headers=headers, json=body)
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             return await client.post(url, headers=headers, json=body)
+
+    async def stream_text(
+        self,
+        *,
+        system_prompt: str,
+        payload: dict[str, Any],
+        purpose: str,
+    ) -> AsyncIterator[TextDelta]:
+        """Consume the OpenAI-compatible SSE chat-completions protocol.
+
+        Ollama exposes the same endpoint under ``/v1/chat/completions``. The
+        API key may therefore be a harmless server-side placeholder.
+        """
+
+        body = {
+            "model": self.model_name,
+            "temperature": self.temperature,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(payload, ensure_ascii=False),
+                },
+            ],
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        url = f"{self.base_url}/chat/completions"
+        usage: dict[str, Any] = {}
+        returned_model = self.model_name
+        try:
+            if self._client is not None:
+                async with self._client.stream(
+                    "POST",
+                    url,
+                    headers=headers,
+                    json=body,
+                    timeout=self.timeout_seconds,
+                ) as response:
+                    async for delta in self._read_text_stream(response):
+                        if delta.done:
+                            usage = {
+                                "prompt_tokens": delta.input_tokens,
+                                "completion_tokens": delta.output_tokens,
+                            }
+                            returned_model = delta.model_name
+                        else:
+                            yield delta
+            else:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    async with client.stream(
+                        "POST",
+                        url,
+                        headers=headers,
+                        json=body,
+                    ) as response:
+                        async for delta in self._read_text_stream(response):
+                            if delta.done:
+                                usage = {
+                                    "prompt_tokens": delta.input_tokens,
+                                    "completion_tokens": delta.output_tokens,
+                                }
+                                returned_model = delta.model_name
+                            else:
+                                yield delta
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            raise WorkflowModelError(
+                f"model returned invalid {purpose} text stream"
+            ) from exc
+        yield TextDelta(
+            text="",
+            model_name=returned_model,
+            input_tokens=_non_negative_int(usage.get("prompt_tokens")),
+            output_tokens=_non_negative_int(usage.get("completion_tokens")),
+            done=True,
+        )
+
+    async def _read_text_stream(
+        self,
+        response: httpx.Response,
+    ) -> AsyncIterator[TextDelta]:
+        response.raise_for_status()
+        model_name = self.model_name
+        usage: dict[str, Any] = {}
+        async for line in response.aiter_lines():
+            line = line.strip()
+            if not line or line.startswith(":"):
+                continue
+            if line == "data: [DONE]":
+                break
+            if not line.startswith("data:"):
+                continue
+            payload = json.loads(line[5:].strip())
+            returned_model = payload.get("model")
+            if isinstance(returned_model, str):
+                model_name = returned_model
+            raw_usage = payload.get("usage")
+            if isinstance(raw_usage, dict):
+                usage = raw_usage
+            choices = payload.get("choices") or []
+            if not choices:
+                continue
+            content = choices[0].get("delta", {}).get("content")
+            if isinstance(content, str) and content:
+                yield TextDelta(text=content, model_name=model_name)
+        yield TextDelta(
+            text="",
+            model_name=model_name,
+            input_tokens=_non_negative_int(usage.get("prompt_tokens")),
+            output_tokens=_non_negative_int(usage.get("completion_tokens")),
+            done=True,
+        )
 
 
 class WorkflowModelRouter:
@@ -395,6 +928,35 @@ class WorkflowModelRouter:
                 purpose=purpose,
             )
 
+    async def stream_text(
+        self,
+        *,
+        system_prompt: str,
+        payload: dict[str, Any],
+        purpose: str,
+    ) -> AsyncIterator[TextDelta]:
+        emitted = False
+        try:
+            async for delta in self.primary.stream_text(
+                system_prompt=system_prompt,
+                payload=payload,
+                purpose=purpose,
+            ):
+                emitted = emitted or bool(delta.text)
+                yield delta
+            return
+        except WorkflowModelError:
+            # Never splice a fallback draft after remote prose was already
+            # emitted; doing so would create corrupt mixed-model content.
+            if emitted or self.fallback is None:
+                raise
+        async for delta in self.fallback.stream_text(
+            system_prompt=system_prompt,
+            payload=payload,
+            purpose=purpose,
+        ):
+            yield delta
+
 
 def get_creative_model(settings: Settings | None = None) -> StructuredModel:
     return _build_model(settings or Settings.from_env(), temperature=0.7, review=False)
@@ -404,6 +966,10 @@ def get_review_model(settings: Settings | None = None) -> StructuredModel:
     return _build_model(settings or Settings.from_env(), temperature=0.1, review=True)
 
 
+def get_creative_text_model(settings: Settings | None = None) -> TextModel:
+    return _build_model(settings or Settings.from_env(), temperature=0.7, review=False)
+
+
 def _build_model(
     settings: Settings,
     *,
@@ -411,14 +977,22 @@ def _build_model(
     review: bool,
 ) -> StructuredModel:
     local = LocalStructuredModel()
-    if not settings.openai_api_key:
-        return local
-    model = (
-        settings.openai_review_model if review else settings.openai_creative_model
+    provider = settings.model_provider
+    use_remote = provider in {"openai-compatible", "ollama"} or (
+        provider == "auto" and bool(settings.openai_api_key)
     )
+    if not use_remote:
+        return local
+    model = settings.openai_review_model if review else settings.openai_creative_model
+    if provider == "ollama":
+        model = settings.ollama_model
     remote = OpenAICompatibleStructuredModel(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url,
+        api_key=settings.openai_api_key or "ollama",
+        base_url=(
+            settings.ollama_base_url
+            if provider == "ollama"
+            else settings.openai_base_url
+        ),
         model=model,
         temperature=temperature,
         timeout_seconds=settings.openai_timeout_seconds,

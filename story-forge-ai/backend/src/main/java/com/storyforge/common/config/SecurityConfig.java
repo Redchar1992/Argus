@@ -2,6 +2,7 @@ package com.storyforge.common.config;
 
 import java.util.List;
 
+import jakarta.servlet.DispatcherType;
 import com.storyforge.common.security.JsonAccessDeniedHandler;
 import com.storyforge.common.security.JsonAuthenticationEntryPoint;
 import com.storyforge.common.security.JwtAuthenticationFilter;
@@ -40,6 +41,9 @@ public class SecurityConfig {
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(authorize -> authorize
+                        // Async redispatch is only reachable after the initial
+                        // authenticated SSE request has started successfully.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/health", "/api/auth/register", "/api/auth/login").permitAll()
                         .anyRequest().authenticated())
@@ -60,7 +64,9 @@ public class SecurityConfig {
         configuration.setAllowedHeaders(List.of(
                 HttpHeaders.AUTHORIZATION,
                 HttpHeaders.CONTENT_TYPE,
-                HttpHeaders.ACCEPT
+                HttpHeaders.ACCEPT,
+                HttpHeaders.CACHE_CONTROL,
+                "Last-Event-ID"
         ));
         configuration.setExposedHeaders(List.of(HttpHeaders.AUTHORIZATION));
         configuration.setAllowCredentials(true);

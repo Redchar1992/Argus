@@ -51,3 +51,27 @@ the model prompt contains the same requirement.
 Creative and review prompts deliberately use separate model configurations.
 This keeps scoring conservative and reproducible while allowing characters and
 outline revisions some creative variance.
+
+## Chapter workflow prompts
+
+| Node | File | Output |
+| --- | --- | --- |
+| Plan | `app/prompts/chapter_plan_v1.txt` | Strict `ChapterPlan` JSON with 3–6 scenes |
+| Writer | `app/prompts/chapter_write_v1.txt` | Ordinary prose streamed as deltas |
+| Review | `app/prompts/chapter_review_v1.txt` | Six scored dimensions; app computes total |
+| Revision | `app/prompts/chapter_revision_v1.txt` | Complete revised prose |
+| Summary | `app/prompts/chapter_summary_v1.txt` | Strict `ChapterSummary` JSON |
+| Memory | `app/prompts/chapter_memory_v1.txt` | Strict `MemoryUpdate` JSON |
+| Selection rewrite | `app/prompts/rewrite_selection_v1.txt` | Version/hash-bound proposal |
+
+For chapter planning, the cloud-model state contains exactly two assigned beats
+under `currentOutlineNodes`; `outlineNodes` is an identical compatibility alias.
+`chapterGoal` and the combined scenes must cite the concrete `event` and
+`protagonistGoal` anchors from both beats. The application validates this after
+schema parsing, so a generic plan or one that leaks a future chapter is rejected
+rather than persisted.
+
+The Writer and Revision prompts never request JSON around正文. Only planning,
+review, summary, memory, and rewrite metadata use structured schemas. Before a
+memory delta is emitted, application code removes attempts to overwrite locked
+facts and appends a continuity warning for every rejected key.

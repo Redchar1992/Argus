@@ -1,13 +1,16 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAuthStore } from '@/stores/auth'
+import { useChapterStore } from '@/stores/chapter'
 import { useStoryStore } from '@/stores/story'
 import {
   getStoredAuth,
+  getChapterStreamCursor,
   getTopicSession,
   getWorkflowSession,
   saveTopicSession,
+  saveChapterStreamCursor,
   saveWorkflowSession,
   setStoredAuth,
 } from '@/utils/storage'
@@ -18,7 +21,7 @@ describe('auth logout cleanup', () => {
     setActivePinia(createPinia())
   })
 
-  it('clears auth, cached topics, and the loaded story list', () => {
+  it('clears auth, cached topics, stream cursors, and loaded story state', async () => {
     setStoredAuth({ token: 'token-a', userId: 10001, username: 'writer' })
     saveTopicSession({
       storyId: 42,
@@ -42,6 +45,15 @@ describe('auth logout cleanup', () => {
       maxRevisions: 2,
       events: [],
     })
+    saveChapterStreamCursor({
+      taskId: 80001,
+      storyId: 42,
+      chapterNo: 1,
+      purpose: 'generate',
+      lastEventId: 'redis-8',
+      lastSequence: 8,
+      updatedAt: '2026-07-30T00:00:00.000Z',
+    })
 
     const storyStore = useStoryStore()
     storyStore.$patch({
@@ -57,12 +69,43 @@ describe('auth logout cleanup', () => {
     })
 
     const authStore = useAuthStore()
-    authStore.logout()
+    await authStore.logout()
 
     expect(getStoredAuth()).toBeNull()
     expect(getTopicSession(42)).toBeNull()
     expect(getWorkflowSession(90001)).toBeNull()
+    expect(getChapterStreamCursor(80001)).toBeNull()
     expect(storyStore.stories).toEqual([])
     expect(storyStore.loaded).toBe(false)
+  })
+
+  it('saves dirty chapter content before clearing the login session', async () => {
+    setStoredAuth({ token: 'token-a', userId: 10001, username: 'writer' })
+    const authStore = useAuthStore()
+    const chapterStore = useChapterStore()
+    chapterStore.updateEditorContent('尚未保存的正文')
+    const saveNow = vi.spyOn(chapterStore, 'saveNow').mockImplementation(async () => {
+      chapterStore.updateEditorContent('')
+      return null
+    })
+
+    await authStore.logout({ saveChapter: true })
+
+    expect(saveNow).toHaveBeenCalledOnce()
+    expect(getStoredAuth()).toBeNull()
+    expect(authStore.isAuthenticated).toBe(false)
+  })
+
+  it('keeps the login session when dirty chapter saving fails', async () => {
+    setStoredAuth({ token: 'token-a', userId: 10001, username: 'writer' })
+    const authStore = useAuthStore()
+    const chapterStore = useChapterStore()
+    chapterStore.updateEditorContent('尚未保存的正文')
+    vi.spyOn(chapterStore, 'saveNow').mockRejectedValue(new Error('保存失败'))
+
+    await expect(authStore.logout({ saveChapter: true })).rejects.toThrow('保存失败')
+
+    expect(getStoredAuth()).toMatchObject({ token: 'token-a' })
+    expect(authStore.isAuthenticated).toBe(true)
   })
 })

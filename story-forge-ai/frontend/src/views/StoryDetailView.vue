@@ -73,6 +73,9 @@ const workflowActionLabel = computed(() => {
   if (session.status === 'SUCCESS') return '查看正式创作方案'
   return '查看生成进度'
 })
+const canOpenChapterStudio = computed(
+  () => matchingWorkflow.value?.status === 'SUCCESS',
+)
 
 function buildCachedStory(session: TopicSession): StoryProject {
   return {
@@ -329,6 +332,16 @@ onMounted(loadStory)
         <div class="workflow-path" aria-label="AI 工作流步骤">
           <span>人物</span><i /><span>大纲</span><i /><span>评分</span><i /><span>审核</span>
         </div>
+        <el-button
+          v-if="canOpenChapterStudio"
+          class="chapter-studio-button"
+          type="success"
+          size="large"
+          @click="router.push({ name: 'chapter-catalog', params: { storyId } })"
+        >
+          进入章节创作
+          <el-icon><ArrowRight /></el-icon>
+        </el-button>
         <el-button
           type="primary"
           size="large"

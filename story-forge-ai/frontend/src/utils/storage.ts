@@ -1,8 +1,15 @@
-import type { EntityId, TopicSession, WorkflowSession, WorkflowTask } from '@/types'
+import type {
+  ChapterStreamCursor,
+  EntityId,
+  TopicSession,
+  WorkflowSession,
+  WorkflowTask,
+} from '@/types'
 
 const AUTH_STORAGE_KEY = 'story-forge.auth'
 const TOPIC_STORAGE_PREFIX = 'story-forge.topic-sessions'
 const WORKFLOW_STORAGE_PREFIX = 'story-forge.workflow-sessions'
+const CHAPTER_STREAM_PREFIX = 'story-forge.chapter-stream-cursors'
 const MAX_CACHED_SESSIONS = 50
 
 export interface StoredAuth {
@@ -146,6 +153,64 @@ export function clearWorkflowSessions() {
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index)
     if (key?.startsWith(WORKFLOW_STORAGE_PREFIX)) keysToRemove.push(key)
+  }
+  keysToRemove.forEach((key) => window.localStorage.removeItem(key))
+}
+
+function chapterStreamStorageKey() {
+  const userId = getStoredAuth()?.userId
+  return `${CHAPTER_STREAM_PREFIX}.${String(userId ?? 'anonymous')}`
+}
+
+function getChapterStreamCursors(): Record<string, ChapterStreamCursor> {
+  return readJson<Record<string, ChapterStreamCursor>>(chapterStreamStorageKey(), {})
+}
+
+export function getChapterStreamCursor(taskId: EntityId): ChapterStreamCursor | null {
+  return getChapterStreamCursors()[String(taskId)] ?? null
+}
+
+export function findChapterStreamCursor(
+  storyId: EntityId,
+  chapterNo: number,
+): ChapterStreamCursor | null {
+  return (
+    Object.values(getChapterStreamCursors())
+      .filter(
+        (cursor) =>
+          String(cursor.storyId) === String(storyId) && cursor.chapterNo === chapterNo,
+      )
+      .sort(
+        (left, right) =>
+          new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+      )[0] ?? null
+  )
+}
+
+export function saveChapterStreamCursor(cursor: ChapterStreamCursor) {
+  const cursors = getChapterStreamCursors()
+  cursors[String(cursor.taskId)] = cursor
+  const limited = Object.entries(cursors)
+    .sort(
+      ([, left], [, right]) =>
+        new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+    )
+    .slice(0, MAX_CACHED_SESSIONS)
+  writeJson(chapterStreamStorageKey(), Object.fromEntries(limited))
+}
+
+export function removeChapterStreamCursor(taskId: EntityId) {
+  const cursors = getChapterStreamCursors()
+  delete cursors[String(taskId)]
+  writeJson(chapterStreamStorageKey(), cursors)
+}
+
+export function clearChapterStreamCursors() {
+  if (!canUseStorage()) return
+  const keysToRemove: string[] = []
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index)
+    if (key?.startsWith(CHAPTER_STREAM_PREFIX)) keysToRemove.push(key)
   }
   keysToRemove.forEach((key) => window.localStorage.removeItem(key))
 }

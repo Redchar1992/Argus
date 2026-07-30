@@ -43,6 +43,18 @@ const router = createRouter({
           meta: { title: '大纲审核' },
         },
         {
+          path: 'stories/:storyId/chapters',
+          name: 'chapter-catalog',
+          component: () => import('@/views/ChapterCatalogView.vue'),
+          meta: { title: '章节目录' },
+        },
+        {
+          path: 'stories/:storyId/chapters/:chapterNo',
+          name: 'chapter-workspace',
+          component: () => import('@/views/ChapterWorkspaceView.vue'),
+          meta: { title: '章节工作台' },
+        },
+        {
           path: 'stories/:id',
           name: 'story-detail',
           component: () => import('@/views/StoryDetailView.vue'),

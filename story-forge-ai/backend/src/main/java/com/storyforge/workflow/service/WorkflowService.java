@@ -157,7 +157,10 @@ public class WorkflowService {
                 integerValue(taskResult, "maxRevisions", 2),
                 progressEvents(task),
                 task.getErrorCode(),
-                task.getErrorMessage()
+                task.getErrorMessage(),
+                task.getTaskType(),
+                task.getChapterId(),
+                parseJson(task.getResultPayload())
         );
     }
 
@@ -210,7 +213,7 @@ public class WorkflowService {
     }
 
     public WorkflowReviewResponse getReview(Long userId, Long taskId) {
-        AiTask task = taskService.requireOwned(userId, taskId);
+        AiTask task = requireWorkflowReviewTask(userId, taskId);
         if (!AiTaskStatus.REVIEW_REQUIRED.equals(task.getStatus())
                 && !AiTaskStatus.SUCCESS.equals(task.getStatus())) {
             throw new ApiException(
@@ -269,7 +272,7 @@ public class WorkflowService {
             Long taskId,
             ReviewDecisionRequest request
     ) {
-        AiTask source = taskService.requireOwned(userId, taskId);
+        AiTask source = requireWorkflowReviewTask(userId, taskId);
         if (!AiTaskStatus.REVIEW_REQUIRED.equals(source.getStatus())) {
             throw new ApiException(
                     HttpStatus.CONFLICT,
@@ -309,6 +312,19 @@ public class WorkflowService {
             );
         }
         return new WorkflowTaskCreatedResponse(task.getId(), task.getStatus());
+    }
+
+    private AiTask requireWorkflowReviewTask(Long userId, Long taskId) {
+        AiTask task = taskService.requireOwned(userId, taskId);
+        if (!WorkflowTaskPersistenceService.TASK_TYPE_START.equals(task.getTaskType())
+                && !WorkflowTaskPersistenceService.TASK_TYPE_RESUME.equals(task.getTaskType())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "WORKFLOW_TASK_TYPE_MISMATCH",
+                    "该任务不属于故事工作流审核"
+            );
+        }
+        return task;
     }
 
     private void publish(

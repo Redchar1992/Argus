@@ -7,6 +7,9 @@ FastAPI + LangGraph service for the Story Forge MVP.
 - **Week two adds one stateful workflow:** selected topic → 3–6 characters →
   exactly 20 outline nodes → five-dimension score → at most two automatic
   revisions → interruptible human review → approved final artifact.
+- **Week three adds one-chapter production:** bounded story context → 3–6 scene
+  plan → ordinary-text token stream → mechanical and six-dimension review →
+  at most two automatic revisions → human approval → summary and memory delta.
 - Every character, outline, score, revision, prompt/model identity, token count,
   duration, and progress event is structured and retained.
 
@@ -32,7 +35,19 @@ Start Redis and the asynchronous worker in a second process:
 python -m app.workers.story_worker
 ```
 
+Start the durable chapter worker as a separate process:
+
+```bash
+mkdir -p ./data
+CHAPTER_CHECKPOINT_DB=./data/chapter-checkpoints.sqlite \
+  python -m app.workers.chapter_worker
+```
+
 Interactive API documentation is available at <http://localhost:8000/docs>.
+Chapter production is intentionally integrated through Redis rather than a
+second public model-facing HTTP API. See
+[`docs/chapter-api.md`](docs/chapter-api.md) for the exact Spring/Python
+contract.
 
 ## HTTP API
 
@@ -130,10 +145,13 @@ and assigns `S/A/B/C`. A score below 80 triggers revision only while
 
 ## Models and fallback
 
-- No `OPENAI_API_KEY`: both creative and review agents use
+- `MODEL_PROVIDER=local`, or `auto` without `OPENAI_API_KEY`: all agents use
   `local-workflow-template`.
-- With a key: Chat Completions is called at
+- `MODEL_PROVIDER=openai-compatible`, or `auto` with a key: Chat Completions is called at
   `${OPENAI_BASE_URL}/chat/completions` using strict Pydantic JSON Schema.
+- `MODEL_PROVIDER=ollama`: the same provider calls
+  `${OLLAMA_BASE_URL}/chat/completions` with `OLLAMA_MODEL`; the default URL is
+  Ollama's OpenAI-compatible `/v1` adapter and no real API key is required.
 - Creative calls use `OPENAI_CREATIVE_MODEL` at temperature `0.7`.
 - Scoring uses `OPENAI_REVIEW_MODEL` at temperature `0.1`.
 - Invalid JSON, schema violations, timeouts, and HTTP failures fall back to the
@@ -180,7 +198,7 @@ artifactType versionNo status content promptVersion modelName
 The worker publishes `RUNNING` after each character/outline/score/revision
 node, then `REVIEW_REQUIRED`, `SUCCESS`, or `FAILED`. It uses:
 
-1. a short Redis processing lock;
+1. an owner-token Redis lease with heartbeat renewal and compare-delete;
 2. a completed-result idempotency key;
 3. `XREADGROUP` for new work;
 4. `XAUTOCLAIM` for abandoned pending entries;
@@ -194,13 +212,20 @@ decision twice. If terminal publication and marker persistence succeed but
 `XACK` fails, redelivery replays the stored terminal event before ACK and never
 publishes a later false `FAILED` state.
 
-## Persistence boundary
+## Chapter persistence boundary
 
-The graph intentionally uses `InMemorySaver` for this local, single-process MVP.
-It supports pause/resume while the service stays alive, but process restarts
-lose graph checkpoints. Production must inject a database-backed LangGraph
-checkpointer before relying on cross-restart resume; Redis Streams alone does
-not replace checkpoint persistence.
+The second-week HTTP graph keeps its documented `InMemorySaver` MVP boundary.
+The third-week chapter worker instead uses `AsyncSqliteSaver` at
+`CHAPTER_CHECKPOINT_DB`, so a paused human-review thread survives worker
+restarts. Its `/data` directory must be mounted to a persistent volume in
+containers. SQLite stores execution checkpoints only; Spring/MySQL remains the
+source of truth for approved chapter versions, summaries, facts, and plot
+threads. Redis events are a bounded transport log, never formal chapter
+storage.
+
+Chapter event sequence allocation and `XADD` share one Redis transaction. The
+producer never applies `MAXLEN`; Spring trims the stream only after persistence
+and acknowledgement, so an unconsumed event cannot be evicted.
 
 ## Test, lint, and Docker
 
@@ -214,4 +239,6 @@ docker run --rm -p 8000:8000 story-forge-ai-service
 Tests cover week-one compatibility, schemas, automatic revision limits,
 interrupt/resume/approval/rejection, HTTP behavior, remote structured output,
 Redis exact fields, duplicate delivery, ACK ordering, and `XAUTOCLAIM`
-recovery.
+recovery. Chapter tests additionally cover ordered token deltas, 82-point
+review routing, append-only content artifacts, SQLite restart recovery, locked
+fact protection, long-memory extraction, and version-safe selection rewrites.

@@ -2,16 +2,22 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import * as authApi from '@/api/auth'
+import { useChapterStore } from '@/stores/chapter'
 import { useStoryStore } from '@/stores/story'
 import { useWorkflowStore } from '@/stores/workflow'
 import type { AuthCredentials, EntityId } from '@/types'
 import {
   clearStoredAuth,
+  clearChapterStreamCursors,
   clearTopicSessions,
   clearWorkflowSessions,
   getStoredAuth,
   setStoredAuth,
 } from '@/utils/storage'
+
+interface LogoutOptions {
+  saveChapter?: boolean
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const persisted = getStoredAuth()
@@ -50,11 +56,20 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function logout() {
+  async function logout(options: LogoutOptions = {}) {
+    const chapterStore = useChapterStore()
+    if (options.saveChapter && chapterStore.isDirty) {
+      await chapterStore.saveNow()
+      if (chapterStore.isDirty) {
+        throw new Error('正文尚未保存，暂时不能退出登录。')
+      }
+    }
+    chapterStore.reset()
     useStoryStore().reset()
     useWorkflowStore().reset()
     clearTopicSessions()
     clearWorkflowSessions()
+    clearChapterStreamCursors()
     token.value = ''
     userId.value = null
     username.value = ''

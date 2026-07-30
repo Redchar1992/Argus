@@ -19,7 +19,7 @@ app.use(ElementPlus, { locale: zhCn })
 app.mount('#app')
 
 window.addEventListener('story-forge:unauthorized', () => {
-  useAuthStore(pinia).logout()
+  void useAuthStore(pinia).logout()
   if (router.currentRoute.value.name !== 'login') {
     router.replace({
       name: 'login',

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from redis.exceptions import ResponseError
+from redis.exceptions import ResponseError, WatchError
 
 from app.schemas.workflow import RedisWorkflowMessage
 
@@ -80,9 +82,7 @@ def encode_request(message: RedisWorkflowMessage) -> dict[str, str]:
         else ""
     )
     approved = (
-        ""
-        if message.approved is None
-        else ("true" if message.approved else "false")
+        "" if message.approved is None else ("true" if message.approved else "false")
     )
     values = {
         "taskId": message.task_id,
@@ -253,16 +253,11 @@ class RedisStreamBroker:
                 1,
             )
             delivery_count = (
-                pending[0].get("times_delivered")
-                or pending[0].get(b"times_delivered")
+                pending[0].get("times_delivered") or pending[0].get(b"times_delivered")
                 if pending
                 else 2
             )
-            attempt_no = (
-                int(delivery_count)
-                if delivery_count is not None
-                else 2
-            )
+            attempt_no = int(delivery_count) if delivery_count is not None else 2
             enriched.append(
                 StreamEntry(
                     message_id=entry.message_id,
@@ -298,7 +293,7 @@ class RedisStreamBroker:
 
 
 class IdempotencyStore:
-    """Redis-backed completed-result marker plus short-lived processing lock."""
+    """Redis-backed result marker plus an owner-scoped renewable lease."""
 
     def __init__(
         self,
@@ -325,33 +320,155 @@ class IdempotencyStore:
             return None
         return json.loads(_text(raw))
 
-    async def acquire(self, key: str) -> bool:
+    async def acquire(self, key: str) -> str | None:
+        owner_token = secrets.token_urlsafe(32)
         acquired = await self.redis.set(
             self._lock_key(key),
-            "1",
+            owner_token,
             nx=True,
             ex=self.lock_ttl_seconds,
         )
-        return bool(acquired)
+        return owner_token if acquired else None
+
+    async def renew(self, key: str, owner_token: str) -> bool:
+        """Extend a lease only while the caller still owns it."""
+
+        lock_key = self._lock_key(key)
+        for _attempt in range(5):
+            async with self.redis.pipeline(transaction=True) as pipeline:
+                try:
+                    await pipeline.watch(lock_key)
+                    current = await pipeline.get(lock_key)
+                    if current is None or _text(current) != owner_token:
+                        await pipeline.unwatch()
+                        return False
+                    pipeline.multi()
+                    pipeline.expire(lock_key, self.lock_ttl_seconds)
+                    result = await pipeline.execute()
+                    return bool(result and result[0])
+                except WatchError:
+                    continue
+        return False
 
     async def mark_completed(
         self,
         key: str,
         result: Mapping[str, Any],
-    ) -> None:
+        owner_token: str,
+    ) -> bool:
         payload = json.dumps(
             dict(result),
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        pipeline = self.redis.pipeline(transaction=True)
-        pipeline.set(
-            self._result_key(key),
-            payload,
-            ex=self.result_ttl_seconds,
-        )
-        pipeline.delete(self._lock_key(key))
-        await pipeline.execute()
+        lock_key = self._lock_key(key)
+        for _attempt in range(5):
+            async with self.redis.pipeline(transaction=True) as pipeline:
+                try:
+                    await pipeline.watch(lock_key)
+                    current = await pipeline.get(lock_key)
+                    if current is None or _text(current) != owner_token:
+                        await pipeline.unwatch()
+                        return False
+                    pipeline.multi()
+                    pipeline.set(
+                        self._result_key(key),
+                        payload,
+                        ex=self.result_ttl_seconds,
+                    )
+                    pipeline.delete(lock_key)
+                    await pipeline.execute()
+                    return True
+                except WatchError:
+                    continue
+        return False
 
-    async def release(self, key: str) -> None:
-        await self.redis.delete(self._lock_key(key))
+    async def release(self, key: str, owner_token: str) -> bool:
+        """Compare-and-delete so an expired worker cannot remove a new lease."""
+
+        lock_key = self._lock_key(key)
+        for _attempt in range(5):
+            async with self.redis.pipeline(transaction=True) as pipeline:
+                try:
+                    await pipeline.watch(lock_key)
+                    current = await pipeline.get(lock_key)
+                    if current is None or _text(current) != owner_token:
+                        await pipeline.unwatch()
+                        return False
+                    pipeline.multi()
+                    pipeline.delete(lock_key)
+                    result = await pipeline.execute()
+                    return bool(result and result[0])
+                except WatchError:
+                    continue
+        return False
+
+    def heartbeat(
+        self,
+        key: str,
+        owner_token: str,
+        *,
+        interval_seconds: float | None = None,
+    ) -> IdempotencyLeaseHeartbeat:
+        return IdempotencyLeaseHeartbeat(
+            self,
+            key,
+            owner_token,
+            interval_seconds=(
+                interval_seconds
+                if interval_seconds is not None
+                else max(1.0, self.lock_ttl_seconds / 3)
+            ),
+        )
+
+
+class IdempotencyLeaseHeartbeat:
+    """Renews a lease and cancels its worker immediately if ownership is lost."""
+
+    def __init__(
+        self,
+        store: IdempotencyStore,
+        key: str,
+        owner_token: str,
+        *,
+        interval_seconds: float,
+    ) -> None:
+        self.store = store
+        self.key = key
+        self.owner_token = owner_token
+        self.interval_seconds = interval_seconds
+        self.lost = False
+        self._owner_task: asyncio.Task[Any] | None = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        if self._heartbeat_task is not None:
+            return
+        self._owner_task = asyncio.current_task()
+        self._heartbeat_task = asyncio.create_task(self._run())
+
+    async def stop(self) -> None:
+        task = self._heartbeat_task
+        self._heartbeat_task = None
+        if task is None:
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def _run(self) -> None:
+        while True:
+            await asyncio.sleep(self.interval_seconds)
+            try:
+                renewed = await self.store.renew(self.key, self.owner_token)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Continuing without a confirmed lease risks concurrent graph
+                # execution and checkpoint corruption, so fail closed.
+                renewed = False
+            if renewed:
+                continue
+            self.lost = True
+            if self._owner_task is not None and not self._owner_task.done():
+                self._owner_task.cancel()
+            return

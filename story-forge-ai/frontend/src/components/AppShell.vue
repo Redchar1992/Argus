@@ -6,37 +6,53 @@ import {
   Plus,
   SwitchButton,
 } from '@element-plus/icons-vue'
-import { computed } from 'vue'
+import { ElMessage } from 'element-plus'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import BrandMark from '@/components/BrandMark.vue'
 import { useAuthStore } from '@/stores/auth'
-import { useStoryStore } from '@/stores/story'
+import { getErrorMessage } from '@/utils/error'
 
 const authStore = useAuthStore()
-const storyStore = useStoryStore()
 const route = useRoute()
 const router = useRouter()
+const loggingOut = ref(false)
 
 const pageTitle = computed(() => {
   if (route.name === 'story-create') return '新建故事'
   if (route.name === 'story-detail') return '故事方案'
   if (route.name === 'workflow-progress') return 'AI 工作流'
   if (route.name === 'workflow-review') return '大纲审核'
+  if (route.name === 'chapter-catalog') return '章节目录'
+  if (route.name === 'chapter-workspace') return '章节工作台'
   return '我的作品'
 })
 
 const showCreateButton = computed(
   () =>
-    !['story-create', 'workflow-progress', 'workflow-review'].includes(
+    ![
+      'story-create',
+      'workflow-progress',
+      'workflow-review',
+      'chapter-catalog',
+      'chapter-workspace',
+    ].includes(
       String(route.name),
     ),
 )
 
-function logout() {
-  authStore.logout()
-  storyStore.reset()
-  router.replace({ name: 'login' })
+async function logout() {
+  if (loggingOut.value) return
+  loggingOut.value = true
+  try {
+    await authStore.logout({ saveChapter: true })
+    await router.replace({ name: 'login' })
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '正文保存失败，暂时无法退出登录。'))
+  } finally {
+    loggingOut.value = false
+  }
 }
 </script>
 
@@ -64,10 +80,10 @@ function logout() {
       </nav>
 
       <div class="sidebar-tip">
-        <div class="tip-icon">02</div>
+        <div class="tip-icon">03</div>
         <div>
-          <strong>AI 编剧工作流</strong>
-          <p>人物 → 20 节点大纲 → 五维评分 → 人工审核。</p>
+          <strong>AI 章节工作台</strong>
+          <p>场景计划 → 流式正文 → 局部改写 → 版本批准。</p>
         </div>
       </div>
     </aside>
@@ -102,8 +118,8 @@ function logout() {
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item :icon="SwitchButton" @click="logout">
-                  退出登录
+                <el-dropdown-item :icon="SwitchButton" :disabled="loggingOut" @click="logout">
+                  {{ loggingOut ? '正在保存…' : '退出登录' }}
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>

@@ -357,6 +357,43 @@ class WorkflowIntegrationTest {
     }
 
     @Test
+    void workflowReviewEndpointsRejectChapterTasks() throws Exception {
+        JsonNode registration = register("chapter-task-review");
+        String token = registration.path("token").asText();
+        long userId = registration.path("userId").asLong();
+        long storyId = createStory(token, "章节任务", "都市情感").path("id").asLong();
+        jdbcTemplate.update("""
+                INSERT INTO ai_task(
+                    user_id,story_id,task_type,status,request_payload,thread_id,
+                    idempotency_key,created_time,updated_time
+                )
+                VALUES (?,?,'CHAPTER_GENERATE','REVIEW_REQUIRED','{}','chapter-thread',
+                        'chapter-review-task',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                """, userId, storyId);
+        long taskId = jdbcTemplate.queryForObject(
+                "SELECT id FROM ai_task WHERE idempotency_key='chapter-review-task'",
+                Long.class
+        );
+
+        mockMvc.perform(get("/api/ai-tasks/{taskId}/review", taskId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("WORKFLOW_TASK_TYPE_MISMATCH"));
+        mockMvc.perform(post("/api/ai-tasks/{taskId}/review", taskId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"approved\":true,\"notes\":\"\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("WORKFLOW_TASK_TYPE_MISMATCH"));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_task WHERE parent_task_id=?",
+                Integer.class,
+                taskId
+        )).isZero();
+    }
+
+    @Test
     void concurrentDifferentStartsKeepStoryAlignedWithWinningTask() throws Exception {
         JsonNode registration = register("concurrent-start");
         long userId = registration.path("userId").asLong();

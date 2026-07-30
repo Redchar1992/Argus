@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowLeft,
+  ArrowRight,
   Check,
   CircleCheck,
   DocumentChecked,
@@ -478,6 +479,14 @@ onMounted(loadReview)
           <h3>正式版本已保存</h3>
           <p>本页仅用于重新查看最终结果和历史版本，不再接受批准或修改操作。</p>
         </div>
+        <el-button
+          type="primary"
+          size="large"
+          :icon="ArrowRight"
+          @click="router.push({ name: 'chapter-catalog', params: { storyId } })"
+        >
+          进入章节创作
+        </el-button>
       </section>
 
       <section v-else class="decision-panel">

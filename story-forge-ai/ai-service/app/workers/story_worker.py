@@ -101,8 +101,7 @@ def _new_progress_payload(items: object) -> list[dict[str, Any]]:
 
 def _model_call_payload(response: WorkflowRunResponse) -> list[dict[str, Any]]:
     return [
-        call.model_dump(mode="json", by_alias=True)
-        for call in response.model_calls
+        call.model_dump(mode="json", by_alias=True) for call in response.model_calls
     ]
 
 
@@ -128,9 +127,7 @@ def _model_call_fields(calls: list[dict[str, Any]]) -> dict[str, str]:
     last = calls[-1]
     return {
         "inputTokens": str(sum(int(call.get("inputTokens", 0)) for call in calls)),
-        "outputTokens": str(
-            sum(int(call.get("outputTokens", 0)) for call in calls)
-        ),
+        "outputTokens": str(sum(int(call.get("outputTokens", 0)) for call in calls)),
         "modelName": str(last.get("modelName", "")),
         "promptVersion": str(last.get("promptVersion", "")),
         "durationMs": str(sum(int(call.get("durationMs", 0)) for call in calls)),
@@ -234,9 +231,36 @@ class StoryWorkflowWorker:
                 # the graph because the completed marker is already durable.
                 pass
             return
-        if not await self.idempotency.acquire(key):
+        owner_token = await self.idempotency.acquire(key)
+        if owner_token is None:
             # Another consumer owns the operation; keep this delivery pending.
             return
+        heartbeat = self.idempotency.heartbeat(key, owner_token)
+        await heartbeat.start()
+        try:
+            await self._process_owned_entry(
+                entry,
+                message,
+                key=key,
+                owner_token=owner_token,
+                attempt_no=attempt_no,
+            )
+        except asyncio.CancelledError:
+            if not heartbeat.lost:
+                await self.idempotency.release(key, owner_token)
+                raise
+        finally:
+            await heartbeat.stop()
+
+    async def _process_owned_entry(
+        self,
+        entry: StreamEntry,
+        message: RedisWorkflowMessage,
+        *,
+        key: str,
+        owner_token: str,
+        attempt_no: int,
+    ) -> None:
 
         thread_id = self._thread_id(message, key)
         current_revision = 0
@@ -267,7 +291,7 @@ class StoryWorkflowWorker:
                 )
             )
         except Exception:
-            await self.idempotency.release(key)
+            await self.idempotency.release(key, owner_token)
             return
 
         try:
@@ -280,9 +304,7 @@ class StoryWorkflowWorker:
                 nonlocal current_revision, last_progress
                 if node in {"prepare_human_review", "finish"}:
                     return
-                current_revision = int(
-                    update.get("revision_count", current_revision)
-                )
+                current_revision = int(update.get("revision_count", current_revision))
                 current_node = str(update.get("current_node", node))
                 progress_value = self._update_progress(
                     current_node,
@@ -314,9 +336,7 @@ class StoryWorkflowWorker:
                         )
                     )
                 except Exception as exc:
-                    raise WorkflowEventPublishError(
-                        "节点进度事件发布失败"
-                    ) from exc
+                    raise WorkflowEventPublishError("节点进度事件发布失败") from exc
 
             response = await self._execute(
                 message,
@@ -352,7 +372,7 @@ class StoryWorkflowWorker:
             )
         except Exception as exc:
             if isinstance(exc, WorkflowEventPublishError):
-                await self.idempotency.release(key)
+                await self.idempotency.release(key, owner_token)
                 return
             failed_calls = (
                 _new_model_call_payload([exc.call])
@@ -377,7 +397,7 @@ class StoryWorkflowWorker:
                     )
                 )
             finally:
-                await self.idempotency.release(key)
+                await self.idempotency.release(key, owner_token)
             # Intentionally omit XACK: XAUTOCLAIM can recover the delivery.
             return
 
@@ -386,9 +406,14 @@ class StoryWorkflowWorker:
         # In particular, never emit a higher-ID FAILED after a final event.
         try:
             await self.broker.publish_event(event)
-            await self.idempotency.mark_completed(key, event)
+            if not await self.idempotency.mark_completed(
+                key,
+                event,
+                owner_token,
+            ):
+                return
         except Exception:
-            await self.idempotency.release(key)
+            await self.idempotency.release(key, owner_token)
             return
 
         # XACK is deliberately outside the execution failure handler. If it

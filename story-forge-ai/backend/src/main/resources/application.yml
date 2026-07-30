@@ -48,6 +48,20 @@ app:
     # @Scheduled string delays require a numeric millisecond value in Spring 6.1.
     reclaim-interval-ms: ${WORKFLOW_RECLAIM_INTERVAL_MS:10000}
     reclaim-batch-size: ${WORKFLOW_RECLAIM_BATCH_SIZE:20}
+  chapter-workflow:
+    redis-enabled: ${CHAPTER_WORKFLOW_REDIS_ENABLED:false}
+    command-stream: ${CHAPTER_COMMAND_STREAM:story:chapter:commands}
+    event-stream: ${CHAPTER_EVENT_STREAM:story:chapter:events}
+    event-group: ${CHAPTER_EVENT_GROUP:storyforge-chapter-backend}
+    event-consumer: ${CHAPTER_EVENT_CONSUMER:chapter-backend-1}
+    poll-timeout: ${CHAPTER_POLL_TIMEOUT:1s}
+    batch-size: ${CHAPTER_EVENT_BATCH_SIZE:50}
+    reclaim-idle: ${CHAPTER_RECLAIM_IDLE:60s}
+    reclaim-interval-ms: ${CHAPTER_RECLAIM_INTERVAL_MS:10000}
+    reclaim-batch-size: ${CHAPTER_RECLAIM_BATCH_SIZE:50}
+    stream-max-length: ${CHAPTER_STREAM_MAX_LENGTH:100000}
+    event-retention-per-task: ${CHAPTER_EVENT_RETENTION_PER_TASK:10000}
+    sse-timeout-ms: ${CHAPTER_SSE_TIMEOUT_MS:1800000}
 
 logging:
   level:

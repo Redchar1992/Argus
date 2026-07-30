@@ -1,6 +1,6 @@
 # Story Forge AI Backend
 
-Spring Boot 3 / Java 17 backend for the two-week Story Forge MVP. It provides JWT
+Spring Boot 3 / Java 17 backend for the three-week Story Forge MVP. It provides JWT
 authentication, per-user persistence, synchronous topic generation, and an
 asynchronous Redis Streams workflow for characters, outlines, scoring, and
 human review.
@@ -14,6 +14,10 @@ human review.
 - Select a generated topic by ID
 - Start, poll, review, and resume the week-two story workflow
 - Version characters, outlines, scores, and final workflow artifacts
+- Plan, stream, edit, version, restore, and approve one chapter at a time
+- Persist chapter summaries, canon, relationships, plot threads, and foreshadowing
+- Preview and explicitly accept or reject hash-bound AI selection rewrites
+- Replay durable ordered chapter events over authenticated SSE
 - Redis Streams request publishing and transactional event persistence
 - Unified JSON errors, CORS, and ownership checks
 - H2 local profile with no MySQL or Redis process required
@@ -23,6 +27,10 @@ Redis is included as a project dependency for later work, but the first-week flo
 does not connect to Redis. The week-two async workflow enables Redis explicitly
 with `WORKFLOW_REDIS_ENABLED=true`; the default remains disabled so the local H2
 profile can still start with no external services.
+
+The week-three worker is enabled separately with
+`CHAPTER_WORKFLOW_REDIS_ENABLED=true`. It consumes
+`story:chapter:commands` and publishes to `story:chapter:events`.
 
 ## Run locally
 
@@ -62,7 +70,8 @@ mvn spring-boot:run
 ```
 
 Flyway creates `sys_user`, `story_project`, `ai_task`, and versioned
-`story_artifact` records.
+`story_artifact` records. V3 adds immutable chapter versions, rewrite proposals,
+durable task-event cursors, summaries, and the long-text memory ledger.
 
 ## API
 
@@ -260,6 +269,68 @@ the unique `(story_id, artifact_type, version_no)` key make redelivery idempoten
 An `XPENDING` + `XCLAIM` recovery loop reclaims events that remain unacknowledged
 beyond `WORKFLOW_RECLAIM_IDLE`. Configure its scheduler with the numeric
 millisecond value `WORKFLOW_RECLAIM_INTERVAL_MS` (default `10000`).
+
+## Week-three chapter API
+
+All routes require `Authorization: Bearer <token>`.
+
+```http
+GET  /api/stories/{storyId}/chapters
+GET  /api/stories/{storyId}/chapters/{chapterNo}
+POST /api/stories/{storyId}/chapters/{chapterNo}/plan
+POST /api/stories/{storyId}/chapters/{chapterNo}/plan/approve
+POST /api/stories/{storyId}/chapters/{chapterNo}/generate
+GET  /api/chapters/{chapterId}
+PUT  /api/chapters/{chapterId}/content
+POST /api/chapters/{chapterId}/rewrite-selection
+GET  /api/chapters/{chapterId}/rewrite-proposals
+POST /api/chapters/{chapterId}/rewrite-proposals/{proposalId}/accept
+POST /api/chapters/{chapterId}/rewrite-proposals/{proposalId}/reject
+POST /api/chapters/{chapterId}/rewrite-proposals/{proposalId}/regenerate
+GET  /api/chapters/{chapterId}/versions
+GET  /api/chapters/{chapterId}/versions/compare
+POST /api/chapters/{chapterId}/versions/{versionId}/restore
+POST /api/chapters/{chapterId}/approve
+GET  /api/ai-tasks/{taskId}/events
+```
+
+Plan, generate, rewrite, and approve/finalize return HTTP `202`:
+
+```json
+{"taskId":101,"chapterId":9,"status":"WAITING"}
+```
+
+Subscribe with `Accept: text/event-stream`. Reconnect with the standard
+`Last-Event-ID` header; never put the JWT in a query string. Named events include
+`TOKEN_DELTA`, `CHAPTER_PLAN_READY`, `HUMAN_REVIEW_REQUIRED`,
+`REWRITE_PROPOSAL_READY`, `FINAL_READY`, and `TASK_FAILED`.
+
+Chapter responses expose `activeTaskId`, `activeTaskStatus`, and
+`activeTaskType`, allowing a refreshed editor to reopen the task and resume its
+stream. Every edit, AI revision, accepted rewrite, restore, and approval creates
+a new `story_chapter_version`; version content, hashes, and ancestry are never
+overwritten. Review metadata may be attached once while the originating task and
+content hash still match. Writes require the current base version, and selection
+rewrites require an exact SHA-256 hash. Late AI results are recorded but cannot
+replace a newer user version.
+Restore is available only before chapter approval. Approved chapters and their
+long-term memory are immutable; the MVP intentionally does not attempt an
+unsafe memory rollback.
+
+Approval dispatches `FINALIZE` on the original generation thread. `FINAL_READY`
+atomically creates the approved version, chapter summary, and memory updates.
+Locked canon facts cannot be overwritten. The next chapter receives the last
+three summaries plus active facts, relationships, plot threads, and
+foreshadowing.
+
+Chapter Redis events are first committed to `ai_task_event`, then acknowledged.
+Per-task history and Redis Streams are bounded; final text lives in MySQL.
+`XPENDING` recovery safely reclaims transient failures, while task/sequence and
+version idempotency keys prevent duplicate versions. Deterministic contract
+violations become a durable `TASK_FAILED` event and are copied to the chapter
+dead-letter stream instead of being reclaimed forever. Redis Stream IDs are the
+transport cursor; task-local sequence values must increase but may contain a
+gap after an ambiguous producer retry.
 
 ## Error format
 

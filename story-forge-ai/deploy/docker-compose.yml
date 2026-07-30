@@ -4,10 +4,10 @@ services:
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-story_forge}
       MYSQL_USER: ${MYSQL_USER:-story_forge}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-story_forge_dev}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-story_forge_root_dev}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set a random MYSQL_PASSWORD in deploy/.env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set a random MYSQL_ROOT_PASSWORD in deploy/.env}
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${MYSQL_BIND_ADDRESS:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
     volumes:
       - story-forge-mysql:/var/lib/mysql
     healthcheck:
@@ -23,12 +23,24 @@ services:
 
   redis:
     image: redis:7-alpine
+    command:
+      [
+        "sh",
+        "-c",
+        "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\"",
+      ]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a random REDIS_PASSWORD in deploy/.env}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - story-forge-redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -37,12 +49,16 @@ services:
     build:
       context: ../ai-service
     environment:
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-auto}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       OPENAI_CREATIVE_MODEL: ${OPENAI_CREATIVE_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
       OPENAI_REVIEW_MODEL: ${OPENAI_REVIEW_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
-      REDIS_URL: redis://redis:6379/0
+      OPENAI_FALLBACK_ENABLED: ${OPENAI_FALLBACK_ENABLED:-true}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set a random REDIS_PASSWORD in deploy/.env}@redis:6379/0
     ports:
       - "${AI_SERVICE_PORT:-8000}:8000"
     healthcheck:
@@ -62,12 +78,16 @@ services:
       context: ../ai-service
     command: ["python", "-m", "app.workers.story_worker"]
     environment:
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-auto}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       OPENAI_CREATIVE_MODEL: ${OPENAI_CREATIVE_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
       OPENAI_REVIEW_MODEL: ${OPENAI_REVIEW_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
-      REDIS_URL: redis://redis:6379/0
+      OPENAI_FALLBACK_ENABLED: ${OPENAI_FALLBACK_ENABLED:-true}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set a random REDIS_PASSWORD in deploy/.env}@redis:6379/0
       REDIS_REQUEST_STREAM: story:workflow:requests
       REDIS_EVENT_STREAM: story:workflow:events
       REDIS_CONSUMER_GROUP: story-workflow-workers
@@ -80,6 +100,37 @@ services:
       disable: true
     restart: unless-stopped
 
+  chapter-worker:
+    build:
+      context: ../ai-service
+    command: ["python", "-m", "app.workers.chapter_worker"]
+    environment:
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-auto}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OPENAI_CREATIVE_MODEL: ${OPENAI_CREATIVE_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      OPENAI_REVIEW_MODEL: ${OPENAI_REVIEW_MODEL:-${OPENAI_MODEL:-gpt-4.1-mini}}
+      OPENAI_FALLBACK_ENABLED: ${OPENAI_FALLBACK_ENABLED:-true}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set a random REDIS_PASSWORD in deploy/.env}@redis:6379/0
+      CHAPTER_COMMAND_STREAM: story:chapter:commands
+      CHAPTER_EVENT_STREAM: story:chapter:events
+      CHAPTER_CONSUMER_GROUP: story-chapter-workers
+      CHAPTER_EVENT_MAXLEN: ${CHAPTER_EVENT_MAXLEN:-100000}
+      CHAPTER_MAX_ATTEMPTS: ${CHAPTER_MAX_ATTEMPTS:-3}
+      CHAPTER_CHECKPOINT_DB: /data/chapter-checkpoints.sqlite
+    volumes:
+      - story-forge-chapter-checkpoints:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    # This container consumes Redis commands and intentionally exposes no HTTP port.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   backend:
     build:
       context: ../backend
@@ -87,15 +138,25 @@ services:
       SPRING_PROFILES_ACTIVE: mysql
       MYSQL_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-story_forge}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       MYSQL_USERNAME: ${MYSQL_USER:-story_forge}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-story_forge_dev}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set a random MYSQL_PASSWORD in deploy/.env}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a random REDIS_PASSWORD in deploy/.env}
       WORKFLOW_REDIS_ENABLED: "true"
       WORKFLOW_REQUEST_STREAM: story:workflow:requests
       WORKFLOW_EVENT_STREAM: story:workflow:events
       WORKFLOW_EVENT_GROUP: storyforge-backend
       WORKFLOW_EVENT_CONSUMER: backend-1
       WORKFLOW_RECLAIM_INTERVAL_MS: ${WORKFLOW_RECLAIM_INTERVAL_MS:-10000}
+      CHAPTER_WORKFLOW_REDIS_ENABLED: "true"
+      CHAPTER_COMMAND_STREAM: story:chapter:commands
+      CHAPTER_EVENT_STREAM: story:chapter:events
+      CHAPTER_EVENT_GROUP: storyforge-chapter-backend
+      CHAPTER_EVENT_CONSUMER: chapter-backend-1
+      CHAPTER_RECLAIM_INTERVAL_MS: ${CHAPTER_RECLAIM_INTERVAL_MS:-10000}
+      CHAPTER_STREAM_MAX_LENGTH: ${CHAPTER_EVENT_MAXLEN:-100000}
+      CHAPTER_EVENT_RETENTION_PER_TASK: ${CHAPTER_EVENT_RETENTION_PER_TASK:-10000}
+      CHAPTER_SSE_TIMEOUT_MS: ${CHAPTER_SSE_TIMEOUT_MS:-1800000}
       AI_SERVICE_URL: http://ai-service:8000
       AI_READ_TIMEOUT: 45s
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
@@ -124,3 +185,4 @@ services:
 volumes:
   story-forge-mysql:
   story-forge-redis:
+  story-forge-chapter-checkpoints:

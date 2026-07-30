@@ -15,6 +15,7 @@ public class AiTask {
     private Long id;
     private Long userId;
     private Long storyId;
+    private Long chapterId;
     private String taskType;
     private String status;
     private String requestPayload;
@@ -56,6 +57,14 @@ public class AiTask {
 
     public Long getStoryId() {
         return storyId;
+    }
+
+    public Long getChapterId() {
+        return chapterId;
+    }
+
+    public void setChapterId(Long chapterId) {
+        this.chapterId = chapterId;
     }
 
     public void setStoryId(Long storyId) {
