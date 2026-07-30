@@ -1,0 +1,60 @@
+name: StoryForge AI CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "story-forge-ai/**"
+      - ".github/workflows/story-forge-ci.yml"
+  pull_request:
+    paths:
+      - "story-forge-ai/**"
+      - ".github/workflows/story-forge-ci.yml"
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: story-forge-ai/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: story-forge-ai/frontend/package-lock.json
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: story-forge-ai/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - run: mvn -B verify
+
+  ai-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: story-forge-ai/ai-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            story-forge-ai/ai-service/requirements.txt
+            story-forge-ai/ai-service/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest

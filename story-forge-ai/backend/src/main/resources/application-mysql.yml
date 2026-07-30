@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/story_forge?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+
+# Non-local deployments must provide their own signing key. Keeping the
+# predictable local key here would allow anyone to mint valid user tokens.
+app:
+  jwt:
+    secret: ${JWT_SECRET}
