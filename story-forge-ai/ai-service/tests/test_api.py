@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -29,6 +30,11 @@ def test_internal_routes_require_configured_service_key() -> None:
 
     assert missing.status_code == 401
     assert valid.status_code == 200
+
+
+def test_production_key_enforcement_fails_closed_without_a_key() -> None:
+    with pytest.raises(RuntimeError, match="AI_INTERNAL_API_KEY"):
+        create_app(Settings(require_internal_api_key=True))
 
 
 def test_local_generation_returns_ten_structured_topics(

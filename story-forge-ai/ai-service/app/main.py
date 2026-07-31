@@ -77,6 +77,14 @@ def create_app(
     final_review_agent: FinalReviewAgent | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
+    if (
+        resolved_settings.require_internal_api_key
+        and not resolved_settings.internal_api_key
+    ):
+        raise RuntimeError(
+            "AI_INTERNAL_API_KEY must be configured when internal API key "
+            "enforcement is enabled"
+        )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

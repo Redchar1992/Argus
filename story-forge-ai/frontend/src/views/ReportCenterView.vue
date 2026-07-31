@@ -152,7 +152,7 @@ onMounted(load)
             </div>
           </div>
         </section>
-        <section v-if="exports.length" class="export-history"><span class="section-kicker">EXPORT HISTORY</span><h3>最近导出</h3><div v-for="item in exports.slice(0, 5)" :key="item.exportId" class="export-row"><span>{{ item.fileName || item.format }}</span><el-tag :type="item.status === 'SUCCESS' ? 'success' : item.status === 'FAILED' ? 'danger' : 'warning'">{{ item.status }}</el-tag><a v-if="item.downloadUrl" :href="`${API_BASE_URL}${item.downloadUrl}`" target="_blank" rel="noreferrer">下载</a></div></section>
+        <section v-if="exports.length" class="export-history"><span class="section-kicker">EXPORT HISTORY</span><h3>最近导出</h3><div v-for="item in exports.slice(0, 5)" :key="item.exportId" class="export-row"><span>{{ item.fileName || item.format }}</span><el-tag :type="item.status === 'SUCCESS' ? 'success' : item.status === 'FAILED' ? 'danger' : 'warning'">{{ item.status }}</el-tag><a v-if="item.downloadUrl" :href="`${API_BASE_URL}${item.downloadUrl}`" target="_blank" rel="noopener noreferrer">下载</a></div></section>
       </template>
     </template>
   </div>

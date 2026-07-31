@@ -27,6 +27,7 @@ function encode(value: string) {
 describe('chapter SSE parser and subscription', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.sessionStorage.clear()
     vi.clearAllMocks()
   })
 

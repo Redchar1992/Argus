@@ -6,3 +6,9 @@ spring:
     driver-class-name: org.h2.Driver
   flyway:
     enabled: true
+
+app:
+  jwt:
+    # Development-only fallback. Production uses application-mysql.yml and
+    # requires JWT_SECRET from the environment instead.
+    secret: ${JWT_SECRET:story-forge-local-secret-key-change-me-2026}

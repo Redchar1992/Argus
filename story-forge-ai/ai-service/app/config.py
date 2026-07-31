@@ -45,6 +45,7 @@ class Settings:
     chapter_checkpoint_db: str = "/data/chapter-checkpoints.sqlite"
     story_checkpoint_db: str = "./data/story-checkpoints.sqlite"
     internal_api_key: str | None = None
+    require_internal_api_key: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -132,4 +133,7 @@ class Settings:
                 "STORY_CHECKPOINT_DB", defaults.story_checkpoint_db
             ),
             internal_api_key=os.getenv("AI_INTERNAL_API_KEY", "").strip() or None,
+            require_internal_api_key=_as_bool(
+                os.getenv("AI_REQUIRE_INTERNAL_API_KEY"), default=False
+            ),
         )

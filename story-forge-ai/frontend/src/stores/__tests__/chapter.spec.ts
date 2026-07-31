@@ -114,6 +114,7 @@ describe('chapter store editor and stream safety', () => {
       configurable: true,
     })
     window.localStorage.clear()
+    window.sessionStorage.clear()
     setStoredAuth({ token: 'jwt', userId: 10001 })
     setActivePinia(createPinia())
     vi.clearAllMocks()

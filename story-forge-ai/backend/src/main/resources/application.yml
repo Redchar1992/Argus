@@ -26,7 +26,11 @@ mybatis-plus:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:story-forge-local-secret-key-change-me-2026}
+    # Never provide a shared signing key from the common configuration. The
+    # local profile supplies a development-only fallback; deployable profiles
+    # must provide JWT_SECRET explicitly and fail during configuration binding
+    # when it is absent.
+    secret: ${JWT_SECRET:}
     expiration: ${JWT_EXPIRATION:86400000}
   ai:
     base-url: ${AI_SERVICE_URL:http://localhost:8000}

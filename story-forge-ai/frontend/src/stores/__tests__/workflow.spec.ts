@@ -33,6 +33,7 @@ function task(patch: Partial<WorkflowTask> = {}): WorkflowTask {
 describe('workflow store', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.sessionStorage.clear()
     setStoredAuth({ token: 'token', userId: 10001 })
     setActivePinia(createPinia())
     vi.clearAllMocks()

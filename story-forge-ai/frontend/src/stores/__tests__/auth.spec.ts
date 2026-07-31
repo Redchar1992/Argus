@@ -18,7 +18,15 @@ import {
 describe('auth logout cleanup', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.sessionStorage.clear()
     setActivePinia(createPinia())
+  })
+
+  it('keeps the JWT in session storage instead of persistent local storage', () => {
+    setStoredAuth({ token: 'token-a', userId: 10001, username: 'writer' })
+
+    expect(window.localStorage.getItem('story-forge.auth')).toBeNull()
+    expect(window.sessionStorage.getItem('story-forge.auth')).toContain('token-a')
   })
 
   it('clears auth, cached topics, stream cursors, and loaded story state', async () => {

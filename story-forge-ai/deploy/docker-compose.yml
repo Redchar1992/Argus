@@ -60,6 +60,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       REDIS_URL: redis://:${REDIS_PASSWORD:?Set a random REDIS_PASSWORD in deploy/.env}@redis:6379/0
       AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY:?Set a random AI_INTERNAL_API_KEY in deploy/.env}
+      AI_REQUIRE_INTERNAL_API_KEY: "true"
       STORY_CHECKPOINT_DB: /data/story/story-checkpoints.sqlite
     volumes:
       # Keep HTTP and worker checkpoints in the same named-volume path.

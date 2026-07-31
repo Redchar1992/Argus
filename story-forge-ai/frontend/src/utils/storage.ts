@@ -18,8 +18,24 @@ export interface StoredAuth {
   username?: string
 }
 
+let volatileAuth: StoredAuth | null = null
+
 function canUseStorage() {
-  return typeof window !== 'undefined' && Boolean(window.localStorage)
+  if (typeof window === 'undefined') return false
+  try {
+    return Boolean(window.localStorage)
+  } catch {
+    return false
+  }
+}
+
+function canUseSessionStorage() {
+  if (typeof window === 'undefined') return false
+  try {
+    return Boolean(window.sessionStorage)
+  } catch {
+    return false
+  }
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -44,17 +60,56 @@ function writeJson(key: string, value: unknown) {
 }
 
 export function getStoredAuth(): StoredAuth | null {
-  const auth = readJson<StoredAuth | null>(AUTH_STORAGE_KEY, null)
+  // JWTs are session credentials, not offline application state. Remove the
+  // legacy localStorage copy rather than migrating it into a longer-lived
+  // store after upgrading from older builds.
+  if (canUseStorage()) {
+    try {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY)
+    } catch {
+      // Storage can be unavailable in privacy mode.
+    }
+  }
+  const auth = canUseSessionStorage()
+    ? (() => {
+        try {
+          const value = window.sessionStorage.getItem(AUTH_STORAGE_KEY)
+          return value ? (JSON.parse(value) as StoredAuth) : null
+        } catch {
+          return volatileAuth
+        }
+      })()
+    : volatileAuth
+  volatileAuth = auth
   return auth?.token ? auth : null
 }
 
 export function setStoredAuth(auth: StoredAuth) {
-  writeJson(AUTH_STORAGE_KEY, auth)
+  volatileAuth = auth
+  if (!canUseSessionStorage()) return
+  try {
+    window.sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth))
+  } catch {
+    // Storage can be unavailable in privacy mode. The active session still works.
+  }
 }
 
 export function clearStoredAuth() {
-  if (!canUseStorage()) return
-  window.localStorage.removeItem(AUTH_STORAGE_KEY)
+  volatileAuth = null
+  if (canUseStorage()) {
+    try {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY)
+    } catch {
+      // Storage can be unavailable in privacy mode.
+    }
+  }
+  if (canUseSessionStorage()) {
+    try {
+      window.sessionStorage.removeItem(AUTH_STORAGE_KEY)
+    } catch {
+      // Storage can be unavailable in privacy mode.
+    }
+  }
 }
 
 function topicStorageKey() {
