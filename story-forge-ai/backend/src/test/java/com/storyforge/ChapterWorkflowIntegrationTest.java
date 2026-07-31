@@ -67,6 +67,10 @@ class ChapterWorkflowIntegrationTest {
             @SuppressWarnings("unchecked") Map<String,String> fields=inv.getArgument(0);
             published.add(new LinkedHashMap<>(fields));return "command-"+published.size();
         });
+        jdbc.update("DELETE FROM user_feedback");jdbc.update("DELETE FROM export_task");
+        jdbc.update("DELETE FROM story_release");jdbc.update("DELETE FROM story_final_report");
+        jdbc.update("DELETE FROM ai_model_usage");jdbc.update("DELETE FROM user_ai_credit_log");
+        jdbc.update("DELETE FROM user_ai_wallet");jdbc.update("DELETE FROM prompt_template");jdbc.update("DELETE FROM model_profile");
         jdbc.update("DELETE FROM ai_task_event");jdbc.update("DELETE FROM story_chapter_summary");
         jdbc.update("DELETE FROM story_rewrite_proposal");jdbc.update("UPDATE story_chapter SET current_version_id=NULL");
         jdbc.update("DELETE FROM story_chapter_version");jdbc.update("DELETE FROM story_fact");

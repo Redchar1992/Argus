@@ -55,6 +55,12 @@ const router = createRouter({
           meta: { title: '章节工作台' },
         },
         {
+          path: 'stories/:storyId/report',
+          name: 'report-center',
+          component: () => import('@/views/ReportCenterView.vue'),
+          meta: { title: '全书报告' },
+        },
+        {
           path: 'stories/:id',
           name: 'story-detail',
           component: () => import('@/views/StoryDetailView.vue'),

@@ -26,6 +26,7 @@ from app.schemas.chapter import (
     ScenePlan,
 )
 from app.schemas.character import CharacterCard, CharacterPack
+from app.schemas.final_review import FinalStoryReport
 from app.schemas.outline import OutlineNode, OutlineResult
 from app.schemas.score import ScoreDimension, StoryScore
 
@@ -125,6 +126,8 @@ class LocalStructuredModel:
                 value = self._memory_update(payload)
             elif schema is RewriteProposal:
                 value = self._rewrite_proposal(payload)
+            elif schema is FinalStoryReport:
+                value = self._final_review(payload)
             else:
                 raise WorkflowModelError(f"local model does not support {purpose}")
         except (ValidationError, ValueError, KeyError, TypeError) as exc:
@@ -372,12 +375,8 @@ class LocalStructuredModel:
         outline_contract = [
             {
                 "event": anchor(node_field(node, "event", "event")),
-                "goal": anchor(
-                    node_field(node, "protagonistGoal", "protagonist_goal")
-                ),
-                "information": node_field(
-                    node, "newInformation", "new_information"
-                ),
+                "goal": anchor(node_field(node, "protagonistGoal", "protagonist_goal")),
+                "information": node_field(node, "newInformation", "new_information"),
                 "cliffhanger": node_field(node, "cliffhanger", "cliffhanger"),
             }
             for node in current_nodes
@@ -411,8 +410,7 @@ class LocalStructuredModel:
                         "埋下账本来源疑点" if index < 4 else "回收前一场的证据异常"
                     ),
                     exit_hook=(
-                        beat["cliffhanger"]
-                        or f"新的记录指向第{index + 1}层利益关系"
+                        beat["cliffhanger"] or f"新的记录指向第{index + 1}层利益关系"
                     ),
                     scene_function=scene_function,  # type: ignore[arg-type]
                 )
@@ -680,6 +678,112 @@ class LocalStructuredModel:
             replacement_text=replacement,
             reason=f"按{action}要求在选中范围内强化可见行动",
             selected_text_hash=str(payload["selected_text_hash"]),
+        )
+
+    def _final_review(self, payload: dict[str, Any]) -> FinalStoryReport:
+        chapters = list(payload.get("chapters") or [])
+        chapter_numbers = [
+            int(item.get("chapterNo", item.get("chapter_no", 0))) for item in chapters
+        ]
+        contents = [str(item.get("content", "")) for item in chapters]
+        all_text = "\n".join(contents)
+        repeated = []
+        if len(contents) >= 3 and len(set(contents)) < len(contents):
+            repeated.append("存在完全重复的章节正文，建议检查版本快照并删除重复内容。")
+        content_score = min(100, 70 + min(20, len(chapters) * 3) - len(repeated) * 10)
+        hit_score = min(100, 72 + min(15, len(chapters) * 2))
+        drama_score = min(100, 68 + min(20, len(chapters) * 2))
+        issues = []
+        if repeated:
+            issues.append(
+                {
+                    "issueType": "REPETITION",
+                    "severity": "HIGH",
+                    "title": "章节正文重复",
+                    "description": repeated[0],
+                    "evidence": [
+                        {
+                            "chapterNo": chapter_numbers[index],
+                            "description": "章节正文与其他章节完全一致",
+                            "excerpt": contents[index][:200],
+                        }
+                        for index in range(min(2, len(contents)))
+                    ],
+                    "suggestedFix": "恢复对应章节的批准版本，并重新检查导出快照。",
+                    "affectedChapters": chapter_numbers[:2],
+                }
+            )
+        if not all_text.strip():
+            issues.append(
+                {
+                    "issueType": "LANGUAGE",
+                    "severity": "CRITICAL",
+                    "title": "正文为空",
+                    "description": "批准章节没有可供终审的正文。",
+                    "evidence": [
+                        {"chapterNo": chapter_numbers[0], "description": "正文为空"}
+                    ],
+                    "suggestedFix": "回到章节工作台完成正文并批准后重新终审。",
+                    "affectedChapters": [chapter_numbers[0]],
+                }
+            )
+        total = round(content_score * 0.4 + hit_score * 0.4 + drama_score * 0.2)
+        level = (
+            "S"
+            if total >= 90
+            else "A"
+            if total >= 80
+            else "B"
+            if total >= 70
+            else "C"
+            if total >= 60
+            else "D"
+        )
+        return FinalStoryReport.model_validate(
+            {
+                "contentQuality": {
+                    "score": content_score,
+                    "summary": "章节已形成可供全书检查的正文链路。",
+                    "strengths": ["章节顺序清晰", "正文版本可追溯"],
+                    "weaknesses": ["仍需人工确认跨章节人物和时间线"],
+                },
+                "hitPotential": {
+                    "score": hit_score,
+                    "summary": "开篇冲突和连续阅读动力具备基础。",
+                    "strengths": ["冲突可视化", "具备情绪推进空间"],
+                    "weaknesses": ["商业判断不等同于收益保证"],
+                },
+                "shortDramaAdaptation": {
+                    "score": drama_score,
+                    "summary": "当前文本可以继续拆解为短剧场景。",
+                    "strengths": ["场景边界明确", "章末有继续阅读动力"],
+                    "weaknesses": ["需要人工评估拍摄成本"],
+                },
+                "criticalIssues": [
+                    item for item in issues if item["severity"] == "CRITICAL"
+                ],
+                "normalIssues": [
+                    item for item in issues if item["severity"] != "CRITICAL"
+                ],
+                "unresolvedThreads": ["终审后请人工确认所有开放剧情线是否有结局"],
+                "unresolvedForeshadowing": ["请检查早期证据与结尾回收是否一一对应"],
+                "strongestChapters": chapter_numbers[-2:]
+                if len(chapter_numbers) > 1
+                else chapter_numbers,
+                "weakestChapters": chapter_numbers[:1],
+                "suggestedTitles": [str(payload.get("storyTitle") or "未命名故事")],
+                "suggestedTags": [str(payload.get("genre") or "故事"), "全书终审"],
+                "revisionOrder": [
+                    "先处理CRITICAL/HIGH问题",
+                    "再核对人物和伏笔状态",
+                    "最后压缩重复表达",
+                ],
+                "total": total,
+                "level": level,
+                "disclaimer": (
+                    "综合分仅表示系统按当前文本和规则得出的内容评估，不代表真实收益保证。"
+                ),
+            }
         )
 
 

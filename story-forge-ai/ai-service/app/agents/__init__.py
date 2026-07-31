@@ -6,6 +6,7 @@ from app.agents.chapter_reviewer_agent import ChapterReviewerAgent
 from app.agents.chapter_revision_agent import ChapterRevisionAgent
 from app.agents.chapter_writer_agent import ChapterWriterAgent
 from app.agents.character_agent import CharacterAgent
+from app.agents.final_review_agent import FinalReviewAgent
 from app.agents.outline_agent import OutlineAgent
 from app.agents.revise_agent import ReviseAgent
 from app.agents.rewrite_selection_agent import RewriteSelectionAgent
@@ -26,4 +27,5 @@ __all__ = [
     "ReviseAgent",
     "ScoreAgent",
     "TopicAgent",
+    "FinalReviewAgent",
 ]

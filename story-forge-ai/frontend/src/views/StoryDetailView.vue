@@ -343,6 +343,16 @@ onMounted(loadStory)
           <el-icon><ArrowRight /></el-icon>
         </el-button>
         <el-button
+          v-if="canOpenChapterStudio"
+          class="report-button"
+          type="warning"
+          size="large"
+          @click="router.push({ name: 'report-center', params: { storyId } })"
+        >
+          全书终审与导出
+          <el-icon><ArrowRight /></el-icon>
+        </el-button>
+        <el-button
           type="primary"
           size="large"
           :loading="workflowStore.starting"

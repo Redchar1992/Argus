@@ -84,8 +84,27 @@ class WorkflowIntegrationTest {
     void cleanDatabase() {
         reset(requestPublisher);
         when(requestPublisher.publish(anyMap())).thenReturn("request-1");
+        jdbcTemplate.update("DELETE FROM user_feedback");
+        jdbcTemplate.update("DELETE FROM export_task");
+        jdbcTemplate.update("DELETE FROM story_release");
+        jdbcTemplate.update("DELETE FROM story_final_report");
+        jdbcTemplate.update("DELETE FROM ai_model_usage");
+        jdbcTemplate.update("DELETE FROM user_ai_credit_log");
+        jdbcTemplate.update("DELETE FROM user_ai_wallet");
+        jdbcTemplate.update("DELETE FROM prompt_template");
+        jdbcTemplate.update("DELETE FROM model_profile");
+        jdbcTemplate.update("DELETE FROM ai_task_event");
+        jdbcTemplate.update("DELETE FROM story_rewrite_proposal");
+        jdbcTemplate.update("DELETE FROM story_chapter_summary");
+        jdbcTemplate.update("UPDATE story_chapter SET current_version_id=NULL");
+        jdbcTemplate.update("DELETE FROM story_chapter_version");
+        jdbcTemplate.update("DELETE FROM story_fact");
+        jdbcTemplate.update("DELETE FROM story_relationship");
+        jdbcTemplate.update("DELETE FROM story_plot_thread");
+        jdbcTemplate.update("DELETE FROM story_foreshadowing");
         jdbcTemplate.update("DELETE FROM story_artifact");
         jdbcTemplate.update("DELETE FROM ai_task");
+        jdbcTemplate.update("DELETE FROM story_chapter");
         jdbcTemplate.update("DELETE FROM story_project");
         jdbcTemplate.update("DELETE FROM sys_user");
     }

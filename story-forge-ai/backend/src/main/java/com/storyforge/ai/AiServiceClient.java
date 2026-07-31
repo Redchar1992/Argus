@@ -37,4 +37,27 @@ public class AiServiceClient {
             throw new AiServiceException("无法连接 AI 服务或请求超时", exception);
         }
     }
+
+    public JsonNode finalReview(JsonNode request) {
+        try {
+            JsonNode response = restClient.post()
+                    .uri("/ai/final-review")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (response == null) {
+                throw new AiServiceException("AI 终审服务返回了空响应");
+            }
+            return response;
+        } catch (RestClientResponseException exception) {
+            throw new AiServiceException(
+                    "AI 终审服务返回 HTTP " + exception.getStatusCode().value(),
+                    exception
+            );
+        } catch (RestClientException exception) {
+            throw new AiServiceException("无法连接 AI 终审服务或请求超时", exception);
+        }
+    }
 }

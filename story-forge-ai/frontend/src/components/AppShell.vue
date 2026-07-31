@@ -26,6 +26,7 @@ const pageTitle = computed(() => {
   if (route.name === 'workflow-review') return '大纲审核'
   if (route.name === 'chapter-catalog') return '章节目录'
   if (route.name === 'chapter-workspace') return '章节工作台'
+  if (route.name === 'report-center') return '全书报告'
   return '我的作品'
 })
 
@@ -37,6 +38,7 @@ const showCreateButton = computed(
       'workflow-review',
       'chapter-catalog',
       'chapter-workspace',
+      'report-center',
     ].includes(
       String(route.name),
     ),

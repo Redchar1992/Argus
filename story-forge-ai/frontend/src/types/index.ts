@@ -210,3 +210,4 @@ export interface WorkflowSession {
 }
 
 export * from './chapter'
+export * from './release'

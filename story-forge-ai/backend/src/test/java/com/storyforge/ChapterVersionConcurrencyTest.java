@@ -23,10 +23,15 @@ class ChapterVersionConcurrencyTest {
     @Autowired JdbcTemplate jdbc;@Autowired ChapterApplicationService service;
     long userId,storyId,chapterId,versionId;
     @BeforeEach void seed(){
+        jdbc.update("DELETE FROM user_feedback");jdbc.update("DELETE FROM export_task");
+        jdbc.update("DELETE FROM story_release");jdbc.update("DELETE FROM story_final_report");
+        jdbc.update("DELETE FROM ai_model_usage");jdbc.update("DELETE FROM user_ai_credit_log");
+        jdbc.update("DELETE FROM user_ai_wallet");jdbc.update("DELETE FROM prompt_template");jdbc.update("DELETE FROM model_profile");
         jdbc.update("DELETE FROM ai_task_event");jdbc.update("DELETE FROM story_chapter_summary");
         jdbc.update("DELETE FROM story_rewrite_proposal");jdbc.update("UPDATE story_chapter SET current_version_id=NULL");
         jdbc.update("DELETE FROM story_chapter_version");jdbc.update("DELETE FROM story_artifact");jdbc.update("DELETE FROM ai_task");
-        jdbc.update("DELETE FROM story_chapter");jdbc.update("DELETE FROM story_project");jdbc.update("DELETE FROM sys_user");
+        jdbc.update("DELETE FROM story_chapter");
+        jdbc.update("DELETE FROM story_project");jdbc.update("DELETE FROM sys_user");
         jdbc.update("INSERT INTO sys_user(username,password,vip_level,created_time) VALUES ('parallel','#','FREE',CURRENT_TIMESTAMP)");
         userId=jdbc.queryForObject("SELECT MAX(id) FROM sys_user",Long.class);
         jdbc.update("INSERT INTO story_project(user_id,title,genre,status,created_time,updated_time) VALUES (?,'并发','都市','WORKFLOW_COMPLETED',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",userId);

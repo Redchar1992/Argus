@@ -17,6 +17,14 @@ from app.schemas.chapter import (
     build_chapter_review,
 )
 from app.schemas.character import CharacterCard, CharacterPack, CharacterRole
+from app.schemas.final_review import (
+    EvidenceLocation,
+    FinalIssue,
+    FinalReviewChapter,
+    FinalReviewRequest,
+    FinalStoryReport,
+    ScoreSection,
+)
 from app.schemas.outline import (
     OutlineNode,
     OutlineResult,
@@ -82,4 +90,10 @@ __all__ = [
     "WorkflowStatus",
     "build_score_result",
     "validate_outline",
+    "EvidenceLocation",
+    "FinalIssue",
+    "FinalReviewChapter",
+    "FinalReviewRequest",
+    "FinalStoryReport",
+    "ScoreSection",
 ]

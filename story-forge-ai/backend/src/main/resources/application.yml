@@ -34,6 +34,7 @@ app:
     # Must exceed the AI provider's 30s timeout so FastAPI has time to return
     # its explicit local-template fallback instead of being cut off mid-fallback.
     read-timeout: ${AI_READ_TIMEOUT:45s}
+    final-review-max-chars: ${FINAL_REVIEW_MAX_CHARS:500000}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
   workflow:
@@ -62,6 +63,9 @@ app:
     stream-max-length: ${CHAPTER_STREAM_MAX_LENGTH:100000}
     event-retention-per-task: ${CHAPTER_EVENT_RETENTION_PER_TASK:10000}
     sse-timeout-ms: ${CHAPTER_SSE_TIMEOUT_MS:1800000}
+  export:
+    storage-dir: ${EXPORT_STORAGE_DIR:./data/exports}
+    download-ttl-minutes: ${EXPORT_DOWNLOAD_TTL_MINUTES:15}
 
 logging:
   level:
