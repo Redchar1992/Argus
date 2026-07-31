@@ -34,6 +34,7 @@ from app.workflow.service import (
     StoryWorkflowConflict,
     StoryWorkflowNotFound,
     StoryWorkflowService,
+    persistent_story_service,
 )
 
 NODE_PROGRESS = {
@@ -612,12 +613,14 @@ async def _main() -> None:
             or f"{socket.gethostname()}-{os.getpid()}"
         ),
     )
-    worker = StoryWorkflowWorker(
-        broker=broker,
-        idempotency=IdempotencyStore(redis),
-    )
     try:
-        await worker.run_forever()
+        async with persistent_story_service(settings.story_checkpoint_db) as workflow:
+            worker = StoryWorkflowWorker(
+                broker=broker,
+                idempotency=IdempotencyStore(redis),
+                workflow=workflow,
+            )
+            await worker.run_forever()
     finally:
         await redis.aclose()
 

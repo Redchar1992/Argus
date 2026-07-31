@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.common.security.JwtService;
+import com.storyforge.cost.AiCreditService;
 import com.storyforge.user.SysUser;
 import com.storyforge.user.SysUserMapper;
 
@@ -19,15 +20,18 @@ public class AuthService {
     private final SysUserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final AiCreditService credits;
 
     public AuthService(
             SysUserMapper userMapper,
             PasswordEncoder passwordEncoder,
-            JwtService jwtService
+            JwtService jwtService,
+            AiCreditService credits
     ) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.credits = credits;
     }
 
     @Transactional
@@ -46,6 +50,7 @@ public class AuthService {
         user.setVipLevel("FREE");
         user.setCreatedTime(LocalDateTime.now());
         userMapper.insert(user);
+        credits.ensureWallet(user.getId());
         return new AuthResponse(jwtService.createToken(user), user.getId());
     }
 

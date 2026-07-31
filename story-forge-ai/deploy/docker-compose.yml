@@ -59,8 +59,11 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       REDIS_URL: redis://:${REDIS_PASSWORD:?Set a random REDIS_PASSWORD in deploy/.env}@redis:6379/0
-    ports:
-      - "${AI_SERVICE_PORT:-8000}:8000"
+      AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY:?Set a random AI_INTERNAL_API_KEY in deploy/.env}
+      STORY_CHECKPOINT_DB: /data/story/story-checkpoints.sqlite
+    volumes:
+      # Keep HTTP and worker checkpoints in the same named-volume path.
+      - story-forge-story-checkpoints:/data/story
     healthcheck:
       test:
         [
@@ -91,6 +94,7 @@ services:
       REDIS_REQUEST_STREAM: story:workflow:requests
       REDIS_EVENT_STREAM: story:workflow:events
       REDIS_CONSUMER_GROUP: story-workflow-workers
+      STORY_CHECKPOINT_DB: /data/story/story-checkpoints.sqlite
     depends_on:
       redis:
         condition: service_healthy
@@ -123,6 +127,7 @@ services:
       CHAPTER_CHECKPOINT_DB: /data/chapter-checkpoints.sqlite
     volumes:
       - story-forge-chapter-checkpoints:/data
+      - story-forge-story-checkpoints:/data/story
     depends_on:
       redis:
         condition: service_healthy
@@ -159,6 +164,7 @@ services:
       CHAPTER_SSE_TIMEOUT_MS: ${CHAPTER_SSE_TIMEOUT_MS:-1800000}
       AI_SERVICE_URL: http://ai-service:8000
       AI_READ_TIMEOUT: 45s
+      AI_INTERNAL_API_KEY: ${AI_INTERNAL_API_KEY:?Set the same AI_INTERNAL_API_KEY as ai-service}
       FINAL_REVIEW_MAX_CHARS: ${FINAL_REVIEW_MAX_CHARS:-500000}
       EXPORT_STORAGE_DIR: /data/exports
       EXPORT_DOWNLOAD_TTL_MINUTES: ${EXPORT_DOWNLOAD_TTL_MINUTES:-15}
@@ -191,4 +197,5 @@ volumes:
   story-forge-mysql:
   story-forge-redis:
   story-forge-chapter-checkpoints:
+  story-forge-story-checkpoints:
   story-forge-exports:

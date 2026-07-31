@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command, StateSnapshot
 
 from app.schemas.workflow import (
@@ -33,7 +36,6 @@ class StoryWorkflowService:
 
     def __init__(self, graph: Any | None = None) -> None:
         self.graph = graph or build_story_graph()
-        self._known_threads: set[str] = set()
 
     @staticmethod
     def _config(thread_id: str) -> dict[str, dict[str, str]]:
@@ -47,7 +49,7 @@ class StoryWorkflowService:
         operation_key: str = "",
     ) -> WorkflowRunResponse:
         thread_id = request.thread_id or str(uuid4())
-        if thread_id in self._known_threads:
+        if await self._snapshot_or_none(thread_id) is not None:
             raise StoryWorkflowConflict(f"工作流线程已存在：{thread_id}")
 
         initial_state = {
@@ -72,8 +74,6 @@ class StoryWorkflowService:
             "model_calls": [],
             "processed_operation_keys": [operation_key] if operation_key else [],
         }
-        # Register before invocation so a failed execution remains diagnosable.
-        self._known_threads.add(thread_id)
         try:
             await self._invoke(
                 initial_state,
@@ -180,12 +180,14 @@ class StoryWorkflowService:
         return key in snapshot.values.get("processed_operation_keys", [])
 
     async def _snapshot(self, thread_id: str) -> StateSnapshot:
-        if thread_id not in self._known_threads:
-            raise StoryWorkflowNotFound(f"工作流线程不存在：{thread_id}")
         snapshot = await self.graph.aget_state(self._config(thread_id))
         if not snapshot.values:
             raise StoryWorkflowNotFound(f"工作流线程不存在：{thread_id}")
         return snapshot
+
+    async def _snapshot_or_none(self, thread_id: str) -> StateSnapshot | None:
+        snapshot = await self.graph.aget_state(self._config(thread_id))
+        return snapshot if snapshot.values else None
 
     async def _invoke(
         self,
@@ -222,3 +224,15 @@ class StoryWorkflowService:
                 value = task.interrupts[0].value
                 return value if isinstance(value, dict) else {"value": value}
         return None
+
+
+@asynccontextmanager
+async def persistent_story_service(
+    database_path: str,
+):
+    """Open a durable SQLite checkpointer for HTTP and worker lifecycles."""
+
+    path = Path(database_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
+        yield StoryWorkflowService(build_story_graph(checkpointer=saver))

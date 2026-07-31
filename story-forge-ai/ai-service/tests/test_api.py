@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.config import Settings
 from app.main import create_app
 
 
@@ -11,6 +12,23 @@ def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_internal_routes_require_configured_service_key() -> None:
+    settings = Settings(internal_api_key="test-service-key")
+    with TestClient(create_app(settings=settings)) as client:
+        missing = client.post(
+            "/ai/topic/generate",
+            json={"genre": "都市情感", "audience": "女性"},
+        )
+        valid = client.post(
+            "/ai/topic/generate",
+            headers={"X-Internal-API-Key": "test-service-key"},
+            json={"genre": "都市情感", "audience": "女性"},
+        )
+
+    assert missing.status_code == 401
+    assert valid.status_code == 200
 
 
 def test_local_generation_returns_ten_structured_topics(

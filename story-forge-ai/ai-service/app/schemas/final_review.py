@@ -92,3 +92,5 @@ class FinalReviewRequest(FinalReviewModel):
     canon_facts: list[dict] = Field(default_factory=list, max_length=300)
     unresolved_threads: list[dict] = Field(default_factory=list, max_length=100)
     foreshadowing_ledger: list[dict] = Field(default_factory=list, max_length=100)
+    prompt_version: str | None = Field(default=None, max_length=64)
+    prompt_system: str | None = Field(default=None, max_length=50_000)

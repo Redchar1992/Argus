@@ -18,6 +18,8 @@ public record AiProperties(
         Duration connectTimeout,
 
         @NotNull
-        Duration readTimeout
+        Duration readTimeout,
+
+        String internalApiKey
 ) {
 }

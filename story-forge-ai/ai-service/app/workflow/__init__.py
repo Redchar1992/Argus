@@ -11,6 +11,7 @@ from app.workflow.service import (
     StoryWorkflowConflict,
     StoryWorkflowNotFound,
     StoryWorkflowService,
+    persistent_story_service,
 )
 from app.workflow.story_graph import build_story_graph
 
@@ -23,5 +24,6 @@ __all__ = [
     "StoryWorkflowConflict",
     "StoryWorkflowNotFound",
     "StoryWorkflowService",
+    "persistent_story_service",
     "build_story_graph",
 ]

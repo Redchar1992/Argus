@@ -43,6 +43,8 @@ class Settings:
     chapter_event_maxlen: int = 100_000
     chapter_max_attempts: int = 3
     chapter_checkpoint_db: str = "/data/chapter-checkpoints.sqlite"
+    story_checkpoint_db: str = "./data/story-checkpoints.sqlite"
+    internal_api_key: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -126,4 +128,8 @@ class Settings:
             chapter_checkpoint_db=os.getenv(
                 "CHAPTER_CHECKPOINT_DB", defaults.chapter_checkpoint_db
             ),
+            story_checkpoint_db=os.getenv(
+                "STORY_CHECKPOINT_DB", defaults.story_checkpoint_db
+            ),
+            internal_api_key=os.getenv("AI_INTERNAL_API_KEY", "").strip() or None,
         )

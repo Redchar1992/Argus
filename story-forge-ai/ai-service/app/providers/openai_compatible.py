@@ -43,7 +43,10 @@ class OpenAICompatibleProvider:
             "temperature": 0.8,
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": TOPIC_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": request.prompt_system or TOPIC_SYSTEM_PROMPT,
+                },
                 {"role": "user", "content": build_topic_user_prompt(request)},
             ],
         }

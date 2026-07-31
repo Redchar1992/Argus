@@ -18,10 +18,14 @@ import com.storyforge.chapter.entity.StoryChapter;
 import com.storyforge.chapter.entity.StoryChapterVersion;
 import com.storyforge.chapter.mapper.StoryChapterMapper;
 import com.storyforge.chapter.mapper.StoryChapterVersionMapper;
+import com.storyforge.artifact.ArtifactType;
+import com.storyforge.artifact.StoryArtifact;
+import com.storyforge.artifact.StoryArtifactService;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.report.FinalReportResponse;
 import com.storyforge.report.FinalReportService;
 import com.storyforge.story.StoryProject;
+import com.storyforge.story.StoryProjectMapper;
 import com.storyforge.story.StoryService;
 
 import org.springframework.http.HttpStatus;
@@ -37,21 +41,30 @@ public class ReleaseService {
     private final FinalReportService reports;
     private final ObjectMapper mapper;
     private final JdbcTemplate jdbc;
+    private final StoryProjectMapper storyMapper;
+    private final StoryArtifactService artifacts;
 
     public ReleaseService(StoryService stories, StoryChapterMapper chapters,
             StoryChapterVersionMapper versions, FinalReportService reports,
-            ObjectMapper mapper, JdbcTemplate jdbc) {
+            ObjectMapper mapper, JdbcTemplate jdbc, StoryProjectMapper storyMapper,
+            StoryArtifactService artifacts) {
         this.stories = stories;
         this.chapters = chapters;
         this.versions = versions;
         this.reports = reports;
         this.mapper = mapper;
         this.jdbc = jdbc;
+        this.storyMapper = storyMapper;
+        this.artifacts = artifacts;
     }
 
     @Transactional
     public ReleaseResponse create(Long userId, Long storyId, Long requestedReportId) {
         StoryProject story = stories.requireOwned(userId, storyId);
+        // Serialize release numbering and snapshot capture per story.  The
+        // unique constraint remains the final guard, but concurrent requests
+        // now observe a single monotonically increasing release number.
+        story = storyMapper.selectByIdForUpdate(storyId);
         FinalReportResponse report = reports.latest(userId, storyId);
         if (requestedReportId != null && !requestedReportId.equals(report.id())) {
             report = reports.list(userId, storyId).stream().filter(item -> requestedReportId.equals(item.id())).findFirst()
@@ -63,7 +76,12 @@ public class ReleaseService {
             throw new ApiException(HttpStatus.CONFLICT, "RELEASE_CHAPTERS_NOT_READY", "只有全部批准的章节才能锁定正式版本");
         }
         ArrayNode snapshots = mapper.createArrayNode();
+        StoryArtifact characterArtifact = artifacts.findLatest(storyId, ArtifactType.CHARACTER);
+        StoryArtifact outlineArtifact = artifacts.findLatest(storyId, ArtifactType.OUTLINE);
+        JsonNode characters = characterArtifact == null ? mapper.createArrayNode() : artifacts.content(characterArtifact);
+        JsonNode outline = outlineArtifact == null ? mapper.createArrayNode() : artifacts.content(outlineArtifact);
         StringBuilder content = new StringBuilder(story.getTitle());
+        content.append('\n').append(write(characters)).append('\n').append(write(outline));
         int wordCount = 0;
         for (StoryChapter chapter : chapterList) {
             StoryChapterVersion version = versions.selectById(chapter.getCurrentVersionId());
@@ -85,11 +103,13 @@ public class ReleaseService {
         String hash = sha256(content.toString());
         jdbc.update("""
                 INSERT INTO story_release
-                (story_id, release_no, title, summary, tags_json, report_id, chapter_versions_json,
-                 word_count, content_hash, status, created_by, created_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'LOCKED', ?, CURRENT_TIMESTAMP)
+                (story_id, release_no, title, summary, tags_json, outline_version_id, report_id,
+                 chapter_versions_json, characters_json, outline_json, word_count, content_hash,
+                 status, created_by, created_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'LOCKED', ?, CURRENT_TIMESTAMP)
                 """, storyId, releaseNo, story.getTitle(), story.getSelectedTopic(), tags,
-                report.id(), write(snapshots), wordCount, hash, userId);
+                outlineArtifact == null ? null : outlineArtifact.getId(), report.id(), write(snapshots),
+                write(characters), write(outline), wordCount, hash, userId);
         Long id = jdbc.queryForObject("SELECT id FROM story_release WHERE story_id=? AND release_no=?", Long.class, storyId, releaseNo);
         return get(userId, id);
     }
@@ -111,7 +131,8 @@ public class ReleaseService {
         return new ReleaseResponse(rs.getLong("id"), rs.getLong("story_id"), rs.getInt("release_no"),
                 rs.getString("title"), rs.getString("summary"), read(rs.getString("tags_json")),
                 rs.getObject("outline_version_id", Long.class), rs.getObject("report_id", Long.class),
-                read(rs.getString("chapter_versions_json")), rs.getInt("word_count"), rs.getString("content_hash"),
+                read(rs.getString("chapter_versions_json")), read(rs.getString("characters_json")),
+                read(rs.getString("outline_json")), rs.getInt("word_count"), rs.getString("content_hash"),
                 rs.getString("status"), timestamp(rs.getTimestamp("created_time")));
     }
 

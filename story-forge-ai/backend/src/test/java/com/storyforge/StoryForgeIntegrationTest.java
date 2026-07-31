@@ -216,6 +216,16 @@ class StoryForgeIntegrationTest {
                 String.class,
                 storyId
         )).contains("\"generatedAt\":\"2026-07-30T12:00:00Z\"");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT available_credits FROM user_ai_wallet WHERE user_id = (SELECT user_id FROM story_project WHERE id = ?)",
+                Long.class,
+                storyId
+        )).isEqualTo(95L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_model_usage WHERE story_id = ? AND agent_type = 'TOPIC_GENERATION'",
+                Integer.class,
+                storyId
+        )).isEqualTo(1);
 
         mockMvc.perform(put("/api/story/{id}/selection", storyId)
                         .header(HttpHeaders.AUTHORIZATION, bearer(token))
@@ -234,6 +244,27 @@ class StoryForgeIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(storyId))
                 .andExpect(jsonPath("$[0].selectedTopic.id").value(1));
+    }
+
+    @Test
+    void insufficientCreditsAreRejectedBeforeCallingAiService() throws Exception {
+        String token = register("no-topic-credits").path("token").asText();
+        JsonNode story = createStory(token, "余额校验", "都市情感", "女性", "复仇");
+        long storyId = story.path("id").asLong();
+        jdbcTemplate.update(
+                "UPDATE user_ai_wallet SET available_credits=0 WHERE user_id = (SELECT user_id FROM story_project WHERE id = ?)",
+                storyId
+        );
+        int before = AI_SERVER.getRequestCount();
+
+        mockMvc.perform(post("/api/ai/topic/generate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"storyId\":%d,\"audience\":\"女性\",\"keywords\":\"复仇\"}".formatted(storyId)))
+                .andExpect(status().isPaymentRequired())
+                .andExpect(jsonPath("$.code").value("AI_CREDITS_INSUFFICIENT"));
+
+        assertThat(AI_SERVER.getRequestCount()).isEqualTo(before);
     }
 
     @Test

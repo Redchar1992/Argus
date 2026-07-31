@@ -99,9 +99,11 @@ flowchart TD
 | 当前章短期状态 | 草稿、当前评分、修改次数、节点 | LangGraph SQLite Checkpointer（本地） |
 | 跨章节长期事实 | Canon Facts、关系、剧情线、伏笔、摘要 | MySQL 业务表 |
 
-章节 Worker 的 `/data/chapter-checkpoints.sqlite` 挂载到命名卷，因此本地 Worker
-重启后仍可恢复。生产环境应切换到数据库型 Checkpointer；正式业务数据不依赖该
-SQLite 文件。
+故事与章节 Worker 的 Checkpointer 都挂载到命名卷，因此本地 Worker 重启后仍可恢复；
+故事 HTTP 服务与故事 Worker 共享 `/data/story/story-checkpoints.sqlite`，不会因容器
+重启或进程切换丢失线程。生产环境应切换到数据库型 Checkpointer；正式业务数据不依赖
+该 SQLite 文件。AI HTTP 路由使用 `X-Internal-API-Key` 做服务间认证，Compose 不把
+AI 服务端口发布到宿主机。
 
 ### 编辑与版本
 

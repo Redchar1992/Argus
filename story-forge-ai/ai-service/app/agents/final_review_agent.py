@@ -21,7 +21,7 @@ class FinalReviewAgent:
             FinalStoryReport,
             node="final_review",
             prompt_name="final_review",
-            prompt=self.prompt,
+            prompt=request.prompt_system or self.prompt,
             payload=request.model_dump(mode="json", by_alias=True),
             purpose="final_review",
         )

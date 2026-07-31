@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+import hmac
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.agents import FinalReviewAgent, TopicAgent
@@ -17,7 +20,26 @@ from app.workflow import (
     StoryWorkflowConflict,
     StoryWorkflowNotFound,
     StoryWorkflowService,
+    persistent_story_service,
 )
+
+
+async def require_internal_api_key(
+    request: Request,
+    provided_key: str | None = Header(default=None, alias="X-Internal-API-Key"),
+) -> None:
+    """Protect service-to-service routes when an internal key is configured.
+
+    Local unit tests and direct development runs may omit the key, while the
+    Compose deployment requires it and keeps the AI service off the host
+    network. This dependency fails closed whenever the deployment has a key.
+    """
+
+    expected_key = request.app.state.internal_api_key
+    if expected_key and (
+        not provided_key or not hmac.compare_digest(provided_key, expected_key)
+    ):
+        raise HTTPException(status_code=401, detail="invalid internal API key")
 
 
 def _build_agent(settings: Settings) -> TopicAgent:
@@ -55,16 +77,34 @@ def create_app(
     final_review_agent: FinalReviewAgent | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if workflow_service is not None:
+            app.state.workflow_service = workflow_service
+            yield
+            return
+        async with persistent_story_service(
+            resolved_settings.story_checkpoint_db
+        ) as service:
+            app.state.workflow_service = service
+            yield
+
     app = FastAPI(
         title=resolved_settings.app_name,
         version=resolved_settings.app_version,
+        lifespan=lifespan,
     )
     app.state.topic_agent = topic_agent or _build_agent(resolved_settings)
-    app.state.workflow_service = workflow_service or StoryWorkflowService()
+    app.state.workflow_service = workflow_service
+    app.state.internal_api_key = resolved_settings.internal_api_key
     app.state.final_review_agent = final_review_agent or FinalReviewAgent(
         model=get_review_model(resolved_settings)
     )
-    app.include_router(workflow_router)
+    app.include_router(
+        workflow_router,
+        dependencies=[Depends(require_internal_api_key)],
+    )
 
     @app.exception_handler(TopicGenerationUnavailable)
     async def generation_unavailable_handler(
@@ -130,6 +170,7 @@ def create_app(
         "/ai/topic/generate",
         response_model=TopicGenerationResponse,
         response_model_by_alias=True,
+        dependencies=[Depends(require_internal_api_key)],
     )
     async def generate_topics(
         payload: TopicGenerateRequest, request: Request
@@ -141,6 +182,7 @@ def create_app(
         "/ai/final-review",
         response_model=FinalStoryReport,
         response_model_by_alias=True,
+        dependencies=[Depends(require_internal_api_key)],
     )
     async def final_review(
         payload: FinalReviewRequest, request: Request

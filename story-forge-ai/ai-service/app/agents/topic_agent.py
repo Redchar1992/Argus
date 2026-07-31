@@ -53,6 +53,7 @@ class TopicAgent:
             topics=topics,
             model=result.model,
             generatedAt=datetime.now(UTC),
+            promptVersion=request.prompt_version or "topic_v1",
         )
 
 

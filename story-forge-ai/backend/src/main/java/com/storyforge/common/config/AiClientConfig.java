@@ -5,6 +5,7 @@ import com.storyforge.ai.AiServiceClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 @Configuration
@@ -15,10 +16,13 @@ public class AiClientConfig {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.connectTimeout());
         requestFactory.setReadTimeout(properties.readTimeout());
-        RestClient restClient = RestClient.builder()
+        RestClient.Builder builder = RestClient.builder()
                 .baseUrl(properties.baseUrl())
-                .requestFactory(requestFactory)
-                .build();
+                .requestFactory(requestFactory);
+        if (StringUtils.hasText(properties.internalApiKey())) {
+            builder.defaultHeader("X-Internal-API-Key", properties.internalApiKey());
+        }
+        RestClient restClient = builder.build();
         return new AiServiceClient(restClient);
     }
 }

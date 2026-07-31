@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.sql.Timestamp;
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
@@ -32,6 +33,8 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -62,9 +65,25 @@ public class ExportService {
         ReleaseResponse release = releases.get(userId, request.releaseId());
         if (!storyId.equals(release.storyId())) throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "EXPORT_FORBIDDEN", "无权导出该故事");
         if (!"LOCKED".equals(release.status()) && !"EXPORTED".equals(release.status())) throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "RELEASE_NOT_LOCKED", "正式版本尚未锁定");
-        jdbc.update("INSERT INTO export_task (story_id, release_id, user_id, format, include_report, status, created_time, updated_time) VALUES (?, ?, ?, ?, ?, 'WAITING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                storyId, request.releaseId(), userId, request.format().name(), request.includeReport());
-        Long exportId = jdbc.queryForObject("SELECT id FROM export_task WHERE user_id=? AND release_id=? ORDER BY id DESC LIMIT 1", Long.class, userId, request.releaseId());
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO export_task
+                    (story_id, release_id, user_id, format, include_report, status, created_time, updated_time)
+                    VALUES (?, ?, ?, ?, ?, 'WAITING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, Statement.RETURN_GENERATED_KEYS);
+            statement.setLong(1, storyId);
+            statement.setLong(2, request.releaseId());
+            statement.setLong(3, userId);
+            statement.setString(4, request.format().name());
+            statement.setBoolean(5, request.includeReport());
+            return statement;
+        }, keyHolder);
+        Number generatedId = keyHolder.getKeyList().isEmpty()
+                ? null
+                : (Number) keyHolder.getKeyList().get(0).get("id");
+        if (generatedId == null) throw new IllegalStateException("导出任务未生成 ID");
+        Long exportId = generatedId.longValue();
         try {
             byte[] bytes = render(release, request.format(), request.includeReport());
             String extension = request.format().name().toLowerCase();
@@ -163,7 +182,10 @@ public class ExportService {
     private String json(ReleaseResponse release, ArrayNode chapters, boolean includeReport) throws JsonProcessingException {
         ObjectNode root = mapper.createObjectNode();
         ObjectNode story = root.putObject("story"); story.put("id", release.storyId()); story.put("title", release.title()); story.put("summary", release.summary());
-        root.set("release", mapper.valueToTree(release)); root.set("chapters", chapters);
+        root.set("release", mapper.valueToTree(release));
+        root.set("characters", release.characters() == null ? mapper.createArrayNode() : release.characters());
+        root.set("outline", release.outline() == null ? mapper.createArrayNode() : release.outline());
+        root.set("chapters", chapters);
         if (includeReport && release.reportId() != null) {
             List<String> reports = jdbc.queryForList("SELECT report_json FROM story_final_report WHERE id=?", String.class, release.reportId());
             if (!reports.isEmpty()) root.set("report", mapper.readTree(reports.get(0)));

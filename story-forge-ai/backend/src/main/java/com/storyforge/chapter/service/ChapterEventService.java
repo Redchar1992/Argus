@@ -22,6 +22,7 @@ import com.storyforge.chapter.mapper.StoryChapterMapper;
 import com.storyforge.chapter.mapper.StoryChapterVersionMapper;
 import com.storyforge.chapter.vo.TaskEventResponse;
 import com.storyforge.common.config.ChapterWorkflowProperties;
+import com.storyforge.cost.AiUsageRecorder;
 import com.storyforge.task.AiTask;
 import com.storyforge.task.AiTaskMapper;
 import com.storyforge.task.AiTaskStatus;
@@ -41,14 +42,16 @@ public class ChapterEventService {
     private final ChapterTaskService taskService;
     private final ChapterSupport support;
     private final ChapterWorkflowProperties properties;
+    private final AiUsageRecorder usage;
 
     public ChapterEventService(AiTaskMapper tasks, StoryChapterMapper chapters,
             StoryChapterVersionMapper versions, RewriteProposalMapper proposals, AiTaskEventMapper events,
             ChapterVersionService versionService, StoryMemoryService memoryService,
-            ChapterTaskService taskService, ChapterSupport support, ChapterWorkflowProperties properties) {
+            ChapterTaskService taskService, ChapterSupport support, ChapterWorkflowProperties properties,
+            AiUsageRecorder usage) {
         this.tasks=tasks; this.chapters=chapters; this.versions=versions; this.proposals=proposals; this.events=events;
         this.versionService=versionService; this.memoryService=memoryService; this.taskService=taskService;
-        this.support=support; this.properties=properties;
+        this.support=support; this.properties=properties; this.usage=usage;
     }
 
     @Transactional
@@ -96,7 +99,19 @@ public class ChapterEventService {
         event.setEventType(type); event.setSequenceNo(sequence); event.setStatus(status);
         event.setCurrentNode(currentNode); event.setProgress(task.getProgress()); event.setDataJson(support.write(data));
         event.setCreatedTime(LocalDateTime.now()); events.insert(event); trimEvents(taskId);
+        if (isTerminal(status)) {
+            JsonNode modelCalls = data.get("modelCalls");
+            usage.recordModelCalls(task, task.getTaskType(),
+                    modelCalls == null ? null : support.write(modelCalls),
+                    AiTaskStatus.SUCCESS.equals(status), task.getErrorCode());
+        }
         return new ProcessedEvent(true,response(event,task,chapter));
+    }
+
+    private boolean isTerminal(String status) {
+        return AiTaskStatus.SUCCESS.equals(status)
+                || AiTaskStatus.FAILED.equals(status)
+                || AiTaskStatus.REVIEW_REQUIRED.equals(status);
     }
 
     /**

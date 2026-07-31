@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
@@ -25,7 +27,7 @@ def build_story_graph(
     outline_agent: OutlineAgent | None = None,
     score_agent: CommercialScoreAgent | None = None,
     revise_agent: ReviseAgent | None = None,
-    checkpointer: InMemorySaver | None = None,
+    checkpointer: Any | None = None,
 ):
     """Build a dependency-injectable graph suitable for production adapters."""
 

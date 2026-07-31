@@ -24,6 +24,12 @@ class TopicGenerateRequest(BaseModel):
     audience: str = Field(min_length=1, max_length=50)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     story_id: int | None = Field(default=None, alias="storyId", ge=1)
+    prompt_version: str | None = Field(
+        default=None, alias="promptVersion", max_length=64
+    )
+    prompt_system: str | None = Field(
+        default=None, alias="promptSystem", max_length=50_000
+    )
 
     @field_validator("keywords", mode="before")
     @classmethod
@@ -115,3 +121,4 @@ class TopicGenerationResponse(BaseModel):
     topics: list[TopicItem] = Field(min_length=10, max_length=10)
     model: str = Field(min_length=1, max_length=120)
     generated_at: datetime = Field(alias="generatedAt")
+    prompt_version: str = Field(default="topic_v1", alias="promptVersion")

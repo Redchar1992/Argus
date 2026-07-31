@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.storyforge.artifact.ArtifactInput;
 import com.storyforge.artifact.StoryArtifactService;
+import com.storyforge.cost.AiUsageRecorder;
 import com.storyforge.story.StoryProject;
 import com.storyforge.story.StoryProjectMapper;
 import com.storyforge.story.StoryStatus;
@@ -29,17 +30,20 @@ public class WorkflowEventService {
     private final StoryProjectMapper storyMapper;
     private final StoryArtifactService artifactService;
     private final ObjectMapper objectMapper;
+    private final AiUsageRecorder usage;
 
     public WorkflowEventService(
             AiTaskMapper taskMapper,
             StoryProjectMapper storyMapper,
             StoryArtifactService artifactService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AiUsageRecorder usage
     ) {
         this.taskMapper = taskMapper;
         this.storyMapper = storyMapper;
         this.artifactService = artifactService;
         this.objectMapper = objectMapper;
+        this.usage = usage;
     }
 
     /**
@@ -138,7 +142,17 @@ public class WorkflowEventService {
         task.setUpdatedTime(LocalDateTime.now());
         taskMapper.updateById(task);
         updateStoryStatus(task);
+        if (isTerminal(task.getStatus())) {
+            usage.recordModelCalls(task, task.getTaskType(), fields.get("modelCalls"),
+                    AiTaskStatus.SUCCESS.equals(task.getStatus()), task.getErrorCode());
+        }
         return true;
+    }
+
+    private boolean isTerminal(String status) {
+        return AiTaskStatus.SUCCESS.equals(status)
+                || AiTaskStatus.FAILED.equals(status)
+                || AiTaskStatus.REVIEW_REQUIRED.equals(status);
     }
 
     private void persistArtifacts(AiTask task, ArrayNode artifacts) {

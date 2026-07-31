@@ -14,6 +14,8 @@ public record ReleaseResponse(
         Long outlineVersionId,
         Long reportId,
         JsonNode chapterVersions,
+        JsonNode characters,
+        JsonNode outline,
         Integer wordCount,
         String contentHash,
         String status,
