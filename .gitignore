@@ -33,3 +33,8 @@ htmlcov/
 *.tsbuildinfo
 frontend/*/vite.config.js
 frontend/*/vite.config.d.ts
+
+# StoryForge runtime backups may contain production data and exports.
+story-forge-ai/deploy/backups/
+story-forge-ai/ai-service/data/
+story-forge-ai/backend/data/

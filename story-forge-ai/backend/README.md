@@ -1,9 +1,9 @@
 # Story Forge AI Backend
 
-Spring Boot 3 / Java 17 backend for the three-week Story Forge MVP. It provides JWT
-authentication, per-user persistence, synchronous topic generation, and an
-asynchronous Redis Streams workflow for characters, outlines, scoring, and
-human review.
+Spring Boot 3 / Java 17 backend for the four-week Story Forge MVP. It provides
+JWT authentication with versioned privacy consent and pilot rate limiting,
+per-user persistence, synchronous topic generation, and an asynchronous Redis
+Streams workflow for characters, outlines, scoring, and human review.
 
 ## Scope
 
@@ -93,7 +93,7 @@ GET /api/health
 POST /api/auth/register
 Content-Type: application/json
 
-{"username":"demo-user","password":"password123"}
+{"username":"demo-user","password":"password123","privacyAccepted":true}
 ```
 
 ```http

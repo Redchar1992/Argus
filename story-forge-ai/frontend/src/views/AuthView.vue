@@ -15,6 +15,7 @@ interface AuthForm {
   username: string
   password: string
   confirmPassword: string
+  privacyAccepted: boolean
 }
 
 const route = useRoute()
@@ -26,6 +27,7 @@ const form = reactive<AuthForm>({
   username: '',
   password: '',
   confirmPassword: '',
+  privacyAccepted: false,
 })
 
 const isRegister = computed(() => mode.value === 'register')
@@ -50,11 +52,21 @@ const rules: FormRules<AuthForm> = {
       trigger: 'blur',
     },
   ],
+  privacyAccepted: [
+    {
+      validator: (_rule, value, callback) => {
+        if (value === true) return callback()
+        callback(new Error('请阅读并同意隐私说明'))
+      },
+      trigger: 'change',
+    },
+  ],
 }
 
 function switchMode(nextMode: AuthMode) {
   mode.value = nextMode
   form.confirmPassword = ''
+  form.privacyAccepted = false
   formRef.value?.clearValidate()
 }
 
@@ -69,22 +81,17 @@ async function submit() {
 
   try {
     if (isRegister.value) {
-      await authStore.register(credentials)
+      await authStore.register({ ...credentials, privacyAccepted: true })
       ElMessage.success('账号创建成功，正在进入故事工坊')
+    } else {
+      await authStore.login({ ...credentials, privacyAccepted: true })
     }
-
-    await authStore.login(credentials)
     const redirect =
       typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
         ? route.query.redirect
         : '/'
     await router.replace(redirect)
   } catch (error) {
-    if (isRegister.value && getErrorMessage(error).includes('登录')) {
-      switchMode('login')
-      ElMessage.warning('账号已创建，请使用新账号登录')
-      return
-    }
     ElMessage.error(
       getErrorMessage(error, isRegister.value ? '注册失败，请稍后重试。' : '登录失败，请重试。'),
     )
@@ -201,6 +208,15 @@ async function submit() {
               type="password"
               @keyup.enter="submit"
             />
+          </el-form-item>
+
+          <el-form-item prop="privacyAccepted" class="privacy-consent">
+            <el-checkbox v-model="form.privacyAccepted">
+              我已阅读并同意
+              <router-link to="/privacy" target="_blank" rel="noopener noreferrer">
+                《内测隐私说明》
+              </router-link>
+            </el-checkbox>
           </el-form-item>
 
           <el-button

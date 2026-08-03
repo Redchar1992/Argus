@@ -60,3 +60,43 @@ jobs:
       - run: pytest
       - run: ruff check .
       - run: pip check
+
+  operations:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: story-forge-ai
+    env:
+      MYSQL_PASSWORD: test-mysql-password
+      MYSQL_ROOT_PASSWORD: test-root-password
+      REDIS_PASSWORD: test-redis-password
+      AI_INTERNAL_API_KEY: test-ai-internal-key
+      JWT_SECRET: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      PILOT_METRICS_KEY: test-pilot-metrics-key-0123456789012345
+      MODEL_PROVIDER: openai-compatible
+      OPENAI_API_KEY: test-model-key
+      PUBLIC_HOST: story.example.com
+      ACME_EMAIL: ops@example.com
+      PILOT_BASIC_AUTH_USER: pilot
+      PILOT_BASIC_AUTH_HASH: '$2y$04$zrv/hNVIbsLkULv49fisC.r2UFZBI.erkY9boRHUBYj.JeSA0IpBO'
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n deploy/*.sh
+      - run: deploy/test-backup-restore.sh
+      - name: Validate pilot Compose stack
+        run: >-
+          docker compose
+          --env-file deploy/pilot.env.example
+          -f deploy/docker-compose.yml
+          -f deploy/docker-compose.pilot.yml
+          config --quiet
+      - name: Validate Caddy configuration
+        run: >-
+          docker run --rm
+          -e ACME_EMAIL
+          -e PUBLIC_HOST
+          -e PILOT_BASIC_AUTH_USER
+          -e PILOT_BASIC_AUTH_HASH
+          -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          caddy:2.11.4-alpine
+          caddy validate --config /etc/caddy/Caddyfile

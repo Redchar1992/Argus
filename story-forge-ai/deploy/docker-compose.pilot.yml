@@ -1,0 +1,103 @@
+x-pilot-logging: &pilot-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set the ACME account email}
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set the public hostname}
+      PILOT_BASIC_AUTH_USER: ${PILOT_BASIC_AUTH_USER:?Set the pilot basic auth user}
+      PILOT_BASIC_AUTH_HASH: ${PILOT_BASIC_AUTH_HASH:?Set the bcrypt password hash}
+    ports:
+      - "${PUBLIC_HTTP_PORT:-80}:80"
+      - "${PUBLIC_HTTPS_PORT:-443}:443"
+      - "${PUBLIC_HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - story-forge-caddy-data:/data
+      - story-forge-caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+    mem_limit: ${CADDY_MEMORY_LIMIT:-96m}
+    cpus: ${CADDY_CPU_LIMIT:-0.25}
+    pids_limit: 128
+    logging: *pilot-logging
+
+  mysql:
+    restart: unless-stopped
+    mem_limit: ${MYSQL_MEMORY_LIMIT:-768m}
+    cpus: ${MYSQL_CPU_LIMIT:-1.0}
+    pids_limit: 256
+    logging: *pilot-logging
+
+  redis:
+    restart: unless-stopped
+    mem_limit: ${REDIS_MEMORY_LIMIT:-192m}
+    cpus: ${REDIS_CPU_LIMIT:-0.5}
+    pids_limit: 128
+    logging: *pilot-logging
+
+  ai-service:
+    environment:
+      MODEL_PROVIDER: ${MODEL_PROVIDER:?Use openai-compatible for the pilot}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set the server-side model API key}
+      OPENAI_FALLBACK_ENABLED: "false"
+      AI_REQUIRE_REMOTE_MODEL: "true"
+    restart: unless-stopped
+    mem_limit: ${AI_SERVICE_MEMORY_LIMIT:-384m}
+    cpus: ${AI_SERVICE_CPU_LIMIT:-0.75}
+    pids_limit: 192
+    logging: *pilot-logging
+
+  ai-worker:
+    environment:
+      MODEL_PROVIDER: ${MODEL_PROVIDER:?Use openai-compatible for the pilot}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set the server-side model API key}
+      OPENAI_FALLBACK_ENABLED: "false"
+      AI_REQUIRE_REMOTE_MODEL: "true"
+    mem_limit: ${AI_WORKER_MEMORY_LIMIT:-384m}
+    cpus: ${AI_WORKER_CPU_LIMIT:-0.75}
+    pids_limit: 192
+    logging: *pilot-logging
+
+  chapter-worker:
+    environment:
+      MODEL_PROVIDER: ${MODEL_PROVIDER:?Use openai-compatible for the pilot}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set the server-side model API key}
+      OPENAI_FALLBACK_ENABLED: "false"
+      AI_REQUIRE_REMOTE_MODEL: "true"
+    mem_limit: ${CHAPTER_WORKER_MEMORY_LIMIT:-512m}
+    cpus: ${CHAPTER_WORKER_CPU_LIMIT:-1.0}
+    pids_limit: 256
+    logging: *pilot-logging
+
+  backend:
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -Xms128m -Xmx384m -XX:MaxMetaspaceSize=160m
+        -XX:+ExitOnOutOfMemoryError
+      PILOT_METRICS_KEY: ${PILOT_METRICS_KEY:?Set a random pilot metrics key}
+    restart: unless-stopped
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-640m}
+    cpus: ${BACKEND_CPU_LIMIT:-1.0}
+    pids_limit: 256
+    logging: *pilot-logging
+
+  frontend:
+    restart: unless-stopped
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-96m}
+    cpus: ${FRONTEND_CPU_LIMIT:-0.25}
+    pids_limit: 128
+    logging: *pilot-logging
+
+volumes:
+  story-forge-caddy-data:
+  story-forge-caddy-config:

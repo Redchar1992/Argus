@@ -50,6 +50,7 @@ class Week4ReleaseIntegrationTest {
     @BeforeEach
     void clean() throws InterruptedException {
         while (AI_SERVER.takeRequest(1, TimeUnit.MILLISECONDS) != null) { }
+        jdbc.update("DELETE FROM product_event");
         jdbc.update("DELETE FROM user_feedback");
         jdbc.update("DELETE FROM user_ai_credit_log");
         jdbc.update("DELETE FROM user_ai_wallet");
@@ -113,11 +114,44 @@ class Week4ReleaseIntegrationTest {
         assertThat(download.getResponse().getContentAsString(StandardCharsets.UTF_8))
                 .contains("正文只能来自批准版本")
                 .contains("终审报告");
+
+        MvcResult firstFeedback = mvc.perform(post(
+                        "/api/stories/{storyId}/feedback",
+                        storyId
+                ).header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"willingness\":\"愿意继续使用\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        MvcResult secondFeedback = mvc.perform(post(
+                        "/api/stories/{storyId}/feedback",
+                        storyId
+                ).header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"willingness\":\"愿意付费\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        long firstFeedbackId = mapper.readTree(
+                firstFeedback.getResponse().getContentAsByteArray()
+        ).path("id").asLong();
+        long secondFeedbackId = mapper.readTree(
+                secondFeedback.getResponse().getContentAsByteArray()
+        ).path("id").asLong();
+        assertThat(firstFeedbackId).isNotEqualTo(secondFeedbackId);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM product_event
+                WHERE story_id=? AND event_name='FEEDBACK_SUBMITTED'
+                """, Long.class, storyId)).isEqualTo(2L);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM product_event
+                WHERE story_id=? AND event_name IN
+                    ('FINAL_REPORT_CREATED','RELEASE_CREATED','EXPORT_SUCCEEDED')
+                """, Long.class, storyId)).isEqualTo(3L);
     }
 
     private JsonNode register(String username) throws Exception {
         MvcResult result = mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"" + username + "\",\"password\":\"password123\"}"))
+                        .content("{\"username\":\"" + username + "\",\"password\":\"password123\",\"privacyAccepted\":true}"))
                 .andExpect(status().isCreated()).andReturn();
         return mapper.readTree(result.getResponse().getContentAsByteArray());
     }

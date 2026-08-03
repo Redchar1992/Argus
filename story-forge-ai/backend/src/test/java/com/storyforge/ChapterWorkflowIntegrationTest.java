@@ -67,6 +67,7 @@ class ChapterWorkflowIntegrationTest {
             @SuppressWarnings("unchecked") Map<String,String> fields=inv.getArgument(0);
             published.add(new LinkedHashMap<>(fields));return "command-"+published.size();
         });
+        jdbc.update("DELETE FROM product_event");
         jdbc.update("DELETE FROM user_feedback");jdbc.update("DELETE FROM export_task");
         jdbc.update("DELETE FROM story_release");jdbc.update("DELETE FROM story_final_report");
         jdbc.update("DELETE FROM ai_model_usage");jdbc.update("DELETE FROM user_ai_credit_log");
@@ -82,7 +83,7 @@ class ChapterWorkflowIntegrationTest {
 
     @Test void completeChapterFlowPersistsImmutableVersionsRewriteMemoryAndNextContext() throws Exception {
         JsonNode registration=body(mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"chapter-writer\",\"password\":\"password123\"}"))
+                .content("{\"username\":\"chapter-writer\",\"password\":\"password123\",\"privacyAccepted\":true}"))
                 .andExpect(status().isCreated()).andReturn());
         String token=registration.path("token").asText();long userId=registration.path("userId").asLong();
         long storyId=body(mvc.perform(post("/api/story/create").header(HttpHeaders.AUTHORIZATION,bearer(token))
@@ -236,6 +237,10 @@ class ChapterWorkflowIntegrationTest {
         eventService.process("4001-0",event(finalizeTask,"FINAL_READY",2,"SUCCESS",finalData.toString()));
         assertThat(count("story_chapter_version","chapter_id",chapterId)).isEqualTo(approvedVersions);
         assertThat(jdbc.queryForObject("SELECT status FROM story_chapter WHERE id=?",String.class,chapterId)).isEqualTo("APPROVED");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM product_event
+                WHERE story_id=? AND event_name='CHAPTER_APPROVED'
+                """, Long.class, storyId)).isEqualTo(1L);
         assertThat(count("story_chapter_summary","chapter_id",chapterId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT fact_value FROM story_fact WHERE story_id=? AND fact_key='arm_injury'",String.class,storyId)).isEqualTo("受伤");
         assertThat(jdbc.queryForObject("SELECT fact_value FROM story_fact WHERE story_id=? AND fact_key='identity_lin_wan'",String.class,storyId)).isEqualTo("林氏继承人");
@@ -420,7 +425,7 @@ class ChapterWorkflowIntegrationTest {
         f.put("errorCode","");f.put("errorMessage","");return f;
     }
     private JsonNode register(String username)throws Exception{return body(mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
-            .content("{\"username\":\""+username+"\",\"password\":\"password123\"}"))
+            .content("{\"username\":\""+username+"\",\"password\":\"password123\",\"privacyAccepted\":true}"))
             .andExpect(status().isCreated()).andReturn());}
     private long createStory(String token)throws Exception{return body(mvc.perform(post("/api/story/create").header(HttpHeaders.AUTHORIZATION,bearer(token))
             .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"测试故事\",\"genre\":\"都市情感\"}"))

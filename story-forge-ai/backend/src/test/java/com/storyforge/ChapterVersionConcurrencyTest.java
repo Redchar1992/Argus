@@ -23,6 +23,7 @@ class ChapterVersionConcurrencyTest {
     @Autowired JdbcTemplate jdbc;@Autowired ChapterApplicationService service;
     long userId,storyId,chapterId,versionId;
     @BeforeEach void seed(){
+        jdbc.update("DELETE FROM product_event");
         jdbc.update("DELETE FROM user_feedback");jdbc.update("DELETE FROM export_task");
         jdbc.update("DELETE FROM story_release");jdbc.update("DELETE FROM story_final_report");
         jdbc.update("DELETE FROM ai_model_usage");jdbc.update("DELETE FROM user_ai_credit_log");

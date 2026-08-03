@@ -18,7 +18,8 @@ public class RedisChapterCommandPublisher implements ChapterCommandPublisher {
             RecordId id = redis.opsForStream().add(
                     StreamRecords.string(fields).withStreamKey(properties.commandStream()));
             if (id == null) throw new WorkflowDispatchException("Redis 未返回章节命令 ID");
-            redis.opsForStream().trim(properties.commandStream(), properties.streamMaxLength(), true);
+            // Never producer-trim: MAXLEN can discard a command that the
+            // worker has not consumed. The worker XDELs each command after ACK.
             return id.getValue();
         } catch (WorkflowDispatchException exception) {
             throw exception;

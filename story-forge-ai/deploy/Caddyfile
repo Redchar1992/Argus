@@ -1,0 +1,46 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$PUBLIC_HOST} {
+	encode zstd gzip
+	request_body {
+		max_size 10MB
+	}
+
+	# Pilot traffic is invite-only. The bcrypt hash is injected from the
+	# server env file; no shared plaintext password is stored in the repo.
+	# API calls use the Authorization header for JWTs, so Basic Auth only
+	# protects the browser shell and the unauthenticated auth endpoints. This
+	# keeps registration invite-only without colliding with Bearer tokens/SSE.
+	@pilotBrowser not path /api/* /assets/*
+	@pilotAuth path /api/auth/*
+	basic_auth @pilotBrowser {
+		{$PILOT_BASIC_AUTH_USER} {$PILOT_BASIC_AUTH_HASH}
+	}
+	basic_auth @pilotAuth {
+		{$PILOT_BASIC_AUTH_USER} {$PILOT_BASIC_AUTH_HASH}
+	}
+
+	@api path /api/*
+	handle @api {
+		reverse_proxy backend:8080 {
+			# Explicit low-latency mode keeps chapter SSE responsive through
+			# the public TLS endpoint.
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# Access logging stays disabled because export download capability tokens
+	# are carried in the query string. Container health and failure alerts are
+	# handled by pilot-healthcheck.sh without persisting those tokens.
+}

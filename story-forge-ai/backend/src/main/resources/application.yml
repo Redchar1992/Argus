@@ -17,6 +17,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # Honor Forwarded/X-Forwarded-* values added by the trusted pilot reverse proxy.
+  # The deploy stack keeps the backend bound to loopback so clients cannot bypass it.
+  forward-headers-strategy: framework
 
 mybatis-plus:
   configuration:
@@ -25,6 +28,18 @@ mybatis-plus:
     banner: false
 
 app:
+  auth:
+    rate-limit:
+      enabled: ${AUTH_RATE_LIMIT_ENABLED:true}
+      window-type: ${AUTH_RATE_LIMIT_WINDOW_TYPE:SLIDING}
+      registration:
+        max-attempts: ${AUTH_REGISTER_RATE_LIMIT_MAX:5}
+        window: ${AUTH_REGISTER_RATE_LIMIT_WINDOW:1h}
+      login:
+        max-attempts: ${AUTH_LOGIN_RATE_LIMIT_MAX:10}
+        window: ${AUTH_LOGIN_RATE_LIMIT_WINDOW:15m}
+      # Bounds attacker-controlled IP/username keys to prevent unbounded heap growth.
+      max-entries: ${AUTH_RATE_LIMIT_MAX_ENTRIES:20000}
   jwt:
     # Never provide a shared signing key from the common configuration. The
     # local profile supplies a development-only fallback; deployable profiles
@@ -71,6 +86,9 @@ app:
   export:
     storage-dir: ${EXPORT_STORAGE_DIR:./data/exports}
     download-ttl-minutes: ${EXPORT_DOWNLOAD_TTL_MINUTES:15}
+  pilot:
+    # Disabled when blank. Pilot deployments must provide a server-only key.
+    metrics-key: ${PILOT_METRICS_KEY:}
 
 logging:
   level:

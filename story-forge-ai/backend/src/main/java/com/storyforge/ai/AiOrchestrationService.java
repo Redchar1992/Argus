@@ -10,6 +10,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.storyforge.analytics.ProductAnalyticsService;
+import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.common.validation.CreativeDirectionValidator;
 import com.storyforge.cost.AiCreditService;
@@ -48,6 +50,7 @@ public class AiOrchestrationService {
     private final AiCreditService credits;
     private final AiUsageRecorder usage;
     private final PromptResolver prompts;
+    private final ProductAnalyticsService analytics;
 
     public AiOrchestrationService(
             StoryService storyService,
@@ -57,7 +60,8 @@ public class AiOrchestrationService {
             ObjectMapper objectMapper,
             AiCreditService credits,
             AiUsageRecorder usage,
-            PromptResolver prompts
+            PromptResolver prompts,
+            ProductAnalyticsService analytics
     ) {
         this.storyService = storyService;
         this.storyMapper = storyMapper;
@@ -67,6 +71,7 @@ public class AiOrchestrationService {
         this.credits = credits;
         this.usage = usage;
         this.prompts = prompts;
+        this.analytics = analytics;
     }
 
     public JsonNode generate(Long userId, GenerateTopicRequest request) {
@@ -122,6 +127,14 @@ public class AiOrchestrationService {
                     System.currentTimeMillis() - started, true, null);
             credits.settleFrozen(userId, task.getId(), freezeKey, settleKey,
                     TOPIC_CREDIT_COST, TOPIC_CREDIT_COST, "AI 选题生成");
+            analytics.record(
+                    ProductEventNames.TOPICS_GENERATED,
+                    userId,
+                    story.getId(),
+                    task.getId(),
+                    "task:" + task.getId() + ":topics-generated",
+                    java.util.Map.of("topicCount", topics.size())
+            );
 
             return buildResponse(upstreamResult, topics, task.getId(), story.getId());
         } catch (AiServiceException exception) {

@@ -60,6 +60,11 @@ class WorkflowEventStreamListenerTest {
     @Test
     void acknowledgesOnlyAfterPersistenceReturns() {
         MapRecord<String, String, String> message = message("3000-0");
+        when(streamOperations.acknowledge(
+                "story:workflow:events",
+                "storyforge-backend",
+                message.getId()
+        )).thenReturn(1L);
 
         listener.onMessage(message);
 
@@ -69,6 +74,11 @@ class WorkflowEventStreamListenerTest {
         order.verify(streamOperations).acknowledge(
                 "story:workflow:events",
                 "storyforge-backend",
+                message.getId()
+        );
+        order.verify(redisTemplate).opsForStream();
+        order.verify(streamOperations).delete(
+                "story:workflow:events",
                 message.getId()
         );
     }

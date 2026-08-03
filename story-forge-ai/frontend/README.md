@@ -53,6 +53,7 @@ docker run --rm -p 5173:80 story-forge-frontend
 | 路由 | 页面 | 功能 |
 | --- | --- | --- |
 | `/login` | 登录 / 注册 | 注册、登录、JWT 本地会话 |
+| `/privacy` | 内测隐私说明 | 说明采集范围、用途、保留与联系渠道 |
 | `/` | 我的作品 | 作品列表、空状态、生成状态概览 |
 | `/stories/new` | AI 故事策划 | 创建故事、生成 10 个选题、比较四维评分、保存主方案 |
 | `/stories/:id` | 故事详情 | 从服务端重新加载生成结果、查看或更换主方案 |
@@ -65,8 +66,8 @@ docker run --rm -p 5173:80 story-forge-frontend
 
 | Method | Path | Body |
 | --- | --- | --- |
-| `POST` | `/api/auth/register` | `{ username, password }` |
-| `POST` | `/api/auth/login` | `{ username, password }` |
+| `POST` | `/api/auth/register` | `{ username, password, privacyAccepted: true }` |
+| `POST` | `/api/auth/login` | `{ username, password, privacyAccepted?: true }` |
 | `GET` | `/api/story/list` | — |
 | `POST` | `/api/story/create` | `{ title, genre, audience, keywords }` |
 | `POST` | `/api/ai/topic/generate` | `{ storyId, genre, audience, keywords }` |

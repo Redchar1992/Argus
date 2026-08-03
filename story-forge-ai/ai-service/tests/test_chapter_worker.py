@@ -82,6 +82,7 @@ async def test_plan_emits_only_one_terminal_ready_event() -> None:
     )
 
     assert await worker.run_once(block_ms=None) == 1
+    assert await redis.xlen(broker.command_stream) == 0
     ready = [
         fields
         for _event_id, fields in await redis.xrange(broker.event_stream)
@@ -674,6 +675,7 @@ async def test_terminal_ack_failure_replays_without_extra_execution() -> None:
     assert (await redis.xpending(broker.command_stream, broker.consumer_group))[
         "pending"
     ] == 0
+    assert await redis.xlen(broker.command_stream) == 0
     assert workflow.start_calls == 1
     failures = [
         event

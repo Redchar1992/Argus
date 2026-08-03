@@ -77,6 +77,7 @@ def create_app(
     final_review_agent: FinalReviewAgent | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
+    resolved_settings.validate_runtime()
     if (
         resolved_settings.require_internal_api_key
         and not resolved_settings.internal_api_key

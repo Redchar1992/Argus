@@ -10,6 +10,8 @@ public record LoginRequest(
 
         @NotBlank(message = "密码不能为空")
         @Size(max = 72, message = "密码最多 72 个字符")
-        String password
+        String password,
+
+        Boolean privacyAccepted
 ) {
 }

@@ -57,6 +57,7 @@ class StoryForgeIntegrationTest {
         while (AI_SERVER.takeRequest(1, TimeUnit.MILLISECONDS) != null) {
             // MockWebServer keeps recorded requests across test methods.
         }
+        jdbcTemplate.update("DELETE FROM product_event");
         jdbcTemplate.update("DELETE FROM user_feedback");
         jdbcTemplate.update("DELETE FROM export_task");
         jdbcTemplate.update("DELETE FROM story_release");
@@ -244,6 +245,11 @@ class StoryForgeIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(storyId))
                 .andExpect(jsonPath("$[0].selectedTopic.id").value(1));
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM product_event
+                WHERE story_id=? AND event_name IN
+                    ('STORY_CREATED','TOPICS_GENERATED','TOPIC_SELECTED')
+                """, Long.class, storyId)).isEqualTo(3L);
     }
 
     @Test
@@ -392,7 +398,7 @@ class StoryForgeIntegrationTest {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"username":"%s","password":"password123"}
+                                {"username":"%s","password":"password123","privacyAccepted":true}
                                 """.formatted(username)))
                 .andExpect(status().isCreated())
                 .andReturn();

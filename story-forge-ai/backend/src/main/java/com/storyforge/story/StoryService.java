@@ -7,6 +7,8 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.storyforge.analytics.ProductAnalyticsService;
+import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.common.validation.CreativeDirectionValidator;
 import com.storyforge.task.AiTask;
@@ -24,15 +26,18 @@ public class StoryService {
     private final StoryProjectMapper storyMapper;
     private final AiTaskMapper taskMapper;
     private final ObjectMapper objectMapper;
+    private final ProductAnalyticsService analytics;
 
     public StoryService(
             StoryProjectMapper storyMapper,
             AiTaskMapper taskMapper,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ProductAnalyticsService analytics
     ) {
         this.storyMapper = storyMapper;
         this.taskMapper = taskMapper;
         this.objectMapper = objectMapper;
+        this.analytics = analytics;
     }
 
     @Transactional
@@ -48,6 +53,14 @@ public class StoryService {
         story.setCreatedTime(now);
         story.setUpdatedTime(now);
         storyMapper.insert(story);
+        analytics.record(
+                ProductEventNames.STORY_CREATED,
+                userId,
+                story.getId(),
+                null,
+                "story:" + story.getId() + ":created",
+                java.util.Map.of("genre", story.getGenre())
+        );
         return toResponse(story);
     }
 
@@ -78,6 +91,14 @@ public class StoryService {
         }
         JsonNode selected = findGeneratedTopic(story, request.topicId());
         applySelection(story, selected, StoryStatus.SELECTED);
+        analytics.record(
+                ProductEventNames.TOPIC_SELECTED,
+                userId,
+                storyId,
+                null,
+                "story:" + storyId + ":topic-selected",
+                java.util.Map.of("topicId", scalarText(request.topicId()))
+        );
         return toResponse(story);
     }
 

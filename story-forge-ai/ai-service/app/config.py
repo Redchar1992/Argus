@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 
 def _as_bool(value: str | None, *, default: bool) -> bool:
@@ -46,6 +47,34 @@ class Settings:
     story_checkpoint_db: str = "./data/story-checkpoints.sqlite"
     internal_api_key: str | None = None
     require_internal_api_key: bool = False
+    require_remote_model: bool = False
+
+    def validate_runtime(self) -> None:
+        """Fail closed when a pilot deployment requires real model calls."""
+        if not self.require_remote_model:
+            return
+        if self.model_provider in {"local", "ollama"}:
+            raise RuntimeError(
+                "MODEL_PROVIDER must use an HTTPS OpenAI-compatible endpoint "
+                "when remote model enforcement is enabled"
+            )
+        if self.model_provider in {"auto", "openai-compatible"} and not (
+            self.openai_api_key
+        ):
+            raise RuntimeError(
+                "OPENAI_API_KEY is required when remote model enforcement is enabled"
+            )
+        endpoint = urlparse(self.openai_base_url)
+        if endpoint.scheme != "https" or not endpoint.hostname:
+            raise RuntimeError(
+                "OPENAI_BASE_URL must be an HTTPS endpoint when remote model "
+                "enforcement is enabled"
+            )
+        if self.openai_fallback_enabled:
+            raise RuntimeError(
+                "OPENAI_FALLBACK_ENABLED must be false when remote model enforcement "
+                "is enabled"
+            )
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -86,7 +115,7 @@ class Settings:
             "local",
         }:
             model_provider = defaults.model_provider
-        return cls(
+        settings = cls(
             app_name=os.getenv("APP_NAME", defaults.app_name),
             app_version=os.getenv("APP_VERSION", defaults.app_version),
             openai_api_key=key,
@@ -136,4 +165,9 @@ class Settings:
             require_internal_api_key=_as_bool(
                 os.getenv("AI_REQUIRE_INTERNAL_API_KEY"), default=False
             ),
+            require_remote_model=_as_bool(
+                os.getenv("AI_REQUIRE_REMOTE_MODEL"), default=False
+            ),
         )
+        settings.validate_runtime()
+        return settings

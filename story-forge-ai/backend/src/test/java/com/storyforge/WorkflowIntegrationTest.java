@@ -84,6 +84,7 @@ class WorkflowIntegrationTest {
     void cleanDatabase() {
         reset(requestPublisher);
         when(requestPublisher.publish(anyMap())).thenReturn("request-1");
+        jdbcTemplate.update("DELETE FROM product_event");
         jdbcTemplate.update("DELETE FROM user_feedback");
         jdbcTemplate.update("DELETE FROM export_task");
         jdbcTemplate.update("DELETE FROM story_release");
@@ -549,6 +550,10 @@ class WorkflowIntegrationTest {
                 String.class,
                 storyId
         )).isEqualTo("WORKFLOW_COMPLETED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM product_event
+                WHERE story_id=? AND event_name='OUTLINE_COMPLETED'
+                """, Long.class, storyId)).isEqualTo(1L);
 
         // Simulate a lost backend XACK: the old START terminal event is replayed
         // with a new stream ID after the newer RESUME operation completed.
@@ -881,7 +886,7 @@ class WorkflowIntegrationTest {
         MvcResult result = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"username":"%s","password":"password123"}
+                                {"username":"%s","password":"password123","privacyAccepted":true}
                                 """.formatted(username)))
                 .andExpect(status().isCreated())
                 .andReturn();

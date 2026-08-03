@@ -37,6 +37,55 @@ def test_production_key_enforcement_fails_closed_without_a_key() -> None:
         create_app(Settings(require_internal_api_key=True))
 
 
+def test_pilot_remote_model_enforcement_rejects_local_fallback() -> None:
+    with pytest.raises(RuntimeError, match="OPENAI_FALLBACK_ENABLED"):
+        create_app(
+            Settings(
+                model_provider="openai-compatible",
+                openai_api_key="server-key",
+                openai_fallback_enabled=True,
+                require_remote_model=True,
+            )
+        )
+
+
+def test_pilot_remote_model_enforcement_requires_server_key() -> None:
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        create_app(
+            Settings(
+                model_provider="openai-compatible",
+                openai_fallback_enabled=False,
+                require_remote_model=True,
+            )
+        )
+
+
+def test_pilot_remote_model_enforcement_rejects_cleartext_endpoint() -> None:
+    with pytest.raises(RuntimeError, match="OPENAI_BASE_URL"):
+        create_app(
+            Settings(
+                model_provider="openai-compatible",
+                openai_api_key="server-key",
+                openai_base_url="http://models.example.test/v1",
+                openai_fallback_enabled=False,
+                require_remote_model=True,
+            )
+        )
+
+
+def test_pilot_remote_model_enforcement_accepts_strict_remote_provider() -> None:
+    app = create_app(
+        Settings(
+            model_provider="openai-compatible",
+            openai_api_key="server-key",
+            openai_fallback_enabled=False,
+            require_remote_model=True,
+        )
+    )
+
+    assert app.title == "Story Forge AI Service"
+
+
 def test_local_generation_returns_ten_structured_topics(
     valid_payload: dict[str, object],
 ) -> None:

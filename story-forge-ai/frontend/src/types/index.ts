@@ -11,6 +11,14 @@ export interface AuthCredentials {
   password: string
 }
 
+export interface LoginCredentials extends AuthCredentials {
+  privacyAccepted?: true
+}
+
+export interface RegisterCredentials extends AuthCredentials {
+  privacyAccepted: true
+}
+
 export interface TopicOption {
   id: string
   title: string

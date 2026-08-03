@@ -8,7 +8,6 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.sql.Timestamp;
-import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
@@ -21,6 +20,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.storyforge.analytics.ProductAnalyticsService;
+import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.chapter.entity.StoryChapterVersion;
 import com.storyforge.chapter.mapper.StoryChapterVersionMapper;
 import com.storyforge.common.exception.ApiException;
@@ -48,16 +49,19 @@ public class ExportService {
     private final JdbcTemplate jdbc;
     private final Path storageDir;
     private final int ttlMinutes;
+    private final ProductAnalyticsService analytics;
 
     public ExportService(ReleaseService releases, StoryChapterVersionMapper versions, ObjectMapper mapper,
             JdbcTemplate jdbc, @Value("${app.export.storage-dir:./data/exports}") String storageDir,
-            @Value("${app.export.download-ttl-minutes:15}") int ttlMinutes) {
+            @Value("${app.export.download-ttl-minutes:15}") int ttlMinutes,
+            ProductAnalyticsService analytics) {
         this.releases = releases;
         this.versions = versions;
         this.mapper = mapper;
         this.jdbc = jdbc;
         this.storageDir = Path.of(storageDir).toAbsolutePath().normalize();
         this.ttlMinutes = Math.max(5, Math.min(ttlMinutes, 30));
+        this.analytics = analytics;
     }
 
     @Transactional
@@ -71,7 +75,7 @@ public class ExportService {
                     INSERT INTO export_task
                     (story_id, release_id, user_id, format, include_report, status, created_time, updated_time)
                     VALUES (?, ?, ?, ?, ?, 'WAITING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, Statement.RETURN_GENERATED_KEYS);
+                    """, new String[] {"id"});
             statement.setLong(1, storyId);
             statement.setLong(2, request.releaseId());
             statement.setLong(3, userId);
@@ -79,9 +83,8 @@ public class ExportService {
             statement.setBoolean(5, request.includeReport());
             return statement;
         }, keyHolder);
-        Number generatedId = keyHolder.getKeyList().isEmpty()
-                ? null
-                : (Number) keyHolder.getKeyList().get(0).get("id");
+        // Avoid relying on a driver-specific generated-key column label.
+        Number generatedId = keyHolder.getKey();
         if (generatedId == null) throw new IllegalStateException("导出任务未生成 ID");
         Long exportId = generatedId.longValue();
         try {
@@ -99,7 +102,22 @@ public class ExportService {
         } catch (Exception exception) {
             jdbc.update("UPDATE export_task SET status='FAILED', error_message=?, updated_time=CURRENT_TIMESTAMP WHERE id=?", exception.getMessage() == null ? "导出失败" : exception.getMessage().substring(0, Math.min(1000, exception.getMessage().length())), exportId);
         }
-        return get(userId, exportId);
+        ExportResponse response = get(userId, exportId);
+        if ("SUCCESS".equals(response.status())) {
+            analytics.record(
+                    ProductEventNames.EXPORT_SUCCEEDED,
+                    userId,
+                    storyId,
+                    null,
+                    "export:" + exportId + ":succeeded",
+                    java.util.Map.of(
+                            "format", request.format().name(),
+                            "releaseId", request.releaseId(),
+                            "fileSize", response.fileSize() == null ? 0 : response.fileSize()
+                    )
+            );
+        }
+        return response;
     }
 
     public List<ExportResponse> list(Long userId, Long storyId) {

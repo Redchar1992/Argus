@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class ChapterEventStreamListener implements StreamListener<String,MapRecord<String,String,String>>{
     private static final Logger log=LoggerFactory.getLogger(ChapterEventStreamListener.class);
+    private static final long DEAD_LETTER_MAX_LENGTH=100;
     private final ChapterEventService service;private final ChapterSseHub hub;
     private final StringRedisTemplate redis;private final ChapterWorkflowProperties properties;
     public ChapterEventStreamListener(ChapterEventService service,ChapterSseHub hub,StringRedisTemplate redis,
@@ -35,8 +36,17 @@ public class ChapterEventStreamListener implements StreamListener<String,MapReco
     }
     private void complete(MapRecord<String,String,String> message,ChapterEventService.ProcessedEvent result){
         if(result.persisted())hub.publish(result.event());
-        redis.opsForStream().acknowledge(properties.eventStream(),properties.eventGroup(),message.getId());
-        redis.opsForStream().trim(properties.eventStream(),properties.streamMaxLength(),true);
+        var streams=redis.opsForStream();
+        Long acknowledged=streams.acknowledge(properties.eventStream(),properties.eventGroup(),message.getId());
+        if(acknowledged!=null&&acknowledged>0){
+            try{
+                // The event is durable in MySQL. Delete only this ACKed record;
+                // global trimming could otherwise evict a different pending event.
+                streams.delete(properties.eventStream(),message.getId());
+            }catch(RuntimeException cleanupFailure){
+                log.warn("Failed to delete acknowledged chapter event {}",message.getId().getValue(),cleanupFailure);
+            }
+        }
     }
     private void deadLetter(MapRecord<String,String,String> message,RuntimeException failure){
         Map<String,String> fields=new LinkedHashMap<>(message.getValue());
@@ -46,6 +56,6 @@ public class ChapterEventStreamListener implements StreamListener<String,MapReco
         fields.put("_errorMessage",detail.length()<=1000?detail:detail.substring(0,1000));
         String stream=properties.eventStream()+":dead-letter";
         redis.opsForStream().add(stream,fields);
-        redis.opsForStream().trim(stream,properties.streamMaxLength(),true);
+        redis.opsForStream().trim(stream,Math.min(properties.streamMaxLength(),DEAD_LETTER_MAX_LENGTH),true);
     }
 }

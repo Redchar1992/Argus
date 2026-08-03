@@ -63,6 +63,7 @@ async def test_worker_acknowledges_success_and_deduplicates_redelivery() -> None
 
     pending = await redis.xpending(broker.request_stream, broker.consumer_group)
     assert pending["pending"] == 0
+    assert await redis.xlen(broker.request_stream) == 0
     events = [fields for _id, fields in await redis.xrange(EVENT_STREAM)]
     assert events[0]["status"] == "RUNNING"
     assert events[0]["revisionCount"] == "0"
@@ -127,6 +128,7 @@ async def test_worker_acknowledges_success_and_deduplicates_redelivery() -> None
     # publishing a second result.
     await broker.enqueue(message)
     assert await worker.run_once(block_ms=None) == 1
+    assert await redis.xlen(broker.request_stream) == 0
     event_count_before_duplicate = len(events)
     after_duplicate = await redis.xrange(EVENT_STREAM)
     assert len(after_duplicate) == event_count_before_duplicate + 1

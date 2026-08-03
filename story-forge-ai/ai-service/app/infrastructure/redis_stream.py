@@ -269,13 +269,23 @@ class RedisStreamBroker:
         return enriched
 
     async def acknowledge(self, message_id: str) -> int:
-        return int(
+        acknowledged = int(
             await self.redis.xack(
                 self.request_stream,
                 self.consumer_group,
                 message_id,
             )
         )
+        if acknowledged:
+            try:
+                # The command is complete and its result is persisted. Delete
+                # only this acknowledged record; never trim pending commands.
+                await self.redis.xdel(self.request_stream, message_id)
+            except Exception:
+                # A transient cleanup failure must not turn a completed command
+                # back into a retry. A later backup/maintenance pass can prune it.
+                pass
+        return acknowledged
 
     @staticmethod
     def _entries(result: object, *, recovered: bool) -> list[StreamEntry]:

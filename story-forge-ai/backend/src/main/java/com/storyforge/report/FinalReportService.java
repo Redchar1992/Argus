@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.storyforge.analytics.ProductAnalyticsService;
+import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.ai.AiServiceClient;
 import com.storyforge.ai.AiServiceException;
 import com.storyforge.chapter.ChapterStatus;
@@ -47,12 +49,14 @@ public class FinalReportService {
     private final int maxReviewChars;
     private final PromptResolver prompts;
     private final StoryProjectMapper storyMapper;
+    private final ProductAnalyticsService analytics;
 
     public FinalReportService(StoryService stories,
             StoryChapterMapper chapterMapper, StoryChapterVersionMapper versionMapper,
             ObjectMapper mapper, AiServiceClient ai, JdbcTemplate jdbc, AiCreditService credits,
             @Value("${app.ai.final-review-max-chars:500000}") int maxReviewChars,
-            PromptResolver prompts, StoryProjectMapper storyMapper) {
+            PromptResolver prompts, StoryProjectMapper storyMapper,
+            ProductAnalyticsService analytics) {
         this.stories = stories;
         this.chapterMapper = chapterMapper;
         this.versionMapper = versionMapper;
@@ -63,6 +67,7 @@ public class FinalReportService {
         this.maxReviewChars = Math.max(10_000, maxReviewChars);
         this.prompts = prompts;
         this.storyMapper = storyMapper;
+        this.analytics = analytics;
     }
 
     @Transactional
@@ -113,7 +118,10 @@ public class FinalReportService {
                 .filter(item -> contentHash.equals(item.contentHash()))
                 .findFirst()
                 .orElse(null);
-        if (existing != null) return existing;
+        if (existing != null) {
+            recordCreated(userId, existing);
+            return existing;
+        }
         String freezeKey = "final-review:freeze:" + storyId + ":" + contentHash;
         String settleKey = "final-review:settle:" + storyId + ":" + contentHash;
         credits.freeze(userId, null, freezeKey, 30, "全书终审预冻结");
@@ -145,7 +153,33 @@ public class FinalReportService {
                 """, storyId, userId, modelName, prompt.version(), inputTokens, outputTokens,
                 (inputTokens + outputTokens) / 100000.0, (inputTokens + outputTokens) / 100000.0, duration);
         credits.settleFrozen(userId, null, freezeKey, settleKey, 30, 30, "全书终审");
-        return response(id, storyId, versionNo, report, wordCount, contentHash, promptVersion, modelName);
+        FinalReportResponse created = response(
+                id,
+                storyId,
+                versionNo,
+                report,
+                wordCount,
+                contentHash,
+                promptVersion,
+                modelName
+        );
+        recordCreated(userId, created);
+        return created;
+    }
+
+    private void recordCreated(Long userId, FinalReportResponse report) {
+        analytics.record(
+                ProductEventNames.FINAL_REPORT_CREATED,
+                userId,
+                report.storyId(),
+                null,
+                "report:" + report.id() + ":created",
+                java.util.Map.of(
+                        "reportVersion", report.versionNo(),
+                        "totalScore", report.total(),
+                        "wordCount", report.wordCount()
+                )
+        );
     }
 
     public FinalReportResponse latest(Long userId, Long storyId) {

@@ -36,11 +36,29 @@ public class WorkflowEventStreamListener
             // only then is XACK issued. A crash between commit and XACK is safe
             // because event IDs and artifact version keys are idempotent.
             eventService.processEvent(message.getId().getValue(), message.getValue());
-            redisTemplate.opsForStream().acknowledge(
+            Long acknowledged = redisTemplate.opsForStream().acknowledge(
                     properties.eventStream(),
                     properties.eventGroup(),
                     message.getId()
             );
+            if (acknowledged != null && acknowledged > 0) {
+                // The event is durable in MySQL now. Delete only this
+                // acknowledged record so pending deliveries are never trimmed.
+                try {
+                    redisTemplate.opsForStream().delete(
+                            properties.eventStream(),
+                            message.getId()
+                    );
+                } catch (RuntimeException cleanupException) {
+                    // XACK already succeeded, so this is retained history rather
+                    // than a pending delivery. Cleanup may safely be retried later.
+                    log.warn(
+                            "Failed to delete acknowledged workflow event {}",
+                            message.getId().getValue(),
+                            cleanupException
+                    );
+                }
+            }
         } catch (RuntimeException exception) {
             log.error(
                     "Failed to persist workflow event {}; leaving it pending",

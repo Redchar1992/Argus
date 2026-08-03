@@ -24,10 +24,22 @@ GET /api/health
 POST /api/auth/register
 Content-Type: application/json
 
-{"username":"demo","password":"demo1234"}
+{"username":"demo","password":"demo1234","privacyAccepted":true}
 ```
 
-注册成功后直接返回与登录相同的令牌结构。
+`privacyAccepted` 必须为 `true`。注册成功后会保存当前隐私说明版本与确认时间，
+并直接返回与登录相同的令牌结构。
+
+### 内测漏斗指标（运营接口）
+
+```http
+GET /api/internal/pilot/metrics?days=7
+Authorization: Bearer <token>
+X-Pilot-Metrics-Key: <PILOT_METRICS_KEY>
+```
+
+只有配置了 `PILOT_METRICS_KEY` 后接口才启用；`days` 允许 1～90。响应包含注册与
+活跃用户数、服务端记录的关键漏斗事件、AI 任务成功率和模型 Token/成本汇总。
 
 ### 登录
 
@@ -35,8 +47,14 @@ Content-Type: application/json
 POST /api/auth/login
 Content-Type: application/json
 
-{"username":"demo","password":"demo1234"}
+{"username":"demo","password":"demo1234","privacyAccepted":true}
 ```
+
+已确认当前版本隐私说明的账号可省略 `privacyAccepted`；历史账号首次登录新版本时
+必须传 `true`，否则返回 `PRIVACY_CONSENT_REQUIRED`。
+
+单机内测默认对注册 IP 和登录的 `IP + 用户名` 组合限流；超限返回 HTTP `429`
+与错误码 `AUTH_RATE_LIMITED`。
 
 ```json
 {"token":"<jwt>","userId":10001}

@@ -14,6 +14,12 @@ const router = createRouter({
       meta: { public: true, title: '登录' },
     },
     {
+      path: '/privacy',
+      name: 'privacy',
+      component: () => import('@/views/PrivacyView.vue'),
+      meta: { public: true, title: '内测隐私说明' },
+    },
+    {
       path: '/',
       component: AppShell,
       meta: { requiresAuth: true },

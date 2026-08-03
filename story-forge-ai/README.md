@@ -1,6 +1,6 @@
 # StoryForge AI
 
-StoryForge AI 是一个用三周验证“AI 是否能辅助作者完成可控短故事创作”的 MVP。
+StoryForge AI 是一个用四周验证“AI 是否能辅助作者完成可控短故事创作”的 MVP。
 
 第一周闭环：
 
@@ -134,7 +134,7 @@ Compose 会同时启动 HTTP AI 服务、故事工作流 Worker 和持久化章�
 |---|---|
 | Web | http://localhost:5173 |
 | Backend | http://localhost:8080 |
-| AI Service | http://localhost:8000 |
+| AI Service | 仅 Compose 内网 `http://ai-service:8000` |
 | MySQL | 127.0.0.1:3306（随机密码） |
 | Redis | 127.0.0.1:6379（随机密码） |
 
@@ -144,6 +144,64 @@ Compose 会同时启动 HTTP AI 服务、故事工作流 Worker 和持久化章�
 python3 deploy/smoke_workflow.py
 python3 deploy/smoke_chapter_workflow.py
 ```
+
+## 单机内测部署
+
+Pilot 配置使用 Caddy 自动申请 HTTPS 证书，只公开 80/443，并对浏览器入口与
+注册/登录接口启用 Basic Auth 作为首批邀请门禁；登录后的 API 继续只接受 JWT。
+登录和注册还启用有界的单机限流；扩容到多个后端副本前应替换为 Redis 共享限流。
+MySQL、Redis、后端调试端口和前端容器端口默认只绑定 `127.0.0.1`。内测模式
+强制调用 HTTPS 远程模型，模型调用失败时不会静默降级为本地模板。必须在模型
+供应商后台设置独立项目、硬预算和用量告警，避免邀请账号异常调用造成失控费用。
+当前积分尚未覆盖每条人物/大纲/章节调用，因此首批只允许可信的小规模邀请用户，
+供应商硬额度必须作为上线门槛，而不是仅依赖应用内积分。
+
+部署前把域名 A/AAAA 记录指向服务器，并确保防火墙放行 80/TCP 与 443/TCP；
+如需 HTTP/3，再放行可选的 443/UDP：
+
+```bash
+cd story-forge-ai
+cp deploy/pilot.env.example deploy/.env.pilot
+# 修改域名、邮箱、模型配置，并为每个密码/密钥分别执行：openssl rand -hex 32
+# 按 pilot.env.example 的命令生成 PILOT_BASIC_AUTH_HASH，并保留值外层单引号
+docker compose \
+  --env-file deploy/.env.pilot \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.pilot.yml \
+  up -d --build
+
+ENV_FILE=deploy/.env.pilot deploy/pilot-healthcheck.sh
+```
+
+健康检查同时覆盖容器状态、Redis 内存、故事/章节 Stream 积压和章节死信。建议
+每 5 分钟由 cron 或外部监控执行一次，并通过 `ALERT_WEBHOOK_URL` 接收失败通知。
+运营人员可使用普通用户 JWT 与独立指标密钥
+查看近 7 天漏斗和 AI 任务健康度：
+
+```bash
+curl -H "Authorization: Bearer <jwt>" \
+  -H "X-Pilot-Metrics-Key: <PILOT_METRICS_KEY>" \
+  "https://<PUBLIC_HOST>/api/internal/pilot/metrics?days=7"
+```
+
+## 备份与恢复
+
+备份包含 MySQL、Redis Streams/幂等状态、故事/章节 Checkpoint 与导出文件，并
+生成完整性清单。正式恢复
+前必须先执行只读校验；实际恢复要求交互确认或显式设置 `FORCE=1`：
+
+```bash
+ENV_FILE=deploy/.env.pilot \
+COMPOSE_OVERRIDE_FILE=deploy/docker-compose.pilot.yml \
+BACKUP_DIR=/srv/story-forge-backups \
+deploy/backup.sh
+
+ENV_FILE=deploy/.env.pilot \
+COMPOSE_OVERRIDE_FILE=deploy/docker-compose.pilot.yml \
+DRY_RUN=1 deploy/restore.sh /srv/story-forge-backups/<timestamp>
+```
+
+备份应同步到独立磁盘或对象存储；上线前先在隔离卷完成一次真实恢复演练。
 
 章节 Worker 本地使用持久化 SQLite Checkpointer；生产环境应按官方建议切换到
 数据库型 Checkpointer（例如 PostgreSQL），并为副作用继续保留业务幂等键。

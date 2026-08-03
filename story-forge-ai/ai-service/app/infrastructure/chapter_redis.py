@@ -246,13 +246,23 @@ class ChapterRedisBroker:
         return recovered
 
     async def acknowledge(self, message_id: str) -> int:
-        return int(
+        acknowledged = int(
             await self.redis.xack(
                 self.command_stream,
                 self.consumer_group,
                 message_id,
             )
         )
+        if acknowledged:
+            try:
+                # The workflow result and emitted events are durable now. Keep
+                # pending commands intact and remove only this ACKed payload.
+                await self.redis.xdel(self.command_stream, message_id)
+            except Exception:
+                # Cleanup is best-effort after XACK; never replay completed work
+                # merely because deletion briefly failed.
+                pass
+        return acknowledged
 
     @staticmethod
     def _entries(

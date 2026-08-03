@@ -8,6 +8,10 @@ spring:
     enabled: true
 
 app:
+  auth:
+    # Keep local/integration workflows deterministic. Production inherits the enabled default.
+    rate-limit:
+      enabled: ${AUTH_RATE_LIMIT_ENABLED:false}
   jwt:
     # Development-only fallback. Production uses application-mysql.yml and
     # requires JWT_SECRET from the environment instead.

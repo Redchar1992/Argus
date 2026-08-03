@@ -14,6 +14,8 @@ public class SysUser {
     private String username;
     private String password;
     private String vipLevel;
+    private String privacyVersion;
+    private LocalDateTime privacyAcceptedTime;
     private LocalDateTime createdTime;
 
     public Long getId() {
@@ -46,6 +48,22 @@ public class SysUser {
 
     public void setVipLevel(String vipLevel) {
         this.vipLevel = vipLevel;
+    }
+
+    public String getPrivacyVersion() {
+        return privacyVersion;
+    }
+
+    public void setPrivacyVersion(String privacyVersion) {
+        this.privacyVersion = privacyVersion;
+    }
+
+    public LocalDateTime getPrivacyAcceptedTime() {
+        return privacyAcceptedTime;
+    }
+
+    public void setPrivacyAcceptedTime(LocalDateTime privacyAcceptedTime) {
+        this.privacyAcceptedTime = privacyAcceptedTime;
     }
 
     public LocalDateTime getCreatedTime() {

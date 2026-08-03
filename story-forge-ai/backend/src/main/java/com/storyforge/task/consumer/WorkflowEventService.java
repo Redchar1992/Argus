@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.storyforge.analytics.ProductAnalyticsService;
+import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.artifact.ArtifactInput;
 import com.storyforge.artifact.StoryArtifactService;
 import com.storyforge.cost.AiUsageRecorder;
@@ -31,19 +33,22 @@ public class WorkflowEventService {
     private final StoryArtifactService artifactService;
     private final ObjectMapper objectMapper;
     private final AiUsageRecorder usage;
+    private final ProductAnalyticsService analytics;
 
     public WorkflowEventService(
             AiTaskMapper taskMapper,
             StoryProjectMapper storyMapper,
             StoryArtifactService artifactService,
             ObjectMapper objectMapper,
-            AiUsageRecorder usage
+            AiUsageRecorder usage,
+            ProductAnalyticsService analytics
     ) {
         this.taskMapper = taskMapper;
         this.storyMapper = storyMapper;
         this.artifactService = artifactService;
         this.objectMapper = objectMapper;
         this.usage = usage;
+        this.analytics = analytics;
     }
 
     /**
@@ -141,10 +146,19 @@ public class WorkflowEventService {
         task.setLastEventId(eventId);
         task.setUpdatedTime(LocalDateTime.now());
         taskMapper.updateById(task);
-        updateStoryStatus(task);
+        boolean latestWorkflow = updateStoryStatus(task);
         if (isTerminal(task.getStatus())) {
             usage.recordModelCalls(task, task.getTaskType(), fields.get("modelCalls"),
                     AiTaskStatus.SUCCESS.equals(task.getStatus()), task.getErrorCode());
+        }
+        if (latestWorkflow && AiTaskStatus.SUCCESS.equals(task.getStatus())) {
+            analytics.record(
+                    ProductEventNames.OUTLINE_COMPLETED,
+                    task.getUserId(),
+                    task.getStoryId(),
+                    task.getId(),
+                    "story:" + task.getStoryId() + ":outline-completed"
+            );
         }
         return true;
     }
@@ -190,10 +204,10 @@ public class WorkflowEventService {
         return result;
     }
 
-    private void updateStoryStatus(AiTask task) {
+    private boolean updateStoryStatus(AiTask task) {
         Long latestTaskId = taskMapper.selectLatestWorkflowTaskId(task.getStoryId());
         if (!task.getId().equals(latestTaskId)) {
-            return;
+            return false;
         }
         StoryProject story = storyMapper.selectById(task.getStoryId());
         if (story == null) {
@@ -211,6 +225,7 @@ public class WorkflowEventService {
             story.setUpdatedTime(LocalDateTime.now());
             storyMapper.updateById(story);
         }
+        return true;
     }
 
     private ArrayNode parseArrayField(String raw, String fieldName) {

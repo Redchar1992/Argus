@@ -5,7 +5,7 @@ import * as authApi from '@/api/auth'
 import { useChapterStore } from '@/stores/chapter'
 import { useStoryStore } from '@/stores/story'
 import { useWorkflowStore } from '@/stores/workflow'
-import type { AuthCredentials, EntityId } from '@/types'
+import type { AuthResult, EntityId, LoginCredentials, RegisterCredentials } from '@/types'
 import {
   clearStoredAuth,
   clearChapterStreamCursors,
@@ -29,28 +29,34 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => Boolean(token.value))
   const displayName = computed(() => username.value || '创作者')
 
-  async function login(credentials: AuthCredentials) {
+  function persistAuth(result: AuthResult, fallbackUsername: string) {
+    token.value = result.token
+    userId.value = result.userId
+    username.value = result.username || fallbackUsername
+    setStoredAuth({
+      token: result.token,
+      userId: result.userId,
+      username: username.value,
+    })
+  }
+
+  async function login(credentials: LoginCredentials) {
     submitting.value = true
     try {
       const result = await authApi.login(credentials)
-      token.value = result.token
-      userId.value = result.userId
-      username.value = result.username || credentials.username
-      setStoredAuth({
-        token: result.token,
-        userId: result.userId,
-        username: username.value,
-      })
+      persistAuth(result, credentials.username)
       return result
     } finally {
       submitting.value = false
     }
   }
 
-  async function register(credentials: AuthCredentials) {
+  async function register(credentials: RegisterCredentials) {
     submitting.value = true
     try {
-      await authApi.register(credentials)
+      const result = await authApi.register(credentials)
+      persistAuth(result, credentials.username)
+      return result
     } finally {
       submitting.value = false
     }

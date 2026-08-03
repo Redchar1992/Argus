@@ -156,7 +156,11 @@ def main() -> int:
         args.backend,
         "POST",
         "/api/auth/register",
-        payload={"username": username, "password": password},
+        payload={
+            "username": username,
+            "password": password,
+            "privacyAccepted": True,
+        },
     )
     token = str(auth["token"])
     story = request_object(

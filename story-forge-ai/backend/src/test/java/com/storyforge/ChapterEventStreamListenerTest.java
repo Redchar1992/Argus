@@ -43,6 +43,7 @@ class ChapterEventStreamListenerTest {
         InOrder order=inOrder(service,hub,redis,operations);order.verify(service).process("7000-0",message.getValue());
         order.verify(hub).publish(null);order.verify(redis).opsForStream();
         order.verify(operations).acknowledge("story:chapter:events","backend",message.getId());
+        order.verify(operations).delete("story:chapter:events",message.getId());
     }
     @Test void persistenceFailureLeavesDeliveryPending(){var message=message("7001-0");
         when(service.process("7001-0",message.getValue())).thenThrow(new IllegalStateException("db down"));listener.onMessage(message);
@@ -75,6 +76,9 @@ class ChapterEventStreamListenerTest {
         verify(service,times(2)).process("7002-0",message.getValue());
         verify(operations).acknowledge("story:chapter:events","backend",message.getId());
     }
-    private MapRecord<String,String,String> message(String id){return MapRecord.create("story:chapter:events",Map.of("taskId","1"))
-            .withId(RecordId.of(id));}
+    private MapRecord<String,String,String> message(String id){
+        var message=MapRecord.create("story:chapter:events",Map.of("taskId","1")).withId(RecordId.of(id));
+        when(operations.acknowledge("story:chapter:events","backend",message.getId())).thenReturn(1L);
+        return message;
+    }
 }

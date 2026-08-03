@@ -39,6 +39,7 @@ class ChapterSafetyIntegrationTest {
     void clean() {
         reset(publisher);
         when(publisher.publish(anyMap())).thenReturn("command-1");
+        jdbc.update("DELETE FROM product_event");
         jdbc.update("DELETE FROM user_feedback");
         jdbc.update("DELETE FROM export_task");
         jdbc.update("DELETE FROM story_release");

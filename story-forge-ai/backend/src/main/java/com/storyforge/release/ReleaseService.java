@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.storyforge.analytics.ProductAnalyticsService;
+import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.chapter.ChapterStatus;
 import com.storyforge.chapter.entity.StoryChapter;
 import com.storyforge.chapter.entity.StoryChapterVersion;
@@ -43,11 +45,12 @@ public class ReleaseService {
     private final JdbcTemplate jdbc;
     private final StoryProjectMapper storyMapper;
     private final StoryArtifactService artifacts;
+    private final ProductAnalyticsService analytics;
 
     public ReleaseService(StoryService stories, StoryChapterMapper chapters,
             StoryChapterVersionMapper versions, FinalReportService reports,
             ObjectMapper mapper, JdbcTemplate jdbc, StoryProjectMapper storyMapper,
-            StoryArtifactService artifacts) {
+            StoryArtifactService artifacts, ProductAnalyticsService analytics) {
         this.stories = stories;
         this.chapters = chapters;
         this.versions = versions;
@@ -56,6 +59,7 @@ public class ReleaseService {
         this.jdbc = jdbc;
         this.storyMapper = storyMapper;
         this.artifacts = artifacts;
+        this.analytics = analytics;
     }
 
     @Transactional
@@ -111,7 +115,19 @@ public class ReleaseService {
                 outlineArtifact == null ? null : outlineArtifact.getId(), report.id(), write(snapshots),
                 write(characters), write(outline), wordCount, hash, userId);
         Long id = jdbc.queryForObject("SELECT id FROM story_release WHERE story_id=? AND release_no=?", Long.class, storyId, releaseNo);
-        return get(userId, id);
+        ReleaseResponse created = get(userId, id);
+        analytics.record(
+                ProductEventNames.RELEASE_CREATED,
+                userId,
+                storyId,
+                null,
+                "release:" + id + ":created",
+                java.util.Map.of(
+                        "releaseNo", releaseNo,
+                        "wordCount", wordCount
+                )
+        );
+        return created;
     }
 
     public List<ReleaseResponse> list(Long userId, Long storyId) {

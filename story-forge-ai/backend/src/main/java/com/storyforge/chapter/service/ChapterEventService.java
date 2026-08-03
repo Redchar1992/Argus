@@ -10,6 +10,8 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.storyforge.analytics.ProductAnalyticsService;
+import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.chapter.ChapterStatus;
 import com.storyforge.chapter.ChapterTaskType;
 import com.storyforge.chapter.entity.AiTaskEvent;
@@ -26,6 +28,7 @@ import com.storyforge.cost.AiUsageRecorder;
 import com.storyforge.task.AiTask;
 import com.storyforge.task.AiTaskMapper;
 import com.storyforge.task.AiTaskStatus;
+import com.storyforge.story.StoryProjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -33,6 +36,7 @@ import org.springframework.util.StringUtils;
 @Service
 public class ChapterEventService {
     private final AiTaskMapper tasks;
+    private final StoryProjectMapper stories;
     private final StoryChapterMapper chapters;
     private final StoryChapterVersionMapper versions;
     private final RewriteProposalMapper proposals;
@@ -43,15 +47,18 @@ public class ChapterEventService {
     private final ChapterSupport support;
     private final ChapterWorkflowProperties properties;
     private final AiUsageRecorder usage;
+    private final ProductAnalyticsService analytics;
 
-    public ChapterEventService(AiTaskMapper tasks, StoryChapterMapper chapters,
+    public ChapterEventService(AiTaskMapper tasks, StoryProjectMapper stories,
+            StoryChapterMapper chapters,
             StoryChapterVersionMapper versions, RewriteProposalMapper proposals, AiTaskEventMapper events,
             ChapterVersionService versionService, StoryMemoryService memoryService,
             ChapterTaskService taskService, ChapterSupport support, ChapterWorkflowProperties properties,
-            AiUsageRecorder usage) {
-        this.tasks=tasks; this.chapters=chapters; this.versions=versions; this.proposals=proposals; this.events=events;
+            AiUsageRecorder usage, ProductAnalyticsService analytics) {
+        this.tasks=tasks; this.stories=stories; this.chapters=chapters; this.versions=versions; this.proposals=proposals; this.events=events;
         this.versionService=versionService; this.memoryService=memoryService; this.taskService=taskService;
         this.support=support; this.properties=properties; this.usage=usage;
+        this.analytics=analytics;
     }
 
     @Transactional
@@ -64,6 +71,8 @@ public class ChapterEventService {
         if(task==null) throw new IllegalArgumentException("事件引用了不存在的 taskId: "+taskId);
         if(!ChapterTaskType.isChapterTask(task.getTaskType())) throw new IllegalArgumentException("事件引用的不是章节任务");
         validateIdentity(task,fields);
+        if(stories.selectByIdForUpdate(task.getStoryId())==null)
+            throw new IllegalArgumentException("任务故事不存在");
         long sequence=requiredLong(fields,"sequence");
         if(sequence<1) throw new IllegalArgumentException("sequence 必须大于 0");
         AiTaskEvent sameSequence=events.selectByTaskAndSequence(taskId,sequence);
@@ -105,7 +114,44 @@ public class ChapterEventService {
                     modelCalls == null ? null : support.write(modelCalls),
                     AiTaskStatus.SUCCESS.equals(status), task.getErrorCode());
         }
+        recordApprovalMilestones(task, chapter, type, status);
         return new ProcessedEvent(true,response(event,task,chapter));
+    }
+
+    private void recordApprovalMilestones(
+            AiTask task,
+            StoryChapter chapter,
+            String eventType,
+            String status
+    ) {
+        if (!"FINAL_READY".equals(eventType)
+                || !AiTaskStatus.SUCCESS.equals(status)
+                || !ChapterStatus.APPROVED.equals(chapter.getStatus())) {
+            return;
+        }
+        analytics.record(
+                ProductEventNames.CHAPTER_APPROVED,
+                task.getUserId(),
+                task.getStoryId(),
+                task.getId(),
+                "chapter:" + chapter.getId() + ":approved",
+                Map.of("chapterNo", chapter.getChapterNo())
+        );
+        Long approvedCount = chapters.selectCount(
+                Wrappers.<StoryChapter>lambdaQuery()
+                        .eq(StoryChapter::getStoryId, task.getStoryId())
+                        .eq(StoryChapter::getStatus, ChapterStatus.APPROVED)
+        );
+        if (approvedCount != null && approvedCount >= 3) {
+            analytics.record(
+                    ProductEventNames.THIRD_CHAPTER_APPROVED,
+                    task.getUserId(),
+                    task.getStoryId(),
+                    task.getId(),
+                    "story:" + task.getStoryId() + ":third-chapter-approved",
+                    Map.of("approvedChapterCount", approvedCount)
+            );
+        }
     }
 
     private boolean isTerminal(String status) {
