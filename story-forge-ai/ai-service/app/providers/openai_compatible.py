@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.agents.prompts import TOPIC_SYSTEM_PROMPT, build_topic_user_prompt
+from app.agents.prompts import build_topic_user_prompt, topic_system_prompt
 from app.models import ProviderResult, ProviderTopic, TopicGenerateRequest
 from app.providers.base import ProviderError
 
@@ -45,7 +45,7 @@ class OpenAICompatibleProvider:
             "messages": [
                 {
                     "role": "system",
-                    "content": request.prompt_system or TOPIC_SYSTEM_PROMPT,
+                    "content": request.prompt_system or topic_system_prompt(request.content_mode),
                 },
                 {"role": "user", "content": build_topic_user_prompt(request)},
             ],

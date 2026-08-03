@@ -85,6 +85,7 @@ function buildCachedStory(session: TopicSession): StoryProject {
     audience: session.input.audience,
     keywords: session.input.keywords,
     status: 'generated',
+    contentMode: session.input.contentMode || 'SHORT_STORY',
     createdTime: session.generatedAt,
     topics: session.topics,
     selectedTopicId: session.selectedTopicId,
@@ -104,6 +105,7 @@ function mergeWithCache(remote: StoryProject, cache: TopicSession | null): Story
     genre: remote.genre === '未分类' ? cache.input.genre : remote.genre,
     audience: remote.audience || cache.input.audience,
     keywords: remote.keywords || cache.input.keywords,
+    contentMode: remote.contentMode || cache.input.contentMode || 'SHORT_STORY',
     topics: remote.topics?.length ? remote.topics : cache.topics,
     selectedTopicId: remote.selectedTopicId || cache.selectedTopicId,
   }
@@ -223,6 +225,7 @@ async function saveSelection() {
         genre: merged.genre,
         audience: merged.audience || '',
         keywords: merged.keywords || '',
+        contentMode: merged.contentMode || 'SHORT_STORY',
       },
     })
     story.value = merged

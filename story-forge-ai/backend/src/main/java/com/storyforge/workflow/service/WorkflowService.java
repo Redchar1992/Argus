@@ -344,6 +344,13 @@ public class WorkflowService {
         fields.put("topic", topic == null || topic.isMissingNode() ? "" : writeJson(topic));
         fields.put("approved", approved == null ? "" : approved.toString());
         fields.put("notes", notes == null ? "" : notes);
+        StoryProject story = storyService.requireOwned(task.getUserId(), task.getStoryId());
+        fields.put("contentMode", story.getContentMode() == null ? "SHORT_STORY" : story.getContentMode());
+        fields.put("targetChapterCount", String.valueOf(story.getTargetChapterCount() == null ? 10 : story.getTargetChapterCount()));
+        fields.put("targetTotalWords", String.valueOf(story.getTargetTotalWords() == null ? 30_000 : story.getTargetTotalWords()));
+        fields.put("chapterTargetWords", String.valueOf(story.getChapterTargetWords() == null ? 1_800 : story.getChapterTargetWords()));
+        fields.put("viewpoint", story.getViewpoint() == null ? "THIRD_LIMITED" : story.getViewpoint());
+        fields.put("styleProfile", story.getStyleProfile() == null ? "{}" : story.getStyleProfile());
         try {
             requestPublisher.publish(fields);
         } catch (WorkflowDispatchException exception) {

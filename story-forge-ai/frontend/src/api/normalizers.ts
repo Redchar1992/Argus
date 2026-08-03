@@ -26,6 +26,18 @@ function text(value: unknown, fallback = '') {
   return fallback
 }
 
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value)
+  }
+  return undefined
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined
+}
+
 function stringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -92,6 +104,7 @@ const SCORE_DIMENSIONS = [
   { dimension: 'reversal', label: '反转张力' },
   { dimension: 'emotionalValue', label: '情绪价值' },
   { dimension: 'shortDramaFit', label: '短剧适配' },
+  { dimension: 'novelFit', label: '小说连载性' },
 ] as const
 
 function dimensionLabel(dimension: string) {
@@ -240,6 +253,21 @@ export function normalizeStory(value: unknown): StoryProject {
     genre: text(firstValue(story, ['genre', 'category']), '未分类'),
     audience: text(firstValue(story, ['audience', 'targetAudience', 'target_audience'])) || undefined,
     keywords: text(firstValue(story, ['keywords', 'direction'])) || undefined,
+    contentMode:
+      text(firstValue(story, ['contentMode', 'content_mode'])) === 'NOVEL'
+        ? 'NOVEL'
+        : 'SHORT_STORY',
+    targetChapterCount: numberValue(
+      firstValue(story, ['targetChapterCount', 'target_chapter_count']),
+    ),
+    targetTotalWords: numberValue(
+      firstValue(story, ['targetTotalWords', 'target_total_words']),
+    ),
+    chapterTargetWords: numberValue(
+      firstValue(story, ['chapterTargetWords', 'chapter_target_words']),
+    ),
+    viewpoint: text(firstValue(story, ['viewpoint'])) || undefined,
+    styleProfile: recordValue(firstValue(story, ['styleProfile', 'style_profile'])),
     status: text(firstValue(story, ['status']), topics.length ? 'generated' : 'draft'),
     createdTime:
       text(firstValue(story, ['createdTime', 'created_time', 'createdAt', 'created_at'])) || undefined,

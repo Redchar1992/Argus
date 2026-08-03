@@ -43,3 +43,24 @@ def test_final_review_rejects_empty_chapters() -> None:
         )
 
     assert response.status_code == 422
+
+
+def test_novel_final_review_returns_novel_adaptation_score() -> None:
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/ai/final-review",
+            json={
+                "storyTitle": "长篇测试",
+                "genre": "都市情感",
+                "contentMode": "NOVEL",
+                "chapters": [
+                    {"chapterNo": 1, "title": "开端", "content": "冲突发生"},
+                    {"chapterNo": 2, "title": "升级", "content": "线索延伸"},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["novelAdaptation"]["score"] >= 0
+    assert "shortDramaAdaptation" not in body

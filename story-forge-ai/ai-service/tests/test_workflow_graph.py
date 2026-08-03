@@ -53,6 +53,21 @@ def start_request(
     )
 
 
+def novel_start_request() -> WorkflowStartRequest:
+    return WorkflowStartRequest(
+        task_id="novel-task-10001",
+        story_id=5001,
+        topic=week_one_topic(),
+        max_revisions=0,
+        content_mode="NOVEL",
+        target_chapter_count=20,
+        target_total_words=60_000,
+        chapter_target_words=2_500,
+        viewpoint="FIRST_PERSON",
+        style_profile={"tone": "克制", "pacing": "slow_burn"},
+    )
+
+
 @pytest.mark.asyncio
 async def test_default_graph_revises_low_score_and_pauses_for_review() -> None:
     service = StoryWorkflowService()
@@ -80,6 +95,22 @@ async def test_default_graph_revises_low_score_and_pauses_for_review() -> None:
     assert outline_versions == [1, 2]
     assert score_versions == [1, 2]
     assert len(response.model_calls) == 5
+
+
+@pytest.mark.asyncio
+async def test_novel_profile_generates_layered_outline_and_preserves_story_profile() -> None:
+    response = await StoryWorkflowService().start(novel_start_request())
+
+    assert response.status is WorkflowStatus.REVIEW_REQUIRED
+    assert response.content_mode == "NOVEL"
+    assert response.target_chapter_count == 20
+    assert response.chapter_target_words == 2_500
+    assert response.viewpoint == "FIRST_PERSON"
+    assert response.style_profile == {"tone": "克制", "pacing": "slow_burn"}
+    assert len(response.outline) == 40
+    assert [node.node_no for node in response.outline] == list(range(1, 41))
+    assert response.outline[-1].stage == "结局"
+    assert sum(node.is_twist for node in response.outline) >= 4
 
 
 @pytest.mark.asyncio

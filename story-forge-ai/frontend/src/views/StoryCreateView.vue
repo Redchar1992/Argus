@@ -11,7 +11,7 @@ import {
 } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
-import { computed, onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import TopicCard from '@/components/TopicCard.vue'
@@ -37,6 +37,15 @@ const genreOptions = [
   '轻喜剧',
 ]
 const audienceOptions = ['女性', '男性', '年轻女性', '年轻男性', '大众']
+const contentModeOptions = [
+  { value: 'SHORT_STORY' as const, label: '短故事', description: '3–10 章，节奏紧凑，适合快速验证' },
+  { value: 'NOVEL' as const, label: '小说', description: '20–200 章，支持分章持续创作' },
+]
+const viewpointOptions = [
+  { value: 'THIRD_LIMITED', label: '第三人称限知' },
+  { value: 'FIRST_PERSON', label: '第一人称' },
+  { value: 'THIRD_OMNISCIENT', label: '第三人称全知' },
+]
 const keywordSuggestions = ['复仇', '身份反转', '先婚后爱', '逆袭', '救赎', '爽感', '悬疑', '治愈']
 const loadingMessages = [
   'Topic Agent 正在拆解题材与受众…',
@@ -63,7 +72,27 @@ const form = reactive<StoryForm>({
   genre: '',
   audience: '',
   keywords: '',
+  contentMode: 'SHORT_STORY',
+  targetChapterCount: 10,
+  targetTotalWords: 30000,
+  chapterTargetWords: 1800,
+  viewpoint: 'THIRD_LIMITED',
 })
+
+watch(
+  () => form.contentMode,
+  (mode) => {
+    if (mode === 'NOVEL') {
+      if (!form.targetChapterCount || form.targetChapterCount < 20) form.targetChapterCount = 30
+      if (!form.targetTotalWords || form.targetTotalWords < 100_000) form.targetTotalWords = 300_000
+      if (!form.chapterTargetWords || form.chapterTargetWords < 800) form.chapterTargetWords = 2500
+    } else {
+      if (!form.targetChapterCount || form.targetChapterCount > 10) form.targetChapterCount = 10
+      if (!form.targetTotalWords || form.targetTotalWords > 80_000) form.targetTotalWords = 30_000
+      if (!form.chapterTargetWords || form.chapterTargetWords > 5000) form.chapterTargetWords = 1800
+    }
+  },
+)
 
 function validateKeywords(
   _rule: unknown,
@@ -96,6 +125,7 @@ const rules: FormRules<StoryForm> = {
     { min: 2, max: 50, message: '题材需为 2–50 个字符', trigger: 'change' },
   ],
   audience: [{ required: true, message: '请选择目标受众', trigger: 'change' }],
+  contentMode: [{ required: true, message: '请选择内容模式', trigger: 'change' }],
   keywords: [
     { required: true, message: '请输入情绪或剧情方向', trigger: 'blur' },
     { max: 120, message: '创作方向请控制在 120 个字符内', trigger: 'blur' },
@@ -138,6 +168,11 @@ async function createProjectIfNeeded() {
     genre: form.genre,
     audience: form.audience,
     keywords: form.keywords.trim(),
+    contentMode: form.contentMode,
+    targetChapterCount: form.targetChapterCount,
+    targetTotalWords: form.targetTotalWords,
+    chapterTargetWords: form.chapterTargetWords,
+    viewpoint: form.viewpoint,
   })
   if (story.id === '' || story.id === null || story.id === undefined) {
     throw new Error('故事已提交，但服务未返回故事 ID。')
@@ -159,6 +194,7 @@ async function handleGenerate() {
       genre: form.genre,
       audience: form.audience,
       keywords: form.keywords.trim(),
+      contentMode: form.contentMode,
     })
     if (!result.topics.length) {
       throw new Error('AI 已返回结果，但未找到可展示的故事方案。')
@@ -177,6 +213,7 @@ async function handleGenerate() {
         genre: form.genre,
         audience: form.audience,
         keywords: form.keywords.trim(),
+        contentMode: form.contentMode,
       },
     })
     storyStore.updateStory(id, {
@@ -184,6 +221,11 @@ async function handleGenerate() {
       topics: result.topics,
       audience: form.audience,
       keywords: form.keywords.trim(),
+      contentMode: form.contentMode,
+      targetChapterCount: form.targetChapterCount,
+      targetTotalWords: form.targetTotalWords,
+      chapterTargetWords: form.chapterTargetWords,
+      viewpoint: form.viewpoint,
     })
     stage.value = 'results'
     ElMessage.success(`已生成 ${result.topics.length} 个故事方案`)
@@ -224,6 +266,7 @@ async function saveSelection() {
         genre: refreshed.genre || form.genre,
         audience: refreshed.audience || form.audience,
         keywords: refreshed.keywords || form.keywords.trim(),
+        contentMode: refreshed.contentMode || form.contentMode,
       },
     })
     storyStore.updateStory(storyId.value, {
@@ -314,6 +357,65 @@ onBeforeUnmount(stopLoadingMessages)
               <div class="section-content">
                 <div class="field-heading">
                   <div>
+                    <h3>内容模式</h3>
+                    <p>先选择短故事或小说，AI 会使用不同的结构和写作节奏。</p>
+                  </div>
+                  <el-icon><MagicStick /></el-icon>
+                </div>
+                <el-form-item prop="contentMode">
+                  <div class="audience-options mode-options">
+                    <button
+                      v-for="option in contentModeOptions"
+                      :key="option.value"
+                      type="button"
+                      :class="{ active: form.contentMode === option.value }"
+                      @click="form.contentMode = option.value"
+                    >
+                      <strong>{{ option.label }}</strong>
+                      <small>{{ option.description }}</small>
+                      <el-icon v-if="form.contentMode === option.value"><Check /></el-icon>
+                    </button>
+                  </div>
+                </el-form-item>
+                <div class="profile-grid">
+                  <el-form-item label="目标章节数">
+                    <el-input-number
+                      v-model="form.targetChapterCount"
+                      :min="form.contentMode === 'NOVEL' ? 20 : 1"
+                      :max="form.contentMode === 'NOVEL' ? 200 : 10"
+                      controls-position="right"
+                      size="large"
+                    />
+                  </el-form-item>
+                  <el-form-item label="单章目标字数">
+                    <el-input-number
+                      v-model="form.chapterTargetWords"
+                      :min="800"
+                      :max="8000"
+                      :step="200"
+                      controls-position="right"
+                      size="large"
+                    />
+                  </el-form-item>
+                  <el-form-item label="叙事视角">
+                    <el-select v-model="form.viewpoint" size="large">
+                      <el-option
+                        v-for="option in viewpointOptions"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
+                      />
+                    </el-select>
+                  </el-form-item>
+                </div>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="section-number">03</div>
+              <div class="section-content">
+                <div class="field-heading">
+                  <div>
                     <h3>目标受众</h3>
                     <p>不同受众期待不同的冲突节奏与情绪回报。</p>
                   </div>
@@ -337,7 +439,7 @@ onBeforeUnmount(stopLoadingMessages)
             </section>
 
             <section class="form-section">
-              <div class="section-number">03</div>
+              <div class="section-number">04</div>
               <div class="section-content">
                 <div class="field-heading">
                   <div>
@@ -675,6 +777,40 @@ onBeforeUnmount(stopLoadingMessages)
   color: var(--sf-primary);
   background: #f6f3ff;
   box-shadow: 0 0 0 2px rgba(92, 73, 213, 0.06);
+}
+
+.mode-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mode-options button {
+  display: grid;
+  gap: 4px;
+  padding: 12px 28px 12px 12px;
+  text-align: left;
+}
+
+.mode-options button strong {
+  color: var(--sf-ink-strong);
+  font-size: 12px;
+}
+
+.mode-options button small {
+  color: var(--sf-ink-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.profile-grid :deep(.el-input-number),
+.profile-grid :deep(.el-select) {
+  width: 100%;
 }
 
 .audience-options .el-icon {

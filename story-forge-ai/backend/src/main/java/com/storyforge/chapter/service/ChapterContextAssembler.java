@@ -13,8 +13,10 @@ import com.storyforge.artifact.StoryArtifactService;
 import com.storyforge.chapter.entity.StoryChapter;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.story.StoryProject;
+import com.storyforge.story.StoryContentMode;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,6 +24,8 @@ public class ChapterContextAssembler {
     private final StoryArtifactService artifacts;
     private final JdbcTemplate jdbc;
     private final ChapterSupport support;
+    @Value("${app.ai.chapter-context-max-chars:40000}")
+    private int maxContextChars = 40_000;
     public ChapterContextAssembler(StoryArtifactService artifacts, JdbcTemplate jdbc, ChapterSupport support) {
         this.artifacts = artifacts; this.jdbc = jdbc; this.support = support;
     }
@@ -31,7 +35,14 @@ public class ChapterContextAssembler {
         payload.put("storyTitle", story.getTitle());
         payload.put("genre", story.getGenre());
         payload.put("targetAudience", story.getAudience() == null ? "" : story.getAudience());
-        payload.set("styleProfile", support.mapper().createObjectNode());
+        payload.put("contentMode", StoryContentMode.parse(story.getContentMode()).name());
+        payload.put("targetChapterCount", story.getTargetChapterCount() == null ? 10 : story.getTargetChapterCount());
+        payload.put("targetTotalWords", story.getTargetTotalWords() == null ? 30_000 : story.getTargetTotalWords());
+        payload.put("chapterTargetWords", story.getChapterTargetWords() == null ? 1_800 : story.getChapterTargetWords());
+        payload.put("viewpoint", story.getViewpoint() == null ? "THIRD_LIMITED" : story.getViewpoint());
+        JsonNode style = story.getStyleProfile() == null ? null : support.read(story.getStyleProfile());
+        payload.set("styleProfile", style == null || !style.isObject()
+                ? support.mapper().createObjectNode() : style);
         JsonNode finalArtifact = content(story.getId(), ArtifactType.WORKFLOW_FINAL);
         JsonNode characters = child(finalArtifact, "characters");
         if (characters == null) characters = content(story.getId(), ArtifactType.CHARACTER);
@@ -79,9 +90,53 @@ public class ChapterContextAssembler {
                        payoff_chapter_no AS payoffChapter, status
                 FROM story_foreshadowing WHERE story_id=? AND status<>'PAID_OFF' ORDER BY id
                 """, story.getId()));
+        boundContext(payload);
         payload.put("targetLength", targetLength);
         payload.put("chapterNo", chapter.getChapterNo());
+        payload.put("contextSnapshotHash", support.sha256(support.write(payload)));
         return payload;
+    }
+
+    private void boundContext(ObjectNode payload) {
+        ObjectNode omitted = support.mapper().createObjectNode();
+        cap(payload, "characters", 24, omitted);
+        cap(payload, "canonFacts", 80, omitted);
+        cap(payload, "relationshipStates", 80, omitted);
+        cap(payload, "recentSummaries", 3, omitted);
+        cap(payload, "unresolvedThreads", 60, omitted);
+        cap(payload, "foreshadowingLedger", 60, omitted);
+
+        String[] trimOrder = {"foreshadowingLedger", "unresolvedThreads", "relationshipStates", "canonFacts", "characters"};
+        boolean trimmed = false;
+        while (support.write(payload).length() > Math.max(10_000, maxContextChars)) {
+            boolean removed = false;
+            for (String field : trimOrder) {
+                JsonNode node = payload.get(field);
+                if (node != null && node.isArray() && node.size() > 1) {
+                    ((ArrayNode) node).remove(0);
+                    omitted.put(field, omitted.path(field).asInt(0) + 1);
+                    removed = true;
+                    trimmed = true;
+                    break;
+                }
+            }
+            if (!removed) break;
+        }
+        if (trimmed || !omitted.isEmpty()) {
+            payload.set("contextOmitted", omitted);
+        }
+    }
+
+    private void cap(ObjectNode payload, String field, int max, ObjectNode omitted) {
+        JsonNode node = payload.get(field);
+        if (node == null || !node.isArray()) return;
+        ArrayNode array = (ArrayNode) node;
+        int removed = 0;
+        while (array.size() > max) {
+            array.remove(0);
+            removed++;
+        }
+        if (removed > 0) omitted.put(field, removed);
     }
 
     private ArrayNode currentOutlineNodes(JsonNode outlineNodes, int chapterNo) {

@@ -7,28 +7,31 @@ from typing import Any
 from app.agents.chapter_utils import chapter_artifact, chapter_progress
 from app.agents.workflow_utils import invoke_structured
 from app.infrastructure.llm_factory import StructuredModel, get_creative_model
-from app.prompts import load_prompt
+from app.prompts import load_profile_prompt
 from app.schemas.chapter import ChapterPlan
 
 
 class ChapterPlanAgent:
     def __init__(self, model: StructuredModel | None = None) -> None:
         self.model = model or get_creative_model()
-        self.prompt = load_prompt("chapter_plan")
+        self.prompt = None
 
     async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
+        prompt, prompt_name = load_profile_prompt("chapter_plan", state.get("content_mode", "SHORT_STORY"))
         generation, call = await invoke_structured(
             self.model,
             ChapterPlan,
             node="plan_chapter",
-            prompt_name="chapter_plan",
-            prompt=self.prompt,
+            prompt_name=prompt_name,
+            prompt=prompt,
             payload={
                 "story_title": state.get("story_title", ""),
                 "genre": state.get("genre", ""),
                 "target_audience": state.get("target_audience", ""),
                 "chapter_no": state["chapter_no"],
                 "target_length": state.get("target_length", 1200),
+                "contentMode": state.get("content_mode", "SHORT_STORY"),
+                "viewpoint": state.get("viewpoint", "THIRD_LIMITED"),
                 **state["context_packet"],
             },
             purpose="chapter_plan",
@@ -53,7 +56,7 @@ class ChapterPlanAgent:
                     version_no=1,
                     status="REVIEW_REQUIRED",
                     content=plan_data,
-                    prompt_name="chapter_plan",
+                    prompt_name=prompt_name,
                     model_name=generation.model_name,
                 )
             ],

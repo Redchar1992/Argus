@@ -26,6 +26,12 @@ export async function createStory(input: CreateStoryInput): Promise<StoryProject
       genre: input.genre,
       audience: input.audience,
       keywords: input.keywords,
+      contentMode: input.contentMode || 'SHORT_STORY',
+      targetChapterCount: input.targetChapterCount,
+      targetTotalWords: input.targetTotalWords,
+      chapterTargetWords: input.chapterTargetWords,
+      viewpoint: input.viewpoint,
+      styleProfile: input.styleProfile,
       status: 'draft',
       createdTime: new Date().toISOString(),
     }
@@ -38,6 +44,12 @@ export async function createStory(input: CreateStoryInput): Promise<StoryProject
     genre: story.genre === '未分类' ? input.genre : story.genre,
     audience: story.audience || input.audience,
     keywords: story.keywords || input.keywords,
+    contentMode: story.contentMode || input.contentMode || 'SHORT_STORY',
+    targetChapterCount: story.targetChapterCount || input.targetChapterCount,
+    targetTotalWords: story.targetTotalWords || input.targetTotalWords,
+    chapterTargetWords: story.chapterTargetWords || input.chapterTargetWords,
+    viewpoint: story.viewpoint || input.viewpoint,
+    styleProfile: story.styleProfile || input.styleProfile,
   }
 }
 

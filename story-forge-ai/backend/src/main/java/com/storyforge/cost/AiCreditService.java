@@ -110,6 +110,11 @@ public class AiCreditService {
                 rs.getLong("balance_after"), rs.getString("description"), timestamp(rs.getTimestamp("created_time"))), userId);
     }
 
+    /** Used by replay-safe consumers when processing tasks created before quota enforcement. */
+    public boolean hasLog(String idempotencyKey) {
+        return existsLog(idempotencyKey);
+    }
+
     private boolean existsLog(String key) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM user_ai_credit_log WHERE idempotency_key=?", Integer.class, key);
         return count != null && count > 0;

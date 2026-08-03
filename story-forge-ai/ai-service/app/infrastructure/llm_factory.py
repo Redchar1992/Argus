@@ -83,14 +83,15 @@ class TextModel(Protocol):
         """Stream ordinary prose without wrapping it in structured JSON."""
 
 
-def _stage(node_no: int) -> str:
-    if node_no <= 3:
+def _stage(node_no: int, total_nodes: int = 20) -> str:
+    quarter = max(1, total_nodes // 4)
+    if node_no <= max(3, quarter):
         return "开篇"
-    if node_no <= 8:
+    if node_no <= max(quarter * 2, 8):
         return "发展"
-    if node_no <= 14:
+    if node_no <= max(quarter * 3, 14):
         return "升级"
-    if node_no <= 18:
+    if node_no <= max(quarter * 4 - 2, 18):
         return "高潮"
     return "结局"
 
@@ -229,6 +230,9 @@ class LocalStructuredModel:
     def _outline(self, payload: dict[str, Any], *, revised: bool) -> OutlineResult:
         topic = payload["topic"]
         revision_count = int(payload.get("revision_count", 0))
+        content_mode = str(payload.get("contentMode", payload.get("content_mode", "SHORT_STORY")))
+        target_chapters = int(payload.get("targetChapterCount") or 10)
+        total_nodes = 20 if content_mode != "NOVEL" else max(40, min(400, target_chapters * 2))
         next_version = revision_count + 1 if revised else 0
         note = str(payload.get("review_notes") or "")
         revision_hint = (
@@ -236,15 +240,15 @@ class LocalStructuredModel:
             if revised and note
             else ("；本版强化反派利益动机与前置证据" if revised else "")
         )
-        twists = {4, 8, 12, 16}
+        twists = set(range(4, total_nodes + 1, max(4, total_nodes // 8)))
         nodes: list[OutlineNode] = []
-        for node_no in range(1, 21):
-            stage = _stage(node_no)
+        for node_no in range(1, total_nodes + 1):
+            stage = _stage(node_no, total_nodes)
             is_twist = node_no in twists
             if node_no == 1:
                 event = "签字现场，主角被公开逐出项目并收到匿名证据包"
                 conflict = "她必须在证据被销毁前决定反击，反派当场施压"
-            elif node_no == 20:
+            elif node_no == total_nodes:
                 event = "主角公开完整证据链，让责任人受罚并选择新的生活"
                 conflict = "她必须在复仇快感与不伤及无辜之间作出最终选择"
             else:
@@ -261,10 +265,10 @@ class LocalStructuredModel:
             else:
                 new_information = f"获得与核心利益链相关的第{node_no}条可验证信息"
 
-            if node_no <= 10:
+            if node_no <= total_nodes // 2:
                 setup = f"埋下证据线索{node_no}，将在高潮阶段回收"
-            elif node_no >= 15:
-                setup = f"回收前半段证据线索{max(1, node_no - 10)}"
+            elif node_no >= max(15, total_nodes - total_nodes // 4):
+                setup = f"回收前半段证据线索{max(1, node_no - total_nodes // 2)}"
             else:
                 setup = "承接既有伏笔并缩小真相范围"
 
@@ -277,13 +281,13 @@ class LocalStructuredModel:
                     protagonist_goal=("保全证据、查清真相，并避免无辜者成为反击代价"),
                     emotional_target=(
                         "释放压抑后的尊严与新生"
-                        if node_no == 20
+                        if node_no == total_nodes
                         else f"让观众感到第{node_no}轮紧张、期待或逆袭满足"
                     ),
                     new_information=new_information,
                     cliffhanger=(
                         "无"
-                        if node_no == 20
+                        if node_no == total_nodes
                         else f"下一步行动前出现指向更深利益方的第{node_no}个疑问"
                     ),
                     is_twist=is_twist,
@@ -357,7 +361,7 @@ class LocalStructuredModel:
         )
         ally = names[2] if len(names) > 2 else protagonist
         chapter_no = int(payload.get("chapter_no", 1))
-        target = min(5000, max(800, int(payload.get("target_length", 1200))))
+        target = min(8000, max(800, int(payload.get("target_length", 1200))))
         current_nodes = payload.get("currentOutlineNodes") or payload.get(
             "outlineNodes"
         )
@@ -452,7 +456,7 @@ class LocalStructuredModel:
             names[1] if len(names) > 1 else "顾承泽",
         )
         target = min(
-            5000,
+            8000,
             max(
                 800,
                 int(
@@ -693,6 +697,7 @@ class LocalStructuredModel:
         content_score = min(100, 70 + min(20, len(chapters) * 3) - len(repeated) * 10)
         hit_score = min(100, 72 + min(15, len(chapters) * 2))
         drama_score = min(100, 68 + min(20, len(chapters) * 2))
+        novel_score = min(100, 70 + min(22, len(chapters) * 2))
         issues = []
         if repeated:
             issues.append(
@@ -727,7 +732,8 @@ class LocalStructuredModel:
                     "affectedChapters": [chapter_numbers[0]],
                 }
             )
-        total = round(content_score * 0.4 + hit_score * 0.4 + drama_score * 0.2)
+        adaptation_score = novel_score if payload.get("contentMode") == "NOVEL" else drama_score
+        total = round(content_score * 0.4 + hit_score * 0.4 + adaptation_score * 0.2)
         level = (
             "S"
             if total >= 90
@@ -739,8 +745,7 @@ class LocalStructuredModel:
             if total >= 60
             else "D"
         )
-        return FinalStoryReport.model_validate(
-            {
+        result = {
                 "contentQuality": {
                     "score": content_score,
                     "summary": "章节已形成可供全书检查的正文链路。",
@@ -752,12 +757,6 @@ class LocalStructuredModel:
                     "summary": "开篇冲突和连续阅读动力具备基础。",
                     "strengths": ["冲突可视化", "具备情绪推进空间"],
                     "weaknesses": ["商业判断不等同于收益保证"],
-                },
-                "shortDramaAdaptation": {
-                    "score": drama_score,
-                    "summary": "当前文本可以继续拆解为短剧场景。",
-                    "strengths": ["场景边界明确", "章末有继续阅读动力"],
-                    "weaknesses": ["需要人工评估拍摄成本"],
                 },
                 "criticalIssues": [
                     item for item in issues if item["severity"] == "CRITICAL"
@@ -784,7 +783,21 @@ class LocalStructuredModel:
                     "综合分仅表示系统按当前文本和规则得出的内容评估，不代表真实收益保证。"
                 ),
             }
-        )
+        if payload.get("contentMode") == "NOVEL":
+            result["novelAdaptation"] = {
+                "score": novel_score,
+                "summary": "当前文本具备持续连载和人物成长的基础。",
+                "strengths": ["阶段目标明确", "保留后续悬念"],
+                "weaknesses": ["仍需人工复核长线伏笔"],
+            }
+        else:
+            result["shortDramaAdaptation"] = {
+                "score": drama_score,
+                "summary": "当前文本可以继续拆解为短剧场景。",
+                "strengths": ["场景边界明确", "章末有继续阅读动力"],
+                "weaknesses": ["需要人工评估拍摄成本"],
+            }
+        return FinalStoryReport.model_validate(result)
 
 
 class OpenAICompatibleStructuredModel:

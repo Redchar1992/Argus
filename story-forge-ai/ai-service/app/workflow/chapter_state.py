@@ -14,6 +14,12 @@ class ChapterState(TypedDict, total=False):
     chapter_no: int
     thread_id: str
     mode: str
+    content_mode: str
+    target_chapter_count: int
+    target_total_words: int
+    chapter_target_words: int
+    viewpoint: str
+    context_snapshot_hash: str
 
     # Story context
     story_title: str

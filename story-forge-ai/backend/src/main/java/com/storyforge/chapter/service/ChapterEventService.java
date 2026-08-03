@@ -25,6 +25,7 @@ import com.storyforge.chapter.mapper.StoryChapterVersionMapper;
 import com.storyforge.chapter.vo.TaskEventResponse;
 import com.storyforge.common.config.ChapterWorkflowProperties;
 import com.storyforge.cost.AiUsageRecorder;
+import com.storyforge.cost.AiCreditService;
 import com.storyforge.task.AiTask;
 import com.storyforge.task.AiTaskMapper;
 import com.storyforge.task.AiTaskStatus;
@@ -47,6 +48,7 @@ public class ChapterEventService {
     private final ChapterSupport support;
     private final ChapterWorkflowProperties properties;
     private final AiUsageRecorder usage;
+    private final AiCreditService credits;
     private final ProductAnalyticsService analytics;
 
     public ChapterEventService(AiTaskMapper tasks, StoryProjectMapper stories,
@@ -54,10 +56,10 @@ public class ChapterEventService {
             StoryChapterVersionMapper versions, RewriteProposalMapper proposals, AiTaskEventMapper events,
             ChapterVersionService versionService, StoryMemoryService memoryService,
             ChapterTaskService taskService, ChapterSupport support, ChapterWorkflowProperties properties,
-            AiUsageRecorder usage, ProductAnalyticsService analytics) {
+            AiUsageRecorder usage, AiCreditService credits, ProductAnalyticsService analytics) {
         this.tasks=tasks; this.stories=stories; this.chapters=chapters; this.versions=versions; this.proposals=proposals; this.events=events;
         this.versionService=versionService; this.memoryService=memoryService; this.taskService=taskService;
-        this.support=support; this.properties=properties; this.usage=usage;
+        this.support=support; this.properties=properties; this.usage=usage; this.credits=credits;
         this.analytics=analytics;
     }
 
@@ -113,9 +115,22 @@ public class ChapterEventService {
             usage.recordModelCalls(task, task.getTaskType(),
                     modelCalls == null ? null : support.write(modelCalls),
                     AiTaskStatus.SUCCESS.equals(status), task.getErrorCode());
+            settleCredits(task, status);
         }
         recordApprovalMilestones(task, chapter, type, status);
         return new ProcessedEvent(true,response(event,task,chapter));
+    }
+
+    private void settleCredits(AiTask task, String status) {
+        long cost = ChapterTaskService.creditCost(task.getTaskType());
+        if (!credits.hasLog(ChapterTaskService.freezeKey(task))) return;
+        if (AiTaskStatus.FAILED.equals(status)) {
+            credits.release(task.getUserId(), task.getId(), ChapterTaskService.freezeKey(task), cost,
+                    "章节 AI 任务失败，释放预冻结额度");
+            return;
+        }
+        credits.settleFrozen(task.getUserId(), task.getId(), ChapterTaskService.freezeKey(task),
+                ChapterTaskService.settleKey(task), cost, cost, "章节 AI 任务完成");
     }
 
     private void recordApprovalMilestones(
@@ -202,6 +217,7 @@ public class ChapterEventService {
         event.setCurrentNode("backend_validation");event.setProgress(task.getProgress());
         event.setDataJson(support.write(data));event.setCreatedTime(LocalDateTime.now());
         events.insert(event);trimEvents(taskId);
+        settleCredits(task, AiTaskStatus.FAILED);
         return new ProcessedEvent(true,response(event,task,chapter));
     }
 
@@ -234,8 +250,8 @@ public class ChapterEventService {
         if(plan==null||!plan.isObject()) throw new IllegalArgumentException("plan 必须是对象");
         JsonNode scenes=plan.get("scenes"); if(scenes==null||!scenes.isArray()||scenes.size()<3||scenes.size()>6)
             throw new IllegalArgumentException("章节计划必须包含 3 至 6 个场景");
-        int target=plan.path("targetLength").asInt(0); if(target<800||target>5000)
-            throw new IllegalArgumentException("targetLength 必须在 800 到 5000 之间");
+        int target=plan.path("targetLength").asInt(0); if(target<800||target>8000)
+            throw new IllegalArgumentException("targetLength 必须在 800 到 8000 之间");
         validateOutlineCoverage(task,plan,scenes);
         Set<String> known=knownCharacters(task);
         for(JsonNode scene:scenes){

@@ -53,7 +53,7 @@ class ChapterPlan(ChapterModel):
     chapter_goal: str = Field(min_length=4, max_length=400)
     opening_hook: str = Field(min_length=4, max_length=320)
     ending_hook: str = Field(min_length=4, max_length=320)
-    target_length: int = Field(ge=800, le=5000)
+    target_length: int = Field(ge=800, le=8000)
     scenes: list[ScenePlan] = Field(min_length=3, max_length=6)
 
     @model_validator(mode="after")

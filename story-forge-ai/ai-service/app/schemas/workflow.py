@@ -91,6 +91,12 @@ class WorkflowStartRequest(CamelModel):
     topic: SelectedTopic
     thread_id: str | None = Field(default=None, min_length=1, max_length=128)
     max_revisions: int = Field(default=2, ge=0, le=2)
+    content_mode: Literal["SHORT_STORY", "NOVEL"] = "SHORT_STORY"
+    target_chapter_count: int = Field(default=10, ge=1, le=200)
+    target_total_words: int = Field(default=30_000, ge=1_000, le=2_000_000)
+    chapter_target_words: int = Field(default=1_800, ge=800, le=8_000)
+    viewpoint: str = Field(default="THIRD_LIMITED", max_length=32)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviewDecision(CamelModel):
@@ -112,6 +118,12 @@ class WorkflowRunResponse(CamelModel):
     thread_id: str
     task_id: str
     story_id: int
+    content_mode: Literal["SHORT_STORY", "NOVEL"] = "SHORT_STORY"
+    target_chapter_count: int = Field(default=10, ge=1, le=200)
+    target_total_words: int = Field(default=30_000, ge=1_000, le=2_000_000)
+    chapter_target_words: int = Field(default=1_800, ge=800, le=8_000)
+    viewpoint: str = Field(default="THIRD_LIMITED", max_length=32)
+    style_profile: dict[str, Any] = Field(default_factory=dict)
     status: WorkflowStatus
     current_node: str
     revision_count: int = Field(ge=0)
@@ -144,6 +156,12 @@ class RedisWorkflowMessage(CamelModel):
     approved: bool | None = None
     notes: str = Field(default="", max_length=2000)
     max_revisions: int = Field(default=2, ge=0, le=2)
+    content_mode: Literal["SHORT_STORY", "NOVEL"] = Field(default="SHORT_STORY", alias="contentMode")
+    target_chapter_count: int = Field(default=10, ge=1, le=200, alias="targetChapterCount")
+    target_total_words: int = Field(default=30_000, ge=1_000, le=2_000_000, alias="targetTotalWords")
+    chapter_target_words: int = Field(default=1_800, ge=800, le=8_000, alias="chapterTargetWords")
+    viewpoint: str = Field(default="THIRD_LIMITED", max_length=32)
+    style_profile: dict[str, Any] = Field(default_factory=dict, alias="styleProfile")
 
     @field_validator("thread_id", "notes", mode="before")
     @classmethod

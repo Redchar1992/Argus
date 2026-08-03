@@ -6,6 +6,9 @@ import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -25,6 +28,7 @@ import com.storyforge.chapter.mapper.StoryChapterVersionMapper;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.cost.AiCreditService;
 import com.storyforge.story.StoryProject;
+import com.storyforge.story.StoryContentMode;
 import com.storyforge.story.StoryProjectMapper;
 import com.storyforge.story.StoryService;
 import com.storyforge.prompt.PromptResolver;
@@ -83,9 +87,10 @@ public class FinalReportService {
         request.put("storyTitle", story.getTitle());
         request.put("genre", story.getGenre());
         request.put("targetAudience", story.getAudience());
+        StoryContentMode contentMode = StoryContentMode.parse(story.getContentMode());
+        request.put("contentMode", contentMode.name());
         ArrayNode chapterPayload = request.putArray("chapters");
         int wordCount = 0;
-        int reviewChars = 0;
         for (StoryChapter chapter : chapters) {
             if (!ChapterStatus.APPROVED.equals(chapter.getStatus()) || chapter.getCurrentVersionId() == null) {
                 throw conflict("FINAL_REVIEW_CHAPTER_NOT_APPROVED", "请先批准全部章节，再执行全书终审");
@@ -98,19 +103,21 @@ public class FinalReportService {
             item.put("chapterNo", chapter.getChapterNo());
             item.put("title", chapter.getTitle() == null ? "第" + chapter.getChapterNo() + "章" : chapter.getTitle());
             item.put("content", version.getContent());
-            reviewChars += version.getContent().length();
-            if (reviewChars > maxReviewChars) {
-                throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "FINAL_REVIEW_TOO_LARGE", "全书正文超过终审长度限制，请分段处理后再试");
-            }
             wordCount += version.getContent().codePointCount(0, version.getContent().length());
         }
         request.set("characters", rowsAsJson("SELECT subject_name AS name, fact_value AS factValue FROM story_fact WHERE story_id=? AND fact_type='CHARACTER'", storyId));
         request.set("canonFacts", rowsAsJson("SELECT fact_key AS factKey, fact_type AS factType, subject_name AS subject, predicate_name AS predicate, fact_value AS factValue, visibility, source_chapter_no AS sourceChapter FROM story_fact WHERE story_id=? AND status='ACTIVE'", storyId));
         request.set("unresolvedThreads", rowsAsJson("SELECT thread_key AS threadKey, description, status, introduced_chapter_no AS introducedChapter FROM story_plot_thread WHERE story_id=? AND status <> 'RESOLVED'", storyId));
         request.set("foreshadowingLedger", rowsAsJson("SELECT foreshadow_key AS foreshadowKey, setup_text AS setup, setup_chapter_no AS setupChapter, payoff_plan AS payoffPlan, status FROM story_foreshadowing WHERE story_id=?", storyId));
-        PromptResolver.Selection prompt = prompts.resolve(userId, "final_review", "final_review_v1");
+        PromptResolver.Selection prompt = prompts.resolve(
+                userId,
+                "final_review",
+                contentMode == StoryContentMode.NOVEL ? "final_review_novel_v1" : "final_review_v1"
+        );
         request.put("promptVersion", prompt.versionLabel());
         if (prompt.systemPrompt() != null) request.put("promptSystem", prompt.systemPrompt());
+
+        List<ObjectNode> reviewBatches = reviewBatches(request, chapterPayload);
 
         long started = System.currentTimeMillis();
         String contentHash = sha256(write(request));
@@ -124,47 +131,64 @@ public class FinalReportService {
         }
         String freezeKey = "final-review:freeze:" + storyId + ":" + contentHash;
         String settleKey = "final-review:settle:" + storyId + ":" + contentHash;
-        credits.freeze(userId, null, freezeKey, 30, "全书终审预冻结");
-        JsonNode report = ai.finalReview(request);
-        validateReportContract(report);
-        report = normalizeReport(report);
-        int versionNo = nextVersion(storyId);
-        String reportJson = write(report);
-        String modelName = report.path("modelName").asText("final-review");
-        String promptVersion = prompt.versionLabel();
-        jdbc.update("""
+        long reservedCredits = 30L * reviewBatches.size();
+        credits.freeze(userId, null, freezeKey, reservedCredits, "全书终审预冻结");
+        List<JsonNode> reports = new ArrayList<>();
+        long inputTokens = 0;
+        long outputTokens = 0;
+        boolean settled = false;
+        try {
+            for (ObjectNode batch : reviewBatches) {
+                JsonNode batchReport = ai.finalReview(batch);
+                validateReportContract(batchReport, contentMode);
+                JsonNode normalizedBatch = normalizeReport(batchReport, contentMode);
+                reports.add(normalizedBatch);
+                inputTokens += Math.max(1, batch.toString().length() / 4);
+                outputTokens += Math.max(1, normalizedBatch.toString().length() / 4);
+            }
+            JsonNode report = mergeReports(reports, contentMode);
+            int versionNo = nextVersion(storyId);
+            String reportJson = write(report);
+            String modelName = report.path("modelName").asText("final-review");
+            String promptVersion = prompt.versionLabel();
+            jdbc.update("""
                 INSERT INTO story_final_report
                 (story_id, report_version, status, report_json, total_score, level, content_hash,
                  word_count,
                  prompt_version, model_name, created_by, created_time)
                 VALUES (?, ?, 'READY', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, storyId, versionNo, reportJson, report.path("total").asInt(),
-                report.path("level").asText(), contentHash, wordCount, promptVersion, modelName, userId);
-        Long id = jdbc.queryForObject("SELECT id FROM story_final_report WHERE story_id=? AND report_version=?", Long.class, storyId, versionNo);
-        long duration = System.currentTimeMillis() - started;
-        long inputTokens = Math.max(1, request.toString().length() / 4);
-        long outputTokens = Math.max(1, reportJson.length() / 4);
-        jdbc.update("""
+                    report.path("level").asText(), contentHash, wordCount, promptVersion, modelName, userId);
+            Long id = jdbc.queryForObject("SELECT id FROM story_final_report WHERE story_id=? AND report_version=?", Long.class, storyId, versionNo);
+            long duration = System.currentTimeMillis() - started;
+            jdbc.update("""
                 INSERT INTO ai_model_usage
                 (story_id, user_id, agent_type, provider, model_name, prompt_key, prompt_version,
                  input_tokens, output_tokens, estimated_cost, actual_cost, cost_status,
                  duration_ms, success, created_time)
                 VALUES (?, ?, 'FINAL_REVIEW', 'ai-service', ?, 'final_review', ?, ?, ?, ?, ?, 'ESTIMATED', ?, TRUE, CURRENT_TIMESTAMP)
-                """, storyId, userId, modelName, prompt.version(), inputTokens, outputTokens,
-                (inputTokens + outputTokens) / 100000.0, (inputTokens + outputTokens) / 100000.0, duration);
-        credits.settleFrozen(userId, null, freezeKey, settleKey, 30, 30, "全书终审");
-        FinalReportResponse created = response(
-                id,
-                storyId,
-                versionNo,
-                report,
-                wordCount,
-                contentHash,
-                promptVersion,
-                modelName
-        );
-        recordCreated(userId, created);
-        return created;
+                    """, storyId, userId, modelName, prompt.version(), inputTokens, outputTokens,
+                    (inputTokens + outputTokens) / 100000.0, (inputTokens + outputTokens) / 100000.0, duration);
+            credits.settleFrozen(userId, null, freezeKey, settleKey, reservedCredits, reservedCredits, "全书终审");
+            settled = true;
+            FinalReportResponse created = response(
+                    id,
+                    storyId,
+                    versionNo,
+                    report,
+                    wordCount,
+                    contentHash,
+                    promptVersion,
+                    modelName
+            );
+            recordCreated(userId, created);
+            return created;
+        } catch (RuntimeException exception) {
+            if (!settled) {
+                credits.release(userId, null, freezeKey, reservedCredits, "全书终审失败，释放预冻结额度");
+            }
+            throw exception;
+        }
     }
 
     private void recordCreated(Long userId, FinalReportResponse report) {
@@ -228,11 +252,13 @@ public class FinalReportService {
         return array;
     }
 
-    private void validateReportContract(JsonNode report) {
+    private void validateReportContract(JsonNode report, StoryContentMode contentMode) {
         if (report == null || !report.isObject()) {
             throw new AiServiceException("AI 终审响应必须是 JSON 对象");
         }
-        for (String section : List.of("contentQuality", "hitPotential", "shortDramaAdaptation")) {
+        String adaptationSection = contentMode == StoryContentMode.NOVEL
+                ? "novelAdaptation" : "shortDramaAdaptation";
+        for (String section : List.of("contentQuality", "hitPotential", adaptationSection)) {
             JsonNode value = report.get(section);
             if (value == null || !value.isObject() || !value.path("score").canConvertToInt()
                     || value.path("score").asInt() < 0 || value.path("score").asInt() > 100
@@ -269,8 +295,14 @@ public class FinalReportService {
         }
     }
 
-    private JsonNode normalizeReport(JsonNode report) {
+    private JsonNode normalizeReport(JsonNode report, StoryContentMode contentMode) {
         ObjectNode normalized = report != null && report.isObject() ? ((ObjectNode) report).deepCopy() : mapper.createObjectNode();
+        if (contentMode == StoryContentMode.NOVEL && !normalized.has("shortDramaAdaptation")) {
+            normalized.set("shortDramaAdaptation", normalized.path("novelAdaptation").deepCopy());
+        }
+        if (contentMode == StoryContentMode.NOVEL && !normalized.has("novelAdaptation")) {
+            normalized.set("novelAdaptation", normalized.path("shortDramaAdaptation").deepCopy());
+        }
         int content = clamp(normalized.path("contentQuality").path("score").asInt(0));
         int hit = clamp(normalized.path("hitPotential").path("score").asInt(0));
         int drama = clamp(normalized.path("shortDramaAdaptation").path("score").asInt(0));
@@ -279,6 +311,75 @@ public class FinalReportService {
         normalized.put("level", total >= 90 ? "S" : total >= 80 ? "A" : total >= 70 ? "B" : total >= 60 ? "C" : "D");
         if (!normalized.hasNonNull("disclaimer")) normalized.put("disclaimer", DISCLAIMER);
         return normalized;
+    }
+
+    private List<ObjectNode> reviewBatches(ObjectNode fullRequest, ArrayNode chapters) {
+        int totalChars = 0;
+        for (JsonNode chapter : chapters) totalChars += chapter.path("content").asText("").length();
+        if (totalChars <= maxReviewChars && chapters.size() <= 200) return List.of(fullRequest);
+
+        ObjectNode base = fullRequest.deepCopy();
+        base.remove("chapters");
+        List<ObjectNode> batches = new ArrayList<>();
+        ObjectNode current = base.deepCopy();
+        ArrayNode currentChapters = current.putArray("chapters");
+        int currentChars = 0;
+        for (JsonNode chapter : chapters) {
+            int chapterChars = chapter.path("content").asText("").length();
+            if (currentChapters.size() > 0
+                    && (currentChars + chapterChars > maxReviewChars || currentChapters.size() >= 200)) {
+                batches.add(current);
+                current = base.deepCopy();
+                currentChapters = current.putArray("chapters");
+                currentChars = 0;
+            }
+            currentChapters.add(chapter);
+            currentChars += chapterChars;
+        }
+        if (currentChapters.size() > 0) batches.add(current);
+        return batches;
+    }
+
+    private JsonNode mergeReports(List<JsonNode> reports, StoryContentMode contentMode) {
+        if (reports.isEmpty()) throw new AiServiceException("AI 终审没有返回有效报告");
+        if (reports.size() == 1) return normalizeReport(reports.get(0), contentMode);
+        ObjectNode merged = reports.get(0).deepCopy();
+        String adaptation = contentMode == StoryContentMode.NOVEL ? "novelAdaptation" : "shortDramaAdaptation";
+        for (String section : List.of("contentQuality", "hitPotential", adaptation)) {
+            int sum = 0;
+            int count = 0;
+            for (JsonNode item : reports) {
+                JsonNode score = item.path(section).path("score");
+                if (score.isIntegralNumber()) { sum += score.asInt(); count++; }
+            }
+            if (count > 0) ((ObjectNode) merged.path(section)).put("score", Math.round((float) sum / count));
+        }
+        ArrayNode critical = merged.putArray("criticalIssues");
+        ArrayNode normal = merged.putArray("normalIssues");
+        ArrayNode unresolvedThreads = merged.putArray("unresolvedThreads");
+        ArrayNode unresolvedForeshadowing = merged.putArray("unresolvedForeshadowing");
+        ArrayNode strongest = merged.putArray("strongestChapters");
+        ArrayNode weakest = merged.putArray("weakestChapters");
+        ArrayNode titles = merged.putArray("suggestedTitles");
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonNode report : reports) {
+            appendUnique(critical, report.path("criticalIssues"), seen, 30);
+            appendUnique(normal, report.path("normalIssues"), seen, 100);
+            appendUnique(unresolvedThreads, report.path("unresolvedThreads"), new LinkedHashSet<>(), 30);
+            appendUnique(unresolvedForeshadowing, report.path("unresolvedForeshadowing"), new LinkedHashSet<>(), 30);
+            appendUnique(strongest, report.path("strongestChapters"), new LinkedHashSet<>(), 20);
+            appendUnique(weakest, report.path("weakestChapters"), new LinkedHashSet<>(), 20);
+            appendUnique(titles, report.path("suggestedTitles"), new LinkedHashSet<>(), 10);
+        }
+        return normalizeReport(merged, contentMode);
+    }
+
+    private void appendUnique(ArrayNode target, JsonNode values, Set<String> seen, int max) {
+        if (!values.isArray()) return;
+        for (JsonNode value : values) {
+            String key = value.isContainerNode() ? value.toString() : value.asText();
+            if (seen.add(key) && target.size() < max) target.add(value);
+        }
     }
 
     private int clamp(int value) { return Math.max(0, Math.min(100, value)); }

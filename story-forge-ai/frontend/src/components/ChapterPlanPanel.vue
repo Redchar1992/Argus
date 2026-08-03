@@ -51,7 +51,7 @@ const targetLength = ref(1800)
         <el-input-number
           v-model="targetLength"
           :min="800"
-          :max="5000"
+          :max="8000"
           :step="200"
           controls-position="right"
         />

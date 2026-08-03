@@ -53,8 +53,11 @@ public class ChapterApplicationService {
     }
 
     public ChapterTaskResponse plan(Long userId, Long storyId, int chapterNo, PlanChapterRequest request) {
+        var story = storyService.requireOwned(userId, storyId);
+        int defaultTarget = story.getChapterTargetWords() == null
+                ? 1_600 : story.getChapterTargetWords();
         var prepared = persistence.preparePlan(userId, storyId, chapterNo,
-                request == null ? 1600 : request.normalizedTargetLength());
+                request == null ? defaultTarget : request.normalizedTargetLength());
         return dispatch(prepared);
     }
     public ChapterResponse approvePlan(Long userId, Long storyId, int chapterNo, ApprovePlanRequest request) {

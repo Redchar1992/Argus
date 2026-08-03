@@ -45,6 +45,14 @@ def finish_workflow(state: dict[str, Any]) -> dict[str, Any]:
     version_no = int(state.get("revision_count", 0)) + 1
     final_content = {
         "topic": state["topic"],
+        "contentMode": state.get("content_mode", "SHORT_STORY"),
+        "storyProfile": {
+            "targetChapterCount": state.get("target_chapter_count"),
+            "targetTotalWords": state.get("target_total_words"),
+            "chapterTargetWords": state.get("chapter_target_words"),
+            "viewpoint": state.get("viewpoint", "THIRD_LIMITED"),
+            "styleProfile": state.get("style_profile", {}),
+        },
         "characters": state["characters"],
         "outlineMetadata": state.get("outline_metadata", {}),
         "outline": state["outline"],

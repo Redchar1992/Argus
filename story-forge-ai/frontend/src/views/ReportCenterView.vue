@@ -37,6 +37,18 @@ const issues = computed(() => [
   ...(report.value?.report.criticalIssues ?? []),
   ...(report.value?.report.normalIssues ?? []),
 ])
+const scoreSections = computed(() => {
+  const current = report.value?.report
+  if (!current) return []
+  const adaptation = current.novelAdaptation ?? current.shortDramaAdaptation
+  return [
+    { label: '内容完成度', section: current.contentQuality },
+    { label: '爆款潜力', section: current.hitPotential },
+    ...(adaptation
+      ? [{ label: current.novelAdaptation ? '小说连载性' : '短剧适配度', section: adaptation }]
+      : []),
+  ]
+})
 const latestRelease = computed(() => releases.value[0])
 
 async function load() {
@@ -123,10 +135,10 @@ onMounted(load)
       <template v-else>
         <section class="score-summary">
           <div class="total-score"><span>综合评分</span><strong>{{ report.total }}</strong><em>等级 {{ report.level }}</em><small>{{ report.report.disclaimer }}</small></div>
-          <article v-for="section in [report.report.contentQuality, report.report.hitPotential, report.report.shortDramaAdaptation]" :key="section.summary" class="score-card">
-            <span>{{ section === report.report.contentQuality ? '内容完成度' : section === report.report.hitPotential ? '爆款潜力' : '短剧适配度' }}</span>
-            <strong>{{ section.score }}</strong>
-            <p>{{ section.summary }}</p>
+          <article v-for="item in scoreSections" :key="item.section.summary" class="score-card">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.section.score }}</strong>
+            <p>{{ item.section.summary }}</p>
           </article>
         </section>
 

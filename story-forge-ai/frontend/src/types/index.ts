@@ -1,4 +1,5 @@
 export type EntityId = number | string
+export type StoryContentMode = 'SHORT_STORY' | 'NOVEL'
 
 export interface AuthResult {
   token: string
@@ -51,6 +52,7 @@ export interface TopicSession {
     genre: string
     audience: string
     keywords: string
+    contentMode?: StoryContentMode
   }
 }
 
@@ -66,6 +68,12 @@ export interface StoryProject {
   updatedTime?: string
   topics?: TopicOption[]
   selectedTopicId?: string
+  contentMode?: StoryContentMode
+  targetChapterCount?: number
+  targetTotalWords?: number
+  chapterTargetWords?: number
+  viewpoint?: string
+  styleProfile?: Record<string, unknown>
 }
 
 export interface CreateStoryInput {
@@ -73,6 +81,12 @@ export interface CreateStoryInput {
   genre: string
   audience?: string
   keywords?: string
+  contentMode?: StoryContentMode
+  targetChapterCount?: number
+  targetTotalWords?: number
+  chapterTargetWords?: number
+  viewpoint?: string
+  styleProfile?: Record<string, unknown>
 }
 
 export interface GenerateTopicInput {
@@ -80,6 +94,7 @@ export interface GenerateTopicInput {
   genre: string
   audience: string
   keywords: string
+  contentMode?: StoryContentMode
 }
 
 export interface GenerateTopicResult {

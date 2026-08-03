@@ -7,22 +7,23 @@ from typing import Any
 from app.agents.chapter_utils import chapter_artifact, chapter_progress
 from app.agents.workflow_utils import invoke_structured
 from app.infrastructure.llm_factory import StructuredModel, get_review_model
-from app.prompts import load_prompt
+from app.prompts import load_profile_prompt
 from app.schemas.chapter import ChapterSummary, MemoryUpdate
 
 
 class ChapterSummaryAgent:
     def __init__(self, model: StructuredModel | None = None) -> None:
         self.model = model or get_review_model()
-        self.prompt = load_prompt("chapter_summary")
+        self.prompt = None
 
     async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
+        prompt, prompt_name = load_profile_prompt("chapter_summary", state.get("content_mode", "SHORT_STORY"))
         generation, call = await invoke_structured(
             self.model,
             ChapterSummary,
             node="summarize_chapter",
-            prompt_name="chapter_summary",
-            prompt=self.prompt,
+            prompt_name=prompt_name,
+            prompt=prompt,
             payload={
                 "chapter_no": state["chapter_no"],
                 "chapter_plan": state["chapter_plan"],
@@ -44,7 +45,7 @@ class ChapterSummaryAgent:
                     version_no=int(state.get("revision_count", 0)) + 1,
                     status="APPROVED",
                     content=summary,
-                    prompt_name="chapter_summary",
+                    prompt_name=prompt_name,
                     model_name=generation.model_name,
                 )
             ],
@@ -55,15 +56,16 @@ class ChapterSummaryAgent:
 class MemoryUpdateAgent:
     def __init__(self, model: StructuredModel | None = None) -> None:
         self.model = model or get_review_model()
-        self.prompt = load_prompt("chapter_memory")
+        self.prompt = None
 
     async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
+        prompt, prompt_name = load_profile_prompt("chapter_memory", state.get("content_mode", "SHORT_STORY"))
         generation, call = await invoke_structured(
             self.model,
             MemoryUpdate,
             node="update_memory",
-            prompt_name="chapter_memory",
-            prompt=self.prompt,
+            prompt_name=prompt_name,
+            prompt=prompt,
             payload={
                 "chapter_no": state["chapter_no"],
                 "approved_content": state["final_content"],
@@ -114,7 +116,7 @@ class MemoryUpdateAgent:
                     version_no=int(state.get("revision_count", 0)) + 1,
                     status="APPROVED",
                     content=update,
-                    prompt_name="chapter_memory",
+                    prompt_name=prompt_name,
                     model_name=generation.model_name,
                 )
             ],

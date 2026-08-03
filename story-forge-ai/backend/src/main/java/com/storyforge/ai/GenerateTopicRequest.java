@@ -2,6 +2,7 @@ package com.storyforge.ai;
 
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record GenerateTopicRequest(
@@ -16,6 +17,9 @@ public record GenerateTopicRequest(
         String audience,
 
         @Size(max = 309, message = "关键词总长度最多 309 个字符")
-        String keywords
+        String keywords,
+
+        @Pattern(regexp = "(?i)^(SHORT_STORY|NOVEL|SHORT|LONG)$", message = "内容模式必须是 SHORT_STORY 或 NOVEL")
+        String contentMode
 ) {
 }

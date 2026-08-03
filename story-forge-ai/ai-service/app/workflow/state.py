@@ -12,6 +12,12 @@ class StoryState(TypedDict, total=False):
     story_id: int
     thread_id: str
     topic: dict[str, Any]
+    content_mode: str
+    target_chapter_count: int
+    target_total_words: int
+    chapter_target_words: int
+    viewpoint: str
+    style_profile: dict[str, Any]
 
     # Current material. These fields intentionally use overwrite semantics.
     characters: list[dict[str, Any]]

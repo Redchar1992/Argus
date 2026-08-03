@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.storyforge.chapter.stream.ChapterCommandPublisher;
 import com.storyforge.chapter.vo.ChapterTaskResponse;
 import com.storyforge.common.exception.ApiException;
+import com.storyforge.cost.AiCreditService;
 import com.storyforge.task.AiTask;
 import com.storyforge.task.AiTaskMapper;
 import com.storyforge.task.AiTaskStatus;
@@ -25,8 +26,10 @@ public class ChapterTaskService {
     private final AiTaskMapper tasks;
     private final ChapterCommandPublisher publisher;
     private final ChapterSupport support;
-    public ChapterTaskService(AiTaskMapper tasks, ChapterCommandPublisher publisher, ChapterSupport support) {
-        this.tasks = tasks; this.publisher = publisher; this.support = support;
+    private final AiCreditService credits;
+    public ChapterTaskService(AiTaskMapper tasks, ChapterCommandPublisher publisher, ChapterSupport support,
+            AiCreditService credits) {
+        this.tasks = tasks; this.publisher = publisher; this.support = support; this.credits = credits;
     }
 
     @Transactional
@@ -75,6 +78,8 @@ public class ChapterTaskService {
             if (raced != null) return raced;
             throw exception;
         }
+        credits.freeze(userId, task.getId(), freezeKey(task), creditCost(taskType),
+                "章节 AI 任务预冻结：" + taskType);
         return task;
     }
 
@@ -117,6 +122,28 @@ public class ChapterTaskService {
         task.setStatus(AiTaskStatus.FAILED); task.setErrorCode(DISPATCH_ERROR);
         task.setErrorMessage(message == null ? null : message.substring(0, Math.min(1000, message.length())));
         task.setUpdatedTime(LocalDateTime.now()); tasks.updateById(task);
+        if (credits.hasLog(freezeKey(task))) {
+            credits.release(task.getUserId(), task.getId(), freezeKey(task), creditCost(task.getTaskType()),
+                    "章节 AI 任务派发失败，释放预冻结额度");
+        }
+    }
+
+    public static long creditCost(String taskType) {
+        return switch (taskType) {
+            case "CHAPTER_PLAN" -> 3L;
+            case "CHAPTER_GENERATE" -> 12L;
+            case "CHAPTER_REWRITE" -> 6L;
+            case "CHAPTER_FINALIZE" -> 5L;
+            default -> 5L;
+        };
+    }
+
+    public static String freezeKey(AiTask task) {
+        return "chapter:freeze:" + task.getIdempotencyKey();
+    }
+
+    public static String settleKey(AiTask task) {
+        return "chapter:settle:" + task.getId();
     }
     private String requestPayload(String action, JsonNode payload) {
         ObjectNode root = support.mapper().createObjectNode(); root.put("action", action); root.set("payload", payload);

@@ -16,6 +16,12 @@ public class StoryProject {
     private String genre;
     private String audience;
     private String keywords;
+    private String contentMode;
+    private Integer targetChapterCount;
+    private Integer targetTotalWords;
+    private Integer chapterTargetWords;
+    private String viewpoint;
+    private String styleProfile;
     private String status;
     private String selectedTopic;
     private String generatedTopics;
@@ -69,6 +75,19 @@ public class StoryProject {
     public void setKeywords(String keywords) {
         this.keywords = keywords;
     }
+
+    public String getContentMode() { return contentMode; }
+    public void setContentMode(String contentMode) { this.contentMode = contentMode; }
+    public Integer getTargetChapterCount() { return targetChapterCount; }
+    public void setTargetChapterCount(Integer targetChapterCount) { this.targetChapterCount = targetChapterCount; }
+    public Integer getTargetTotalWords() { return targetTotalWords; }
+    public void setTargetTotalWords(Integer targetTotalWords) { this.targetTotalWords = targetTotalWords; }
+    public Integer getChapterTargetWords() { return chapterTargetWords; }
+    public void setChapterTargetWords(Integer chapterTargetWords) { this.chapterTargetWords = chapterTargetWords; }
+    public String getViewpoint() { return viewpoint; }
+    public void setViewpoint(String viewpoint) { this.viewpoint = viewpoint; }
+    public String getStyleProfile() { return styleProfile; }
+    public void setStyleProfile(String styleProfile) { this.styleProfile = styleProfile; }
 
     public String getStatus() {
         return status;

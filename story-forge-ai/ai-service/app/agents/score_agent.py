@@ -6,6 +6,7 @@ import hashlib
 from typing import Any
 
 from app.models import CriterionScore, ProviderTopic, ScoreReasons, TopicItem
+from app.prompts import load_profile_prompt
 
 
 class ScoreAgent:
@@ -60,15 +61,28 @@ class ScoreAgent:
             "片段",
             "揭开",
         ),
+        "novel_fit": (
+            "连载",
+            "阶段",
+            "成长",
+            "伏笔",
+            "长期",
+            "家族",
+            "调查",
+            "秘密",
+            "关系",
+            "回收",
+        ),
     }
 
-    def score(self, topic: ProviderTopic, *, topic_id: int) -> TopicItem:
+    def score(self, topic: ProviderTopic, *, topic_id: int, content_mode: str = "SHORT_STORY") -> TopicItem:
         text = f"{topic.title} {topic.hook} {topic.summary} {' '.join(topic.tags)}"
         conflict = self._criterion(text, "conflict", topic.title, topic_id)
         reversal = self._criterion(text, "reversal", topic.title, topic_id)
         emotion = self._criterion(text, "emotion", topic.title, topic_id)
-        fit = self._criterion(text, "fit", topic.title, topic_id)
-
+        novel = content_mode == "NOVEL"
+        fit_name = "novel_fit" if novel else "fit"
+        fit = self._criterion(text, fit_name, topic.title, topic_id)
         reasons = ScoreReasons(
             conflict=CriterionScore(
                 score=conflict,
@@ -82,10 +96,14 @@ class ScoreAgent:
                 score=emotion,
                 reason="逆袭、成长或情感选择提供了清晰的观众回报。",
             ),
-            shortDramaFit=CriterionScore(
+            shortDramaFit=None if novel else CriterionScore(
                 score=fit,
                 reason="钩子具体、节点紧凑，可拆分为连续短剧悬念。",
             ),
+            novelFit=CriterionScore(
+                score=fit,
+                reason="人物目标、阶段悬念和长期冲突具备持续连载空间。",
+            ) if novel else None,
         )
         # Equal weighting keeps the MVP score transparent and easy to calibrate.
         total = round((conflict + reversal + emotion + fit) / 4)
@@ -119,23 +137,26 @@ class CommercialScoreAgent:
         from app.prompts import load_prompt
 
         self.model = model or get_review_model()
-        self.prompt = load_prompt("score")
+        self.prompt = None
 
     async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
         from app.agents.workflow_utils import artifact, invoke_structured, progress
         from app.schemas.score import StoryScore, build_score_result
 
+        content_mode = state.get("content_mode", "SHORT_STORY")
+        prompt, prompt_name = load_profile_prompt("score", content_mode)
         generation, call = await invoke_structured(
             self.model,
             StoryScore,
             node="score_outline",
-            prompt_name="score",
-            prompt=self.prompt,
+            prompt_name=prompt_name,
+            prompt=prompt,
             payload={
                 "topic": state["topic"],
                 "characters": state["characters"],
                 "outline": state["outline"],
                 "revision_count": int(state.get("revision_count", 0)),
+                "contentMode": content_mode,
             },
             purpose="score",
         )
@@ -158,7 +179,7 @@ class CommercialScoreAgent:
                     version_no=version_no,
                     status="DRAFT",
                     content=score_data,
-                    prompt_name="score",
+                    prompt_name=prompt_name,
                     model_name=generation.model_name,
                 )
             ],

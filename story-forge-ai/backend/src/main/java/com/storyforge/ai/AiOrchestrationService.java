@@ -18,6 +18,7 @@ import com.storyforge.cost.AiCreditService;
 import com.storyforge.cost.AiUsageRecorder;
 import com.storyforge.prompt.PromptResolver;
 import com.storyforge.story.StoryProject;
+import com.storyforge.story.StoryContentMode;
 import com.storyforge.story.StoryProjectMapper;
 import com.storyforge.story.StoryService;
 import com.storyforge.story.StoryStatus;
@@ -35,11 +36,8 @@ public class AiOrchestrationService {
     private static final String TASK_TYPE_TOPIC = "TOPIC_GENERATION";
     private static final int EXPECTED_TOPIC_COUNT = 10;
     private static final long TOPIC_CREDIT_COST = 5;
-    private static final Set<String> SCORE_DIMENSIONS = Set.of(
-            "conflict",
-            "reversal",
-            "emotionalValue",
-            "shortDramaFit"
+    private static final Set<String> COMMON_SCORE_DIMENSIONS = Set.of(
+            "conflict", "reversal", "emotionalValue"
     );
 
     private final StoryService storyService;
@@ -77,9 +75,18 @@ public class AiOrchestrationService {
     public JsonNode generate(Long userId, GenerateTopicRequest request) {
         StoryProject story = storyService.requireOwned(userId, request.storyId());
         AiTopicRequest direction = resolveDirection(story, request);
-        PromptResolver.Selection prompt = prompts.resolve(userId, "topic_generation", "topic_v1");
+        StoryContentMode mode = StoryContentMode.parse(story.getContentMode());
+        if (StringUtils.hasText(request.contentMode())
+                && StoryContentMode.parse(request.contentMode()) != mode) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CONTENT_MODE_MISMATCH",
+                    "选题生成的 contentMode 必须与故事创建时的内容模式一致");
+        }
+        String promptFallback = mode == StoryContentMode.NOVEL
+                ? "topic_novel_v1" : "topic_v1";
+        PromptResolver.Selection prompt = prompts.resolve(userId, "topic_generation", promptFallback);
         AiTopicRequest aiRequest = new AiTopicRequest(direction.storyId(), direction.genre(), direction.audience(),
-                direction.keywords(), prompt.versionLabel(), prompt.systemPrompt());
+                direction.keywords(), mode.name(),
+                prompt.versionLabel(), prompt.systemPrompt());
         LocalDateTime now = LocalDateTime.now();
 
         story.setGenre(aiRequest.genre());
@@ -105,7 +112,7 @@ public class AiOrchestrationService {
         long started = System.currentTimeMillis();
         try {
             JsonNode upstreamResult = aiServiceClient.generateTopics(aiRequest);
-            JsonNode topics = extractTopics(upstreamResult);
+            JsonNode topics = extractTopics(upstreamResult, aiRequest.contentMode());
             LocalDateTime completedAt = LocalDateTime.now();
 
             task.setStatus(AiTaskStatus.SUCCESS);
@@ -170,7 +177,7 @@ public class AiOrchestrationService {
         );
     }
 
-    private JsonNode extractTopics(JsonNode upstreamResult) {
+    private JsonNode extractTopics(JsonNode upstreamResult, String contentMode) {
         if (!upstreamResult.isObject()) {
             throw invalidAiResponse("顶层必须是 JSON 对象");
         }
@@ -196,12 +203,12 @@ public class AiOrchestrationService {
 
         Set<String> ids = new HashSet<>();
         for (int index = 0; index < topics.size(); index++) {
-            validateTopic(topics.get(index), index, ids);
+            validateTopic(topics.get(index), index, ids, contentMode);
         }
         return topics;
     }
 
-    private void validateTopic(JsonNode topic, int index, Set<String> ids) {
+    private void validateTopic(JsonNode topic, int index, Set<String> ids, String contentMode) {
         String path = "topics[" + index + "]";
         if (topic == null || !topic.isObject()) {
             throw invalidAiResponse(path + " 必须是 JSON 对象");
@@ -234,7 +241,9 @@ public class AiOrchestrationService {
         if (reasons == null || !reasons.isObject()) {
             throw invalidAiResponse(path + ".scoreReasons 必须是 JSON 对象");
         }
-        for (String dimension : SCORE_DIMENSIONS) {
+        Set<String> dimensions = new HashSet<>(COMMON_SCORE_DIMENSIONS);
+        dimensions.add("NOVEL".equals(contentMode) ? "novelFit" : "shortDramaFit");
+        for (String dimension : dimensions) {
             JsonNode detail = reasons.get(dimension);
             String detailPath = path + ".scoreReasons." + dimension;
             if (detail == null || !detail.isObject()) {

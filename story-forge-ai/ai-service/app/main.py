@@ -191,6 +191,7 @@ def create_app(
         "/ai/final-review",
         response_model=FinalStoryReport,
         response_model_by_alias=True,
+        response_model_exclude_none=True,
         dependencies=[Depends(require_internal_api_key)],
     )
     async def final_review(

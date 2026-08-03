@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from typing import Any
 
 import pytest
@@ -209,6 +210,37 @@ def test_context_assembler_keeps_only_latest_three_summaries() -> None:
     ] == [3, 4, 5]
     assert assembled["context_packet"]["currentOutlineNodes"] == context["outlineNodes"]
     assert assembled["context_packet"]["outlineNodes"] == context["outlineNodes"]
+
+
+def test_context_assembler_bounds_large_novel_memory_and_adds_snapshot_hash() -> None:
+    context = chapter_context()
+    context["contentMode"] = "NOVEL"
+    context["canonFacts"] = [
+        {"factKey": f"fact-{index}", "value": "事实" * 500}
+        for index in range(100)
+    ]
+    context["unresolvedThreads"] = [
+        {"threadKey": f"thread-{index}", "description": "伏笔" * 500}
+        for index in range(100)
+    ]
+
+    state = {
+        "content_mode": "NOVEL",
+        "characters": context["characters"],
+        "style_profile": context["styleProfile"],
+        "canon_facts": context["canonFacts"],
+        "relationship_states": context["relationshipStates"],
+        "recent_summaries": context["recentSummaries"],
+        "outline_nodes": context["outlineNodes"],
+        "unresolved_threads": context["unresolvedThreads"],
+        "foreshadowing_ledger": context["foreshadowingLedger"],
+    }
+
+    packet = ChapterContextAssembler()(state)["context_packet"]
+    assert len(json.dumps(packet, ensure_ascii=False, separators=(",", ":"))) <= 40_000
+    assert packet["contentMode"] == "NOVEL"
+    assert packet["contextSnapshotHash"]
+    assert packet["contextOmitted"]
 
 
 def test_context_preserves_injury_secret_death_and_item_ownership_facts() -> None:

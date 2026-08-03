@@ -40,7 +40,8 @@ export interface ScoreSection {
 export interface FinalStoryReport {
   contentQuality: ScoreSection
   hitPotential: ScoreSection
-  shortDramaAdaptation: ScoreSection
+  shortDramaAdaptation?: ScoreSection
+  novelAdaptation?: ScoreSection
   criticalIssues: FinalIssue[]
   normalIssues: FinalIssue[]
   unresolvedThreads: string[]

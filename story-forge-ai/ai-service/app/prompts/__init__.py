@@ -13,4 +13,13 @@ def load_prompt(name: str, version: str = PROMPT_VERSION) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-__all__ = ["PROMPT_VERSION", "load_prompt"]
+def profile_prompt_name(name: str, content_mode: str = "SHORT_STORY") -> str:
+    return f"{name}_novel" if content_mode == "NOVEL" else name
+
+
+def load_profile_prompt(name: str, content_mode: str = "SHORT_STORY") -> tuple[str, str]:
+    prompt_name = profile_prompt_name(name, content_mode)
+    return load_prompt(prompt_name), prompt_name
+
+
+__all__ = ["PROMPT_VERSION", "load_prompt", "load_profile_prompt", "profile_prompt_name"]

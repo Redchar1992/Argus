@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
+import json
 
 from app.agents.chapter_utils import chapter_progress
 
 
 class ChapterContextAssembler:
+    max_context_chars = 40_000
+
     def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
         characters = list(state.get("characters") or [])
         if any(not isinstance(item, dict) for item in characters):
@@ -31,6 +35,8 @@ class ChapterContextAssembler:
             raise ValueError("章节上下文必须包含恰好两个当前大纲节点")
 
         packet = {
+            "contentMode": state.get("content_mode", "SHORT_STORY"),
+            "viewpoint": state.get("viewpoint", "THIRD_LIMITED"),
             "styleProfile": dict(state.get("style_profile") or {}),
             "characters": characters,
             "canonFacts": list(state.get("canon_facts") or []),
@@ -44,6 +50,34 @@ class ChapterContextAssembler:
             "unresolvedThreads": list(state.get("unresolved_threads") or []),
             "foreshadowingLedger": list(state.get("foreshadowing_ledger") or []),
         }
+        omitted: dict[str, int] = {}
+        for key, limit in {
+            "characters": 24,
+            "canonFacts": 80,
+            "relationshipStates": 80,
+            "recentSummaries": 3,
+            "unresolvedThreads": 60,
+            "foreshadowingLedger": 60,
+        }.items():
+            values = packet[key]
+            if len(values) > limit:
+                omitted[key] = len(values) - limit
+                packet[key] = values[-limit:]
+
+        trim_order = ("foreshadowingLedger", "unresolvedThreads", "relationshipStates", "canonFacts", "characters")
+        while len(json.dumps(packet, ensure_ascii=False, separators=(",", ":"))) > self.max_context_chars:
+            for key in trim_order:
+                if len(packet[key]) > 1:
+                    packet[key] = packet[key][1:]
+                    omitted[key] = omitted.get(key, 0) + 1
+                    break
+            else:
+                break
+        if omitted:
+            packet["contextOmitted"] = omitted
+        packet["contextSnapshotHash"] = state.get("context_snapshot_hash") or hashlib.sha256(
+            json.dumps(packet, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         return {
             "context_packet": packet,
             "recent_summaries": packet["recentSummaries"],

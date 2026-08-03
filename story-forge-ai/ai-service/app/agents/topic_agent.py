@@ -46,7 +46,9 @@ class TopicAgent:
             result = await self.fallback_provider.generate(request)
 
         topics = [
-            self.score_agent.score(topic, topic_id=index)
+            self.score_agent.score(
+                topic, topic_id=index, content_mode=request.content_mode
+            )
             for index, topic in enumerate(result.topics, start=1)
         ]
         return TopicGenerationResponse(

@@ -70,9 +70,20 @@ Content-Type: application/json
   "title":"都市复仇",
   "genre":"都市情感",
   "audience":"女性",
-  "keywords":"复仇, 身份反转"
+  "keywords":"复仇, 身份反转",
+  "contentMode":"SHORT_STORY",
+  "targetChapterCount":10,
+  "targetTotalWords":30000,
+  "chapterTargetWords":1800,
+  "viewpoint":"THIRD_LIMITED",
+  "styleProfile":{"tone":"克制","pacing":"fast"}
 }
 ```
+
+`contentMode` 支持 `SHORT_STORY`（短故事，默认）和 `NOVEL`（小说）。短故事目标章节数
+为 1～10；小说建议 20～200 章。未填写目标参数时，后端按模式使用默认值。`styleProfile`
+必须是 JSON 对象，最多 10000 个字符。故事创建后内容模式视为不可变；选题生成时若传入
+不同模式会返回 `400 CONTENT_MODE_MISMATCH`。
 
 ### 我的作品
 
@@ -122,7 +133,7 @@ Content-Type: application/json
         "shortDramaFit":{"score":90,"reason":"节点紧凑，可拆分为连续悬念。"}
       },
       "tags":["都市情感","复仇","身份反转"]
-    }
+      }
   ],
   "model":"local-template",
   "generatedAt":"2026-07-30T12:00:00Z"
@@ -130,6 +141,9 @@ Content-Type: application/json
 ```
 
 实际响应固定包含 10 个 `topics`。
+
+短故事的第四个评分维度为 `shortDramaFit`（短剧适配）；小说使用 `novelFit`（小说连载性），
+其余冲突、反转和情绪价值维度保持一致。
 
 ### 保存选中方案
 
@@ -278,6 +292,10 @@ Content-Type: application/json
 
 {"targetLength":1600}
 ```
+
+`targetLength` 支持 800～8000 字；不传时使用故事档案中的 `chapterTargetWords`。
+小说章节会只接收当前章节对应的两个大纲节点，并携带有限大小的结构化长期记忆，
+不会把整本正文重复发送给模型。
 
 返回 `202 Accepted`：
 
@@ -486,7 +504,8 @@ Content-Type: application/json
   "storyId":1,
   "genre":"都市情感",
   "audience":"女性",
-  "keywords":"复仇"
+  "keywords":"复仇",
+  "contentMode":"SHORT_STORY"
 }
 ```
 
@@ -496,6 +515,7 @@ AI 服务负责保证：
 - 所有字段通过 Pydantic 校验；
 - `score` 为 `0..100`；
 - 输出来源通过 `model` 明确披露；
+- 短故事返回 `shortDramaFit` 评分，小说返回 `novelFit` 评分；
 - 无效输入返回 `422`，内部生成失败返回结构化错误。
 
 ### Story Workflow（开发与测试）

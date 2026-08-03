@@ -120,6 +120,27 @@ def test_local_generation_returns_ten_structured_topics(
             assert reason["reason"]
 
 
+def test_novel_generation_returns_novel_fit_instead_of_short_drama_fit() -> None:
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/ai/topic/generate",
+            json={
+                "genre": "都市情感",
+                "audience": "女性",
+                "contentMode": "NOVEL",
+            },
+        )
+
+    assert response.status_code == 200
+    for topic in response.json()["topics"]:
+        assert set(topic["scoreReasons"]) == {
+            "conflict",
+            "reversal",
+            "emotionalValue",
+            "novelFit",
+        }
+
+
 def test_keywords_may_be_a_delimited_string() -> None:
     payload = {
         "genre": "都市情感",

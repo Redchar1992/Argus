@@ -6,23 +6,26 @@ from typing import Any
 
 from app.agents.chapter_utils import chapter_artifact, chapter_progress, invoke_text
 from app.infrastructure.llm_factory import TextModel, get_creative_text_model
-from app.prompts import load_prompt
+from app.prompts import load_profile_prompt
 
 
 class ChapterWriterAgent:
     def __init__(self, model: TextModel | None = None) -> None:
         self.model = model or get_creative_text_model()
-        self.prompt = load_prompt("chapter_write")
+        self.prompt = None
 
     async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
+        prompt, prompt_name = load_profile_prompt("chapter_write", state.get("content_mode", "SHORT_STORY"))
         content, call = await invoke_text(
             self.model,
             node="write_chapter",
-            prompt_name="chapter_write",
-            prompt=self.prompt,
+            prompt_name=prompt_name,
+            prompt=prompt,
             payload={
                 "chapter_no": state["chapter_no"],
                 "chapter_plan": state["chapter_plan"],
+                "contentMode": state.get("content_mode", "SHORT_STORY"),
+                "viewpoint": state.get("viewpoint", "THIRD_LIMITED"),
                 **state["context_packet"],
             },
             purpose="chapter_write",
@@ -40,7 +43,7 @@ class ChapterWriterAgent:
                     version_no=1,
                     status="DRAFT",
                     content={"content": content, "sourceType": "AI_DRAFT"},
-                    prompt_name="chapter_write",
+                    prompt_name=prompt_name,
                     model_name=str(call["model_name"]),
                 )
             ],

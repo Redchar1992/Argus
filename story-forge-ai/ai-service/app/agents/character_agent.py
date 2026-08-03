@@ -6,23 +6,24 @@ from typing import Any
 
 from app.agents.workflow_utils import artifact, invoke_structured, progress
 from app.infrastructure.llm_factory import StructuredModel, get_creative_model
-from app.prompts import load_prompt
+from app.prompts import load_profile_prompt
 from app.schemas.character import CharacterPack
 
 
 class CharacterAgent:
     def __init__(self, model: StructuredModel | None = None) -> None:
         self.model = model or get_creative_model()
-        self.prompt = load_prompt("character")
+        self.prompt = None
 
     async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
+        prompt, prompt_name = load_profile_prompt("character", state.get("content_mode", "SHORT_STORY"))
         generation, call = await invoke_structured(
             self.model,
             CharacterPack,
             node="generate_characters",
-            prompt_name="character",
-            prompt=self.prompt,
-            payload={"topic": state["topic"]},
+            prompt_name=prompt_name,
+            prompt=prompt,
+            payload={"topic": state["topic"], "contentMode": state.get("content_mode", "SHORT_STORY")},
             purpose="character",
         )
         pack = generation.value
@@ -41,7 +42,7 @@ class CharacterAgent:
                     version_no=1,
                     status="DRAFT",
                     content={"characters": characters},
-                    prompt_name="character",
+                    prompt_name=prompt_name,
                     model_name=generation.model_name,
                 )
             ],

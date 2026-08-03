@@ -249,7 +249,48 @@ class StoryForgeIntegrationTest {
                 SELECT COUNT(*) FROM product_event
                 WHERE story_id=? AND event_name IN
                     ('STORY_CREATED','TOPICS_GENERATED','TOPIC_SELECTED')
-                """, Long.class, storyId)).isEqualTo(3L);
+        """, Long.class, storyId)).isEqualTo(3L);
+    }
+
+    @Test
+    void novelProfileIsPersistedAndUsesNovelScoringContract() throws Exception {
+        String token = register("novel-writer").path("token").asText();
+        MvcResult created = mockMvc.perform(post("/api/story/create")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"长篇连载项目",
+                                  "genre":"都市情感",
+                                  "audience":"女性",
+                                  "keywords":"家族、成长",
+                                  "contentMode":"NOVEL",
+                                  "targetChapterCount":30,
+                                  "targetTotalWords":300000,
+                                  "chapterTargetWords":2500,
+                                  "viewpoint":"FIRST_PERSON",
+                                  "styleProfile":{"tone":"克制"}
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.contentMode").value("NOVEL"))
+                .andExpect(jsonPath("$.targetChapterCount").value(30))
+                .andExpect(jsonPath("$.viewpoint").value("FIRST_PERSON"))
+                .andReturn();
+        long storyId = objectMapper.readTree(created.getResponse().getContentAsByteArray()).path("id").asLong();
+
+        AI_SERVER.enqueue(jsonResponse(200, validAiResponse("novelFit")));
+        mockMvc.perform(post("/api/ai/topic/generate")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"storyId\":%d,\"contentMode\":\"NOVEL\"}".formatted(storyId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.topics[0].scoreReasons.novelFit.score").value(90));
+
+        RecordedRequest aiRequest = AI_SERVER.takeRequest(1, TimeUnit.SECONDS);
+        assertThat(aiRequest).isNotNull();
+        assertThat(objectMapper.readTree(aiRequest.getBody().readUtf8()).path("contentMode").asText())
+                .isEqualTo("NOVEL");
     }
 
     @Test
@@ -435,6 +476,10 @@ class StoryForgeIntegrationTest {
     }
 
     private String validAiResponse() throws Exception {
+        return validAiResponse("shortDramaFit");
+    }
+
+    private String validAiResponse(String fitDimension) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("model", "local-template");
         root.put("generatedAt", "2026-07-30T12:00:00Z");
@@ -456,7 +501,8 @@ class StoryForgeIntegrationTest {
             addCriterion(reasons, "conflict", 92, "开场即有明确冲突");
             addCriterion(reasons, "reversal", 91, "隐藏身份推动反转");
             addCriterion(reasons, "emotionalValue", 93, "逆袭提供情绪回报");
-            addCriterion(reasons, "shortDramaFit", 90, "节奏适合短剧拆分");
+            addCriterion(reasons, fitDimension, 90,
+                    "novelFit".equals(fitDimension) ? "具备长期连载空间" : "节奏适合短剧拆分");
         }
         return objectMapper.writeValueAsString(root);
     }

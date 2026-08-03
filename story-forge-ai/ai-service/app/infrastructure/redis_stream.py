@@ -26,6 +26,12 @@ REQUEST_FIELDS = (
     "topic",
     "approved",
     "notes",
+    "contentMode",
+    "targetChapterCount",
+    "targetTotalWords",
+    "chapterTargetWords",
+    "viewpoint",
+    "styleProfile",
 )
 EVENT_FIELDS = (
     "taskId",
@@ -94,6 +100,12 @@ def encode_request(message: RedisWorkflowMessage) -> dict[str, str]:
         "topic": topic,
         "approved": approved,
         "notes": message.notes,
+        "contentMode": message.content_mode,
+        "targetChapterCount": str(message.target_chapter_count),
+        "targetTotalWords": str(message.target_total_words),
+        "chapterTargetWords": str(message.chapter_target_words),
+        "viewpoint": message.viewpoint,
+        "styleProfile": json.dumps(message.style_profile, ensure_ascii=False, separators=(",", ":")),
     }
     return {field: values[field] for field in REQUEST_FIELDS}
 
@@ -119,6 +131,11 @@ def decode_request(fields: Mapping[object, object]) -> RedisWorkflowMessage:
     else:
         raise ValueError("approved必须为true或false")
 
+    try:
+        style_profile = json.loads(values.get("styleProfile", "{}") or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError("styleProfile必须是合法JSON对象") from exc
+
     return RedisWorkflowMessage.model_validate(
         {
             "taskId": values.get("taskId", ""),
@@ -130,6 +147,12 @@ def decode_request(fields: Mapping[object, object]) -> RedisWorkflowMessage:
             "topic": topic,
             "approved": approved,
             "notes": values.get("notes", ""),
+            "contentMode": values.get("contentMode", "SHORT_STORY"),
+            "targetChapterCount": values.get("targetChapterCount", "10"),
+            "targetTotalWords": values.get("targetTotalWords", "30000"),
+            "chapterTargetWords": values.get("chapterTargetWords", "1800"),
+            "viewpoint": values.get("viewpoint", "THIRD_LIMITED"),
+            "styleProfile": style_profile,
         }
     )
 

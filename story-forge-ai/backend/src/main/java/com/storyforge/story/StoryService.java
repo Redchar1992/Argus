@@ -43,12 +43,37 @@ public class StoryService {
     @Transactional
     public StoryResponse create(Long userId, CreateStoryRequest request) {
         LocalDateTime now = LocalDateTime.now();
+        StoryContentMode contentMode = StoryContentMode.parse(request.contentMode());
+        int targetChapterCount = request.targetChapterCount() == null
+                ? contentMode.defaultChapterCount() : request.targetChapterCount();
+        if (contentMode == StoryContentMode.SHORT_STORY && targetChapterCount > 10) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SHORT_STORY_CHAPTER_LIMIT",
+                    "短故事目标章节数不能超过 10；长篇内容请切换为小说模式");
+        }
+        if (contentMode == StoryContentMode.NOVEL && targetChapterCount < 20) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "NOVEL_CHAPTER_COUNT_TOO_SMALL",
+                    "小说目标章节数至少为 20");
+        }
+        int chapterTargetWords = request.chapterTargetWords() == null
+                ? contentMode.defaultChapterWords() : request.chapterTargetWords();
+        int targetTotalWords = request.targetTotalWords() == null
+                ? Math.max(contentMode.defaultTotalWords(), targetChapterCount * chapterTargetWords)
+                : request.targetTotalWords();
+        String viewpoint = StringUtils.hasText(request.viewpoint())
+                ? request.viewpoint().trim() : "THIRD_LIMITED";
+        String styleProfile = serializeStyleProfile(request.styleProfile());
         StoryProject story = new StoryProject();
         story.setUserId(userId);
         story.setTitle(request.title().trim());
         story.setGenre(CreativeDirectionValidator.genre(request.genre()));
         story.setAudience(CreativeDirectionValidator.audience(request.audience(), false));
         story.setKeywords(CreativeDirectionValidator.keywords(request.keywords()));
+        story.setContentMode(contentMode.name());
+        story.setTargetChapterCount(targetChapterCount);
+        story.setTargetTotalWords(targetTotalWords);
+        story.setChapterTargetWords(chapterTargetWords);
+        story.setViewpoint(viewpoint);
+        story.setStyleProfile(styleProfile);
         story.setStatus(StoryStatus.DRAFT);
         story.setCreatedTime(now);
         story.setUpdatedTime(now);
@@ -210,9 +235,23 @@ public class StoryService {
                 story.getStatus(),
                 parseJson(story.getSelectedTopic()),
                 parseJson(story.getGeneratedTopics()),
+                contentMode(story).name(),
+                valueOr(story.getTargetChapterCount(), contentMode(story).defaultChapterCount()),
+                valueOr(story.getTargetTotalWords(), contentMode(story).defaultTotalWords()),
+                valueOr(story.getChapterTargetWords(), contentMode(story).defaultChapterWords()),
+                StringUtils.hasText(story.getViewpoint()) ? story.getViewpoint() : "THIRD_LIMITED",
+                parseJson(story.getStyleProfile()),
                 story.getCreatedTime(),
                 story.getUpdatedTime()
         );
+    }
+
+    private StoryContentMode contentMode(StoryProject story) {
+        return StoryContentMode.parse(story.getContentMode());
+    }
+
+    private int valueOr(Integer value, int fallback) {
+        return value == null ? fallback : value;
     }
 
     private JsonNode parseJson(String json) {
@@ -232,6 +271,20 @@ public class StoryService {
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("选题 JSON 无效", exception);
         }
+    }
+
+    private String serializeStyleProfile(JsonNode styleProfile) {
+        if (styleProfile == null || styleProfile.isNull()) return null;
+        if (!styleProfile.isObject()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "STYLE_PROFILE_INVALID",
+                    "文风配置必须是 JSON 对象");
+        }
+        String value = writeJson(styleProfile);
+        if (value.length() > 10_000) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "STYLE_PROFILE_TOO_LARGE",
+                    "文风配置不能超过 10000 个字符");
+        }
+        return value;
     }
 
     private String scalarText(JsonNode value) {

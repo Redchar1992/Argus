@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 ShortText = Annotated[str, Field(min_length=1, max_length=120)]
 
@@ -23,6 +23,7 @@ class TopicGenerateRequest(BaseModel):
     genre: str = Field(min_length=2, max_length=50)
     audience: str = Field(min_length=1, max_length=50)
     keywords: list[str] = Field(default_factory=list, max_length=10)
+    content_mode: str = Field(default="SHORT_STORY", alias="contentMode", pattern="^(SHORT_STORY|NOVEL)$")
     story_id: int | None = Field(default=None, alias="storyId", ge=1)
     prompt_version: str | None = Field(
         default=None, alias="promptVersion", max_length=64
@@ -96,7 +97,22 @@ class ScoreReasons(BaseModel):
     conflict: CriterionScore
     reversal: CriterionScore
     emotional_value: CriterionScore = Field(alias="emotionalValue")
-    short_drama_fit: CriterionScore = Field(alias="shortDramaFit")
+    short_drama_fit: CriterionScore | None = Field(default=None, alias="shortDramaFit")
+    novel_fit: CriterionScore | None = Field(default=None, alias="novelFit")
+
+    @model_serializer(mode="plain")
+    def serialize_without_empty_profiles(self) -> dict[str, object]:
+        return {
+            key: value.model_dump(by_alias=True)
+            for key, value in (
+                ("conflict", self.conflict),
+                ("reversal", self.reversal),
+                ("emotionalValue", self.emotional_value),
+                ("shortDramaFit", self.short_drama_fit),
+                ("novelFit", self.novel_fit),
+            )
+            if value is not None
+        }
 
 
 class TopicItem(BaseModel):

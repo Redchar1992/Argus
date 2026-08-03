@@ -68,7 +68,8 @@ class ScoreSection(FinalReviewModel):
 class FinalStoryReport(FinalReviewModel):
     content_quality: ScoreSection
     hit_potential: ScoreSection
-    short_drama_adaptation: ScoreSection
+    short_drama_adaptation: ScoreSection | None = None
+    novel_adaptation: ScoreSection | None = None
     critical_issues: list[FinalIssue] = Field(default_factory=list, max_length=30)
     normal_issues: list[FinalIssue] = Field(default_factory=list, max_length=100)
     unresolved_threads: list[str] = Field(default_factory=list, max_length=30)
@@ -87,6 +88,7 @@ class FinalReviewRequest(FinalReviewModel):
     story_title: str = Field(min_length=1, max_length=255)
     genre: str = Field(min_length=1, max_length=100)
     target_audience: str | None = Field(default=None, max_length=200)
+    content_mode: Literal["SHORT_STORY", "NOVEL"] = "SHORT_STORY"
     chapters: list[FinalReviewChapter] = Field(min_length=1, max_length=200)
     characters: list[dict] = Field(default_factory=list, max_length=100)
     canon_facts: list[dict] = Field(default_factory=list, max_length=300)

@@ -48,6 +48,17 @@ public class WorkflowTaskPersistenceService {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("action", "START");
         payload.set("topic", topic);
+        payload.put("contentMode", story.getContentMode() == null ? "SHORT_STORY" : story.getContentMode());
+        payload.put("targetChapterCount", story.getTargetChapterCount() == null ? 10 : story.getTargetChapterCount());
+        payload.put("targetTotalWords", story.getTargetTotalWords() == null ? 30_000 : story.getTargetTotalWords());
+        payload.put("chapterTargetWords", story.getChapterTargetWords() == null ? 1_800 : story.getChapterTargetWords());
+        payload.put("viewpoint", story.getViewpoint() == null ? "THIRD_LIMITED" : story.getViewpoint());
+        try {
+            payload.set("styleProfile", story.getStyleProfile() == null
+                    ? objectMapper.createObjectNode() : objectMapper.readTree(story.getStyleProfile()));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("故事文风配置不是合法 JSON", exception);
+        }
 
         AiTask task = newTask(userId, story.getId());
         task.setTaskType(TASK_TYPE_START);

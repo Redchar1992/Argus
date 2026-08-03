@@ -11,7 +11,7 @@ from app.agents.chapter_utils import (
 )
 from app.agents.workflow_utils import invoke_structured
 from app.infrastructure.llm_factory import StructuredModel, get_review_model
-from app.prompts import load_prompt
+from app.prompts import load_profile_prompt
 from app.schemas.chapter import ChapterReview, build_chapter_review
 
 
@@ -36,21 +36,23 @@ def validate_chapter_node(state: dict[str, Any]) -> dict[str, Any]:
 class ChapterReviewerAgent:
     def __init__(self, model: StructuredModel | None = None) -> None:
         self.model = model or get_review_model()
-        self.prompt = load_prompt("chapter_review")
+        self.prompt = None
 
     async def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
+        prompt, prompt_name = load_profile_prompt("chapter_review", state.get("content_mode", "SHORT_STORY"))
         generation, call = await invoke_structured(
             self.model,
             ChapterReview,
             node="review_chapter",
-            prompt_name="chapter_review",
-            prompt=self.prompt,
+            prompt_name=prompt_name,
+            prompt=prompt,
             payload={
                 "chapter_no": state["chapter_no"],
                 "chapter_plan": state["chapter_plan"],
                 "content": state["draft_content"],
                 "mechanical_errors": state.get("mechanical_errors", []),
                 "revision_count": state.get("revision_count", 0),
+                "contentMode": state.get("content_mode", "SHORT_STORY"),
                 **state["context_packet"],
             },
             purpose="chapter_review",
@@ -79,7 +81,7 @@ class ChapterReviewerAgent:
                     version_no=version_no,
                     status="DRAFT",
                     content=review_data,
-                    prompt_name="chapter_review",
+                    prompt_name=prompt_name,
                     model_name=generation.model_name,
                 )
             ],
