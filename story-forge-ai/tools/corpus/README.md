@@ -55,3 +55,15 @@ ai-service/.venv/bin/python tools/corpus/run_long_novel_benchmark.py \
 
 基准覆盖章节解析、40,000 字符上下文预算、240 节点小说大纲和 120 章终审 schema，
 并将结果写为不包含正文的结构化报告。
+
+章节生成闭环基准：
+
+```bash
+ai-service/.venv/bin/python tools/corpus/run_chapter_workflow_benchmark.py \
+  --ai-service-root ai-service \
+  --chapter-count 120 \
+  --report /tmp/story-forge-chapter-workflow.json
+```
+
+该基准逐章执行 `PLAN → GENERATE → APPROVE`，验证每章双节点、章节审核、正文摘要和
+长期记忆更新；仅使用本地模板和合成数据。
