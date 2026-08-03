@@ -38,3 +38,4 @@ frontend/*/vite.config.d.ts
 story-forge-ai/deploy/backups/
 story-forge-ai/ai-service/data/
 story-forge-ai/backend/data/
+story-forge-ai/data/

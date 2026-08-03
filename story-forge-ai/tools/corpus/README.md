@@ -18,3 +18,26 @@ python tools/corpus/import_github_corpus.py \
 - 输出目录包含原文，只应放在本地或私有存储，不提交到应用仓库。
 - manifest 会记录仓库、解析后的 commit SHA、源文件路径、内容 SHA-256、章节数和字数。
 - 没有章节标题的短篇会被保留为单章 fixture；识别到 `第 N 章`、`Chapter N`、序章、楔子或尾声时才拆章。
+
+## 异常 fixture 与远程 smoke test
+
+```bash
+ai-service/.venv/bin/pytest -q tools/corpus/test_edge_fixtures.py
+```
+
+`fixtures/edge-cases/` 只包含合成的无标题、空章、重复标题和前置简介样本；超长
+章节与 GB18030 在测试中动态生成。
+
+远程模型 smoke test 默认跳过，只有显式确认且配置了 HTTPS OpenAI-compatible
+服务才会发起一次不含原文的 JSON Schema 请求：
+
+```bash
+STORY_FORGE_REMOTE_SMOKE_CONFIRM=I_UNDERSTAND \
+ai-service/.venv/bin/python tools/corpus/run_remote_smoke.py \
+  --ai-service-root ai-service \
+  --confirm-remote \
+  --report /tmp/story-forge-remote-smoke.json
+```
+
+脚本不会发送导入语料，仅使用合成 topic；缺少确认、密钥或 HTTPS endpoint 时返回
+`SKIPPED`，不会失败退出。
