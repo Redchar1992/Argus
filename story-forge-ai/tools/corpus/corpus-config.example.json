@@ -1,0 +1,30 @@
+{
+  "sources": [
+    {
+      "id": "shortnovels-samples",
+      "repo": "thunderxu7-sketch/ShortNovels",
+      "ref": "main",
+      "mode": "SHORT_STORY",
+      "paths": [
+        "IP-Echo-Program-2-001/母亲的最后一句话，是AI替她说的.md",
+        "IP-Echo-Program-2-002/外婆把离婚证绣进了嫁衣.md",
+        "IP-Echo-Program-2-003/我替全城删除最后一句话.md"
+      ]
+    },
+    {
+      "id": "littleuncle-sample",
+      "repo": "thunderxu7-sketch/LittleUncle",
+      "ref": "main",
+      "mode": "NOVEL",
+      "paths": [
+        "《未婚夫逃婚后，他小叔夜夜要我哄睡》正文-第001至003章.md",
+        "《未婚夫逃婚后，他小叔夜夜要我哄睡》正文-第004至006章.md",
+        "《未婚夫逃婚后，他小叔夜夜要我哄睡》正文-第007至009章.md",
+        "《未婚夫逃婚后，他小叔夜夜要我哄睡》正文-第010至012章.md",
+        "《未婚夫逃婚后，他小叔夜夜要我哄睡》正文-第013至015章.md",
+        "《未婚夫逃婚后，他小叔夜夜要我哄睡》正文-第016至018章.md",
+        "《未婚夫逃婚后，他小叔夜夜要我哄睡》正文-第019至022章.md"
+      ]
+    }
+  ]
+}

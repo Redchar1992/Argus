@@ -1,0 +1,3 @@
+# Raw imported manuscripts are local test fixtures and must not enter Git.
+raw/
+artifacts/
