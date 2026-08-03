@@ -15,6 +15,8 @@ class StoryContentModeTest {
         assertThat(StoryContentMode.parse("SHORT_STORY")).isEqualTo(StoryContentMode.SHORT_STORY);
         assertThat(StoryContentMode.parse("short")).isEqualTo(StoryContentMode.SHORT_STORY);
         assertThat(StoryContentMode.parse("LONG")).isEqualTo(StoryContentMode.NOVEL);
+        assertThat(StoryContentMode.SHORT_STORY.minChapterCount()).isEqualTo(3);
+        assertThat(StoryContentMode.NOVEL.minChapterCount()).isEqualTo(20);
         assertThat(StoryContentMode.NOVEL.defaultChapterCount()).isEqualTo(30);
         assertThat(StoryContentMode.NOVEL.defaultChapterWords()).isEqualTo(2_500);
     }
@@ -33,4 +35,5 @@ class StoryContentModeTest {
         assertThat(ChapterTaskService.creditCost("CHAPTER_REWRITE")).isEqualTo(6L);
         assertThat(ChapterTaskService.creditCost("CHAPTER_FINALIZE")).isEqualTo(5L);
     }
+
 }

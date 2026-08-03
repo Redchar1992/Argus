@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.schemas.character import CharacterPack
 from app.schemas.outline import OutlineResult
 from app.schemas.score import StoryScore, build_score_result
-from app.schemas.workflow import SelectedTopic
+from app.schemas.workflow import SelectedTopic, WorkflowStartRequest
 from tests.workflow_samples import (
     character,
     outline_nodes,
@@ -98,3 +98,29 @@ def test_score_dimension_is_bounded_and_total_is_application_owned() -> None:
     invalid["hook"]["score"] = 21
     with pytest.raises(ValidationError):
         StoryScore.model_validate(invalid)
+
+
+@pytest.mark.parametrize(
+    ("content_mode", "target_chapter_count", "message"),
+    [
+        ("SHORT_STORY", 2, "短故事目标章节数"),
+        ("SHORT_STORY", 11, "短故事目标章节数"),
+        ("NOVEL", 19, "小说目标章节数"),
+    ],
+)
+def test_workflow_enforces_content_profile_chapter_limits(
+    content_mode: str,
+    target_chapter_count: int,
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        WorkflowStartRequest(
+            task_id="profile-limit-test",
+            story_id=1,
+            content_mode=content_mode,
+            target_chapter_count=target_chapter_count,
+            topic={
+                "title": "内容模式边界测试",
+                "hook": "开场冲突足以触发边界校验",
+            },
+        )

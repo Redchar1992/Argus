@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -189,6 +189,38 @@ async def test_plan_generate_review_revision_and_memory_closed_loop() -> None:
         for warning in completed.memory_update.continuity_warnings
     )
     assert completed.artifacts[-1]["artifactType"] == "CHAPTER_FINAL"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content_mode", "target_chapter_count", "message"),
+    [
+        ("SHORT_STORY", 2, "短故事目标章节数"),
+        ("SHORT_STORY", 11, "短故事目标章节数"),
+        ("NOVEL", 19, "小说目标章节数"),
+    ],
+)
+async def test_chapter_service_enforces_content_profile_limits(
+    content_mode: str,
+    target_chapter_count: int,
+    message: str,
+) -> None:
+    context = chapter_context()
+    context.update(
+        {
+            "contentMode": content_mode,
+            "targetChapterCount": target_chapter_count,
+        }
+    )
+    with pytest.raises(ValueError, match=message):
+        await ChapterWorkflowService(build_chapter_graph()).start(
+            command(
+                "PLAN",
+                task=f"profile-limit-{content_mode}",
+                thread=f"profile-limit-{content_mode}",
+                payload=context,
+            )
+        )
 
 
 def test_context_assembler_keeps_only_latest_three_summaries() -> None:

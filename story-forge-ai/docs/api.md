@@ -81,7 +81,7 @@ Content-Type: application/json
 ```
 
 `contentMode` 支持 `SHORT_STORY`（短故事，默认）和 `NOVEL`（小说）。短故事目标章节数
-为 1～10；小说建议 20～200 章。未填写目标参数时，后端按模式使用默认值。`styleProfile`
+为 3～10；小说为 20～200 章。未填写目标参数时，后端按模式使用默认值。`styleProfile`
 必须是 JSON 对象，最多 10000 个字符。故事创建后内容模式视为不可变；选题生成时若传入
 不同模式会返回 `400 CONTENT_MODE_MISMATCH`。
 

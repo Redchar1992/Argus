@@ -41,6 +41,19 @@ class WorkflowStatus(StrEnum):
     FAILED = "FAILED"
 
 
+def validate_content_profile(content_mode: str, target_chapter_count: int) -> None:
+    """Keep AI-service chapter limits aligned with the Story project profile."""
+
+    normalized = str(content_mode).strip().upper()
+    if normalized in {"SHORT", "SHORT_STORY"}:
+        if target_chapter_count < 3:
+            raise ValueError("短故事目标章节数至少为3")
+        if target_chapter_count > 10:
+            raise ValueError("短故事目标章节数不能超过10")
+    if normalized in {"NOVEL", "LONG"} and target_chapter_count < 20:
+        raise ValueError("小说目标章节数至少为20")
+
+
 class SelectedTopic(CamelModel):
     # Week-one topic responses contain scoreReasons and may gain additional
     # explainability fields over time. The workflow only needs the creative
@@ -97,6 +110,11 @@ class WorkflowStartRequest(CamelModel):
     chapter_target_words: int = Field(default=1_800, ge=800, le=8_000)
     viewpoint: str = Field(default="THIRD_LIMITED", max_length=32)
     style_profile: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_content_profile_limits(self) -> WorkflowStartRequest:
+        validate_content_profile(self.content_mode, self.target_chapter_count)
+        return self
 
 
 class ReviewDecision(CamelModel):
@@ -156,10 +174,18 @@ class RedisWorkflowMessage(CamelModel):
     approved: bool | None = None
     notes: str = Field(default="", max_length=2000)
     max_revisions: int = Field(default=2, ge=0, le=2)
-    content_mode: Literal["SHORT_STORY", "NOVEL"] = Field(default="SHORT_STORY", alias="contentMode")
-    target_chapter_count: int = Field(default=10, ge=1, le=200, alias="targetChapterCount")
-    target_total_words: int = Field(default=30_000, ge=1_000, le=2_000_000, alias="targetTotalWords")
-    chapter_target_words: int = Field(default=1_800, ge=800, le=8_000, alias="chapterTargetWords")
+    content_mode: Literal["SHORT_STORY", "NOVEL"] = Field(
+        default="SHORT_STORY", alias="contentMode"
+    )
+    target_chapter_count: int = Field(
+        default=10, ge=1, le=200, alias="targetChapterCount"
+    )
+    target_total_words: int = Field(
+        default=30_000, ge=1_000, le=2_000_000, alias="targetTotalWords"
+    )
+    chapter_target_words: int = Field(
+        default=1_800, ge=800, le=8_000, alias="chapterTargetWords"
+    )
     viewpoint: str = Field(default="THIRD_LIMITED", max_length=32)
     style_profile: dict[str, Any] = Field(default_factory=dict, alias="styleProfile")
 
@@ -170,6 +196,7 @@ class RedisWorkflowMessage(CamelModel):
 
     @model_validator(mode="after")
     def validate_action_payload(self) -> RedisWorkflowMessage:
+        validate_content_profile(self.content_mode, self.target_chapter_count)
         if self.action == "START" and self.topic is None:
             raise ValueError("START消息必须包含topic")
         if self.action == "RESUME":

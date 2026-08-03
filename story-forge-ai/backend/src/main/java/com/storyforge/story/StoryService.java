@@ -46,6 +46,18 @@ public class StoryService {
         StoryContentMode contentMode = StoryContentMode.parse(request.contentMode());
         int targetChapterCount = request.targetChapterCount() == null
                 ? contentMode.defaultChapterCount() : request.targetChapterCount();
+        if (targetChapterCount < contentMode.minChapterCount()) {
+            String message = contentMode == StoryContentMode.SHORT_STORY
+                    ? "短故事目标章节数至少为 3"
+                    : "小说目标章节数至少为 20";
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    contentMode == StoryContentMode.SHORT_STORY
+                            ? "SHORT_STORY_CHAPTER_COUNT_TOO_SMALL"
+                            : "NOVEL_CHAPTER_COUNT_TOO_SMALL",
+                    message
+            );
+        }
         if (contentMode == StoryContentMode.SHORT_STORY && targetChapterCount > 10) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "SHORT_STORY_CHAPTER_LIMIT",
                     "短故事目标章节数不能超过 10；长篇内容请切换为小说模式");

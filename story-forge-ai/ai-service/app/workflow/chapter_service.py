@@ -18,6 +18,7 @@ from app.schemas.chapter import (
     ChapterRunResponse,
     ChapterRunStatus,
 )
+from app.schemas.workflow import validate_content_profile
 from app.workflow.chapter_graph import build_chapter_graph
 
 ChapterUpdateCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -189,6 +190,11 @@ class ChapterWorkflowService:
             raise ValueError(
                 f"第{command.chapter_no}章必须且只能包含两个当前大纲节点"
             )
+        content_mode = str(value("contentMode", "content_mode", "SHORT_STORY"))
+        target_chapter_count = int(
+            value("targetChapterCount", "target_chapter_count", 10) or 10
+        )
+        validate_content_profile(content_mode, target_chapter_count)
         return {
             "task_id": command.task_id,
             "story_id": command.story_id,
@@ -196,12 +202,18 @@ class ChapterWorkflowService:
             "chapter_no": command.chapter_no,
             "thread_id": command.thread_id,
             "mode": command.action.value,
-            "content_mode": str(value("contentMode", "content_mode", "SHORT_STORY")),
-            "target_chapter_count": int(value("targetChapterCount", "target_chapter_count", 10) or 10),
-            "target_total_words": int(value("targetTotalWords", "target_total_words", 30_000) or 30_000),
-            "chapter_target_words": int(value("chapterTargetWords", "chapter_target_words", 1_800) or 1_800),
+            "content_mode": content_mode,
+            "target_chapter_count": target_chapter_count,
+            "target_total_words": int(
+                value("targetTotalWords", "target_total_words", 30_000) or 30_000
+            ),
+            "chapter_target_words": int(
+                value("chapterTargetWords", "chapter_target_words", 1_800) or 1_800
+            ),
             "viewpoint": str(value("viewpoint", "viewpoint", "THIRD_LIMITED")),
-            "context_snapshot_hash": str(value("contextSnapshotHash", "context_snapshot_hash", "")),
+            "context_snapshot_hash": str(
+                value("contextSnapshotHash", "context_snapshot_hash", "")
+            ),
             "story_title": str(value("storyTitle", "story_title", "")),
             "genre": str(value("genre", "genre", "")),
             "target_audience": str(value("targetAudience", "target_audience", "")),

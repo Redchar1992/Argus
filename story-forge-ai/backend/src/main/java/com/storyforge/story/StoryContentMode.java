@@ -7,14 +7,16 @@ import java.util.Locale;
  * allowing novel projects to use a larger, slower-moving outline.
  */
 public enum StoryContentMode {
-    SHORT_STORY(10, 30_000, 1_800),
-    NOVEL(30, 300_000, 2_500);
+    SHORT_STORY(3, 10, 30_000, 1_800),
+    NOVEL(20, 30, 300_000, 2_500);
 
+    private final int minChapterCount;
     private final int defaultChapterCount;
     private final int defaultTotalWords;
     private final int defaultChapterWords;
 
-    StoryContentMode(int defaultChapterCount, int defaultTotalWords, int defaultChapterWords) {
+    StoryContentMode(int minChapterCount, int defaultChapterCount, int defaultTotalWords, int defaultChapterWords) {
+        this.minChapterCount = minChapterCount;
         this.defaultChapterCount = defaultChapterCount;
         this.defaultTotalWords = defaultTotalWords;
         this.defaultChapterWords = defaultChapterWords;
@@ -22,6 +24,10 @@ public enum StoryContentMode {
 
     public int defaultChapterCount() {
         return defaultChapterCount;
+    }
+
+    public int minChapterCount() {
+        return minChapterCount;
     }
 
     public int defaultTotalWords() {

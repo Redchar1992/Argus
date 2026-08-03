@@ -294,6 +294,26 @@ class StoryForgeIntegrationTest {
     }
 
     @Test
+    void shortStoryProfileRejectsFewerThanThreeChapters() throws Exception {
+        String token = register("short-story-writer").path("token").asText();
+
+        mockMvc.perform(post("/api/story/create")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"过短项目",
+                                  "genre":"都市情感",
+                                  "audience":"女性",
+                                  "contentMode":"SHORT_STORY",
+                                  "targetChapterCount":2
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("SHORT_STORY_CHAPTER_COUNT_TOO_SMALL"));
+    }
+
+    @Test
     void insufficientCreditsAreRejectedBeforeCallingAiService() throws Exception {
         String token = register("no-topic-credits").path("token").asText();
         JsonNode story = createStory(token, "余额校验", "都市情感", "女性", "复仇");

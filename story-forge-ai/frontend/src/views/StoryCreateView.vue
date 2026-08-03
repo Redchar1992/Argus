@@ -87,7 +87,7 @@ watch(
       if (!form.targetTotalWords || form.targetTotalWords < 100_000) form.targetTotalWords = 300_000
       if (!form.chapterTargetWords || form.chapterTargetWords < 800) form.chapterTargetWords = 2500
     } else {
-      if (!form.targetChapterCount || form.targetChapterCount > 10) form.targetChapterCount = 10
+      if (!form.targetChapterCount || form.targetChapterCount < 3 || form.targetChapterCount > 10) form.targetChapterCount = 10
       if (!form.targetTotalWords || form.targetTotalWords > 80_000) form.targetTotalWords = 30_000
       if (!form.chapterTargetWords || form.chapterTargetWords > 5000) form.chapterTargetWords = 1800
     }
@@ -381,7 +381,7 @@ onBeforeUnmount(stopLoadingMessages)
                   <el-form-item label="目标章节数">
                     <el-input-number
                       v-model="form.targetChapterCount"
-                      :min="form.contentMode === 'NOVEL' ? 20 : 1"
+                      :min="form.contentMode === 'NOVEL' ? 20 : 3"
                       :max="form.contentMode === 'NOVEL' ? 200 : 10"
                       controls-position="right"
                       size="large"
