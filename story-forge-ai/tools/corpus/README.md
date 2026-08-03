@@ -41,3 +41,17 @@ ai-service/.venv/bin/python tools/corpus/run_remote_smoke.py \
 
 脚本不会发送导入语料，仅使用合成 topic；缺少确认、密钥或 HTTPS endpoint 时返回
 `SKIPPED`，不会失败退出。
+
+## 100+ 章性能基准
+
+使用合成文本运行 120 章基准，不读取作者原文：
+
+```bash
+ai-service/.venv/bin/python tools/corpus/run_long_novel_benchmark.py \
+  --ai-service-root ai-service \
+  --chapter-count 120 \
+  --report /tmp/story-forge-long-novel.json
+```
+
+基准覆盖章节解析、40,000 字符上下文预算、240 节点小说大纲和 120 章终审 schema，
+并将结果写为不包含正文的结构化报告。
