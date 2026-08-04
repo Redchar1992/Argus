@@ -4,7 +4,8 @@
 > 适用分支：`develop`
 > 目标：在一台 Ubuntu 云服务器上部署 Vue、Spring Boot、FastAPI、MySQL、Redis、两个 Worker 和 Caddy，完成 HTTPS 访问及端到端冒烟验证。
 
-本文是给另一台电脑上的 GPT/CLI Agent 使用的执行手册。Agent 应严格按顺序执行，
+本文是给另一台电脑上的 GPT/CLI Agent 使用的执行手册。执行前先完成
+[`deployment-prerequisites.md`](./deployment-prerequisites.md)。Agent 应严格按顺序执行，
 每一步检查命令退出码和输出；遇到未满足的前置条件先停止并报告，不要猜测密钥、域名、
 模型名称或数据库密码。
 

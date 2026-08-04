@@ -223,6 +223,8 @@ cd story-forge-ai/frontend && npm test -- --run && npm run build
 
 - [架构与数据流](docs/architecture.md)
 - [API 契约](docs/api.md)
+- [部署前置依赖](docs/deployment-prerequisites.md)
+- [AI 可执行部署手册](docs/ai-deployment-runbook.md)
 - [第一周验收清单](docs/week-1-acceptance.md)
 - [第二周验收清单](docs/week-2-acceptance.md)
 - [第三周验收清单](docs/week-3-acceptance.md)
