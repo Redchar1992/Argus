@@ -27,6 +27,7 @@ import com.storyforge.chapter.mapper.StoryChapterMapper;
 import com.storyforge.chapter.mapper.StoryChapterVersionMapper;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.cost.AiCreditService;
+import com.storyforge.cost.AiPricingService;
 import com.storyforge.story.StoryProject;
 import com.storyforge.story.StoryContentMode;
 import com.storyforge.story.StoryProjectMapper;
@@ -50,6 +51,7 @@ public class FinalReportService {
     private final AiServiceClient ai;
     private final JdbcTemplate jdbc;
     private final AiCreditService credits;
+    private final AiPricingService pricing;
     private final int maxReviewChars;
     private final PromptResolver prompts;
     private final StoryProjectMapper storyMapper;
@@ -58,6 +60,7 @@ public class FinalReportService {
     public FinalReportService(StoryService stories,
             StoryChapterMapper chapterMapper, StoryChapterVersionMapper versionMapper,
             ObjectMapper mapper, AiServiceClient ai, JdbcTemplate jdbc, AiCreditService credits,
+            AiPricingService pricing,
             @Value("${app.ai.final-review-max-chars:500000}") int maxReviewChars,
             PromptResolver prompts, StoryProjectMapper storyMapper,
             ProductAnalyticsService analytics) {
@@ -68,6 +71,7 @@ public class FinalReportService {
         this.ai = ai;
         this.jdbc = jdbc;
         this.credits = credits;
+        this.pricing = pricing;
         this.maxReviewChars = Math.max(10_000, maxReviewChars);
         this.prompts = prompts;
         this.storyMapper = storyMapper;
@@ -131,7 +135,7 @@ public class FinalReportService {
         }
         String freezeKey = "final-review:freeze:" + storyId + ":" + contentHash;
         String settleKey = "final-review:settle:" + storyId + ":" + contentHash;
-        long reservedCredits = 30L * reviewBatches.size();
+        long reservedCredits = pricing.credits("FINAL_REVIEW") * reviewBatches.size();
         credits.freeze(userId, null, freezeKey, reservedCredits, "全书终审预冻结");
         List<JsonNode> reports = new ArrayList<>();
         long inputTokens = 0;

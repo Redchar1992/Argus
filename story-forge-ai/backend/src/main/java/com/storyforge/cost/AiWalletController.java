@@ -13,14 +13,21 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/me/ai-wallet")
 public class AiWalletController {
     private final AiCreditService credits;
+    private final AiQuotaService quota;
 
-    public AiWalletController(AiCreditService credits) {
+    public AiWalletController(AiCreditService credits, AiQuotaService quota) {
         this.credits = credits;
+        this.quota = quota;
     }
 
     @GetMapping
-    public AiWalletResponse wallet(@AuthenticationPrincipal AuthenticatedUser user) {
-        return credits.get(user.userId());
+    public AiWalletView wallet(@AuthenticationPrincipal AuthenticatedUser user) {
+        AiWalletResponse wallet = credits.get(user.userId());
+        AiQuotaService.QuotaSnapshot snapshot = quota.snapshot(user.userId());
+        return new AiWalletView(wallet.userId(), wallet.availableCredits(), wallet.frozenCredits(),
+                wallet.consumedCredits(), wallet.updatedTime(), snapshot.planCode(), snapshot.dailyLimit(),
+                snapshot.monthlyLimit(), snapshot.dailyRemaining(), snapshot.monthlyRemaining(),
+                snapshot.maxConcurrentTasks());
     }
 
     @GetMapping("/logs")

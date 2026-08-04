@@ -8,9 +8,11 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.storyforge.chapter.stream.ChapterCommandPublisher;
+import com.storyforge.chapter.ChapterTaskType;
 import com.storyforge.chapter.vo.ChapterTaskResponse;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.cost.AiCreditService;
+import com.storyforge.cost.AiPricingService;
 import com.storyforge.task.AiTask;
 import com.storyforge.task.AiTaskMapper;
 import com.storyforge.task.AiTaskStatus;
@@ -27,9 +29,11 @@ public class ChapterTaskService {
     private final ChapterCommandPublisher publisher;
     private final ChapterSupport support;
     private final AiCreditService credits;
+    private final AiPricingService pricing;
     public ChapterTaskService(AiTaskMapper tasks, ChapterCommandPublisher publisher, ChapterSupport support,
-            AiCreditService credits) {
+            AiCreditService credits, AiPricingService pricing) {
         this.tasks = tasks; this.publisher = publisher; this.support = support; this.credits = credits;
+        this.pricing = pricing;
     }
 
     @Transactional
@@ -78,7 +82,7 @@ public class ChapterTaskService {
             if (raced != null) return raced;
             throw exception;
         }
-        credits.freeze(userId, task.getId(), freezeKey(task), creditCost(taskType),
+        credits.freeze(userId, task.getId(), freezeKey(task), configuredCreditCost(taskType),
                 "章节 AI 任务预冻结：" + taskType);
         return task;
     }
@@ -123,17 +127,25 @@ public class ChapterTaskService {
         task.setErrorMessage(message == null ? null : message.substring(0, Math.min(1000, message.length())));
         task.setUpdatedTime(LocalDateTime.now()); tasks.updateById(task);
         if (credits.hasLog(freezeKey(task))) {
-            credits.release(task.getUserId(), task.getId(), freezeKey(task), creditCost(task.getTaskType()),
+            credits.release(task.getUserId(), task.getId(), freezeKey(task), configuredCreditCost(task.getTaskType()),
                     "章节 AI 任务派发失败，释放预冻结额度");
         }
     }
 
+    public long configuredCreditCost(String taskType) {
+        if (!ChapterTaskType.isChapterTask(taskType)) {
+            throw new IllegalArgumentException("不支持的章节任务类型: " + taskType);
+        }
+        return pricing.credits(taskType);
+    }
+
+    /** Legacy defaults kept for callers outside Spring; runtime billing uses the pricing table. */
     public static long creditCost(String taskType) {
         return switch (taskType) {
-            case "CHAPTER_PLAN" -> 3L;
-            case "CHAPTER_GENERATE" -> 12L;
-            case "CHAPTER_REWRITE" -> 6L;
-            case "CHAPTER_FINALIZE" -> 5L;
+            case ChapterTaskType.PLAN -> 3L;
+            case ChapterTaskType.GENERATE -> 12L;
+            case ChapterTaskType.REWRITE -> 6L;
+            case ChapterTaskType.FINALIZE -> 5L;
             default -> 5L;
         };
     }

@@ -11,12 +11,13 @@ import {
 } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import TopicCard from '@/components/TopicCard.vue'
 import { generateTopics, saveTopicSelection } from '@/api/story'
 import { useStoryStore } from '@/stores/story'
+import { useAiStore } from '@/stores/ai'
 import type { CreateStoryInput, EntityId, TopicOption } from '@/types'
 import { getErrorMessage } from '@/utils/error'
 import { saveTopicSession } from '@/utils/storage'
@@ -56,6 +57,7 @@ const loadingMessages = [
 
 const router = useRouter()
 const storyStore = useStoryStore()
+const aiStore = useAiStore()
 const formRef = ref<FormInstance>()
 const stage = ref<'configure' | 'results'>('configure')
 const generating = ref(false)
@@ -66,6 +68,14 @@ const taskId = ref<EntityId>()
 const topics = ref<TopicOption[]>([])
 const selectedTopicId = ref('')
 let loadingTimer: ReturnType<typeof setInterval> | undefined
+
+const topicCost = computed(() => aiStore.cost('TOPIC_GENERATION'))
+
+onMounted(() => {
+  aiStore.fetch().catch(() => {
+    // Cost display is optional; the server remains the source of truth.
+  })
+})
 
 const form = reactive<StoryForm>({
   title: '',
@@ -477,6 +487,7 @@ onBeforeUnmount(stopLoadingMessages)
               <div>
                 <strong>一次生成 10 个结构化方案</strong>
                 <span>包含开场钩子、故事梗概与商业潜力评分</span>
+                <small v-if="topicCost !== null">本次预计消耗 {{ topicCost }} AI 额度，平台统一提供模型</small>
               </div>
               <el-button
                 type="primary"
@@ -870,6 +881,11 @@ onBeforeUnmount(stopLoadingMessages)
 
 .generate-action span {
   color: var(--sf-ink-muted);
+  font-size: 9px;
+}
+
+.generate-action small {
+  color: #8d79bd;
   font-size: 9px;
 }
 

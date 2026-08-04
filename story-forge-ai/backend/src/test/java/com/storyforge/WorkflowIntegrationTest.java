@@ -28,6 +28,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.storyforge.common.exception.ApiException;
+import com.storyforge.cost.AiReservationExpiryService;
 import com.storyforge.story.StoryProject;
 import com.storyforge.task.consumer.WorkflowEventService;
 import com.storyforge.task.producer.WorkflowDispatchException;
@@ -70,6 +71,9 @@ class WorkflowIntegrationTest {
 
     @Autowired
     private WorkflowEventService eventService;
+
+    @Autowired
+    private AiReservationExpiryService reservationExpiryService;
 
     @Autowired
     private WorkflowService workflowService;
@@ -246,6 +250,48 @@ class WorkflowIntegrationTest {
                 Long.class,
                 resumeTaskId
         )).isEqualTo(taskId);
+    }
+
+    @Test
+    void expiredReviewReservationReleasesCreditsAndRejectsResume() throws Exception {
+        String token = register("expired-review").path("token").asText();
+        long storyId = createStory(token, "审核超时", "都市情感").path("id").asLong();
+        seedTopics(storyId);
+        long taskId = startWorkflow(token, storyId);
+
+        Map<String, String> reviewEvent = event(taskId, storyId, "thread-expired", "REVIEW_REQUIRED");
+        reviewEvent.put("currentNode", "human_review");
+        assertThat(eventService.processEvent("1002-0", reviewEvent)).isTrue();
+
+        String freezeKey = WorkflowTaskPersistenceService.workflowFreezeKey(storyId);
+        jdbcTemplate.update(
+                "UPDATE ai_quota_reservation SET expires_time='2000-01-01 00:00:00.000' WHERE idempotency_key=?",
+                freezeKey
+        );
+        reservationExpiryService.releaseExpiredReservations();
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_quota_reservation WHERE idempotency_key=?",
+                String.class,
+                freezeKey
+        )).isEqualTo("RELEASED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT frozen_credits FROM user_ai_wallet WHERE user_id=(SELECT user_id FROM story_project WHERE id=?)",
+                Long.class,
+                storyId
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT available_credits FROM user_ai_wallet WHERE user_id=(SELECT user_id FROM story_project WHERE id=?)",
+                Long.class,
+                storyId
+        )).isEqualTo(100L);
+
+        mockMvc.perform(post("/api/ai-tasks/{taskId}/review", taskId)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"approved\":true,\"notes\":\"\"}"))
+                .andExpect(status().isPaymentRequired())
+                .andExpect(jsonPath("$.code").value("AI_WORKFLOW_REVIEW_EXPIRED"));
     }
 
     @Test

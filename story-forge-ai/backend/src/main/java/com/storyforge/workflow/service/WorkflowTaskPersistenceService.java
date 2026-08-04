@@ -6,13 +6,18 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.storyforge.common.exception.ApiException;
 import com.storyforge.story.StoryProject;
+import com.storyforge.cost.AiCreditService;
+import com.storyforge.cost.AiPricingService;
 import com.storyforge.task.AiTask;
 import com.storyforge.task.AiTaskMapper;
 import com.storyforge.task.AiTaskService;
 import com.storyforge.task.AiTaskStatus;
 import com.storyforge.workflow.dto.ReviewDecisionRequest;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,15 +31,24 @@ public class WorkflowTaskPersistenceService {
     private final AiTaskMapper taskMapper;
     private final AiTaskService taskService;
     private final ObjectMapper objectMapper;
+    private final AiCreditService credits;
+    private final AiPricingService pricing;
+    private final long reviewTimeoutHours;
 
     public WorkflowTaskPersistenceService(
             AiTaskMapper taskMapper,
             AiTaskService taskService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AiCreditService credits,
+            AiPricingService pricing,
+            @Value("${app.ai.workflow-review-timeout-hours:24}") long reviewTimeoutHours
     ) {
         this.taskMapper = taskMapper;
         this.taskService = taskService;
         this.objectMapper = objectMapper;
+        this.credits = credits;
+        this.pricing = pricing;
+        this.reviewTimeoutHours = Math.max(1, reviewTimeoutHours);
     }
 
     @Transactional
@@ -69,6 +83,9 @@ public class WorkflowTaskPersistenceService {
         task.setIdempotencyKey(idempotencyKey);
         task.setRequestPayload(writeJson(payload));
         taskMapper.insert(task);
+        credits.freeze(userId, task.getId(), workflowFreezeKey(story.getId()),
+                workflowReservedCredits(), "故事工作流预冻结",
+                LocalDateTime.now().plusHours(reviewTimeoutHours));
         return task;
     }
 
@@ -79,6 +96,14 @@ public class WorkflowTaskPersistenceService {
         AiTask existing = taskService.findByIdempotencyKey(source.getUserId(), idempotencyKey);
         if (existing != null) {
             return existing;
+        }
+        String freezeKey = workflowFreezeKey(source.getStoryId());
+        if (credits.hasLog(freezeKey) && !credits.hasActiveFreeze(source.getUserId(), freezeKey)) {
+            throw new ApiException(
+                    HttpStatus.PAYMENT_REQUIRED,
+                    "AI_WORKFLOW_REVIEW_EXPIRED",
+                    "人工审核已超时，额度已释放，请新建故事后重新生成"
+            );
         }
 
         ObjectNode payload = objectMapper.createObjectNode();
@@ -121,6 +146,22 @@ public class WorkflowTaskPersistenceService {
 
     public static String startIdempotencyKey(Long storyId) {
         return storyId + ":v1:START:0";
+    }
+
+    public static String workflowFreezeKey(Long storyId) {
+        return "workflow:freeze:" + storyId;
+    }
+
+    public static String workflowSettleKey(Long storyId) {
+        return "workflow:settle:" + storyId;
+    }
+
+    /** Maximum cost for the initial run plus the two revisions allowed by the worker contract. */
+    public long workflowReservedCredits() {
+        return pricing.credits("WORKFLOW_CHARACTER")
+                + pricing.credits("WORKFLOW_OUTLINE")
+                + pricing.credits("WORKFLOW_SCORE")
+                + 2L * pricing.credits("WORKFLOW_REVISION");
     }
 
     public static String resumeIdempotencyKey(Long storyId, int attemptNo) {

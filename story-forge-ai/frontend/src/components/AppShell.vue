@@ -8,16 +8,25 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
+import { onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import BrandMark from '@/components/BrandMark.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useAiStore } from '@/stores/ai'
 import { getErrorMessage } from '@/utils/error'
 
 const authStore = useAuthStore()
+const aiStore = useAiStore()
 const route = useRoute()
 const router = useRouter()
 const loggingOut = ref(false)
+
+onMounted(() => {
+  aiStore.fetch().catch(() => {
+    // The wallet is supplementary UI; API failures should not block navigation.
+  })
+})
 
 const pageTitle = computed(() => {
   if (route.name === 'story-create') return '新建故事'
@@ -100,6 +109,11 @@ async function logout() {
           <h1>{{ pageTitle }}</h1>
         </div>
         <div class="topbar-actions">
+          <div v-if="aiStore.wallet" class="credit-badge" title="平台 AI 额度">
+            <span class="credit-badge-label">AI 额度</span>
+            <strong>{{ aiStore.wallet.availableCredits }}</strong>
+            <small>今日剩余 {{ aiStore.wallet.dailyRemaining }}</small>
+          </div>
           <el-button
             v-if="showCreateButton"
             class="create-button"
@@ -318,6 +332,32 @@ async function logout() {
   gap: 12px;
 }
 
+.credit-badge {
+  display: grid;
+  min-width: 118px;
+  gap: 1px;
+  padding: 7px 12px;
+  border: 1px solid rgba(112, 92, 242, 0.16);
+  border-radius: 12px;
+  background: rgba(112, 92, 242, 0.06);
+  line-height: 1.15;
+}
+
+.credit-badge-label {
+  color: var(--sf-ink-muted);
+  font-size: 9px;
+}
+
+.credit-badge strong {
+  color: var(--sf-primary);
+  font-size: 14px;
+}
+
+.credit-badge small {
+  color: var(--sf-ink-muted);
+  font-size: 9px;
+}
+
 .create-button {
   height: 42px;
   padding-inline: 18px;
@@ -413,6 +453,11 @@ async function logout() {
   .profile-copy,
   .profile-button > .el-icon {
     display: none;
+  }
+
+  .credit-badge {
+    min-width: 92px;
+    padding-inline: 9px;
   }
 }
 

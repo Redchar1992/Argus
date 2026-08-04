@@ -15,6 +15,7 @@ import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.common.exception.ApiException;
 import com.storyforge.common.validation.CreativeDirectionValidator;
 import com.storyforge.cost.AiCreditService;
+import com.storyforge.cost.AiPricingService;
 import com.storyforge.cost.AiUsageRecorder;
 import com.storyforge.prompt.PromptResolver;
 import com.storyforge.story.StoryProject;
@@ -35,7 +36,6 @@ public class AiOrchestrationService {
 
     private static final String TASK_TYPE_TOPIC = "TOPIC_GENERATION";
     private static final int EXPECTED_TOPIC_COUNT = 10;
-    private static final long TOPIC_CREDIT_COST = 5;
     private static final Set<String> COMMON_SCORE_DIMENSIONS = Set.of(
             "conflict", "reversal", "emotionalValue"
     );
@@ -46,6 +46,7 @@ public class AiOrchestrationService {
     private final AiServiceClient aiServiceClient;
     private final ObjectMapper objectMapper;
     private final AiCreditService credits;
+    private final AiPricingService pricing;
     private final AiUsageRecorder usage;
     private final PromptResolver prompts;
     private final ProductAnalyticsService analytics;
@@ -57,6 +58,7 @@ public class AiOrchestrationService {
             AiServiceClient aiServiceClient,
             ObjectMapper objectMapper,
             AiCreditService credits,
+            AiPricingService pricing,
             AiUsageRecorder usage,
             PromptResolver prompts,
             ProductAnalyticsService analytics
@@ -67,6 +69,7 @@ public class AiOrchestrationService {
         this.aiServiceClient = aiServiceClient;
         this.objectMapper = objectMapper;
         this.credits = credits;
+        this.pricing = pricing;
         this.usage = usage;
         this.prompts = prompts;
         this.analytics = analytics;
@@ -108,7 +111,8 @@ public class AiOrchestrationService {
 
         String freezeKey = "topic:freeze:" + story.getId() + ":" + task.getId();
         String settleKey = "topic:settle:" + story.getId() + ":" + task.getId();
-        credits.freeze(userId, task.getId(), freezeKey, TOPIC_CREDIT_COST, "AI 选题预冻结");
+        long creditCost = pricing.credits(TASK_TYPE_TOPIC);
+        credits.freeze(userId, task.getId(), freezeKey, creditCost, "AI 选题预冻结");
         long started = System.currentTimeMillis();
         try {
             JsonNode upstreamResult = aiServiceClient.generateTopics(aiRequest);
@@ -133,7 +137,7 @@ public class AiOrchestrationService {
                     Math.max(1, reportJson.length() / 4),
                     System.currentTimeMillis() - started, true, null);
             credits.settleFrozen(userId, task.getId(), freezeKey, settleKey,
-                    TOPIC_CREDIT_COST, TOPIC_CREDIT_COST, "AI 选题生成");
+                    creditCost, creditCost, "AI 选题生成");
             analytics.record(
                     ProductEventNames.TOPICS_GENERATED,
                     userId,
@@ -148,7 +152,7 @@ public class AiOrchestrationService {
             usage.record(task, "TOPIC_GENERATION", "ai-service", "topic-agent", "topic_generation", prompt.versionLabel(),
                     Math.max(1, task.getRequestPayload().length() / 4), 0,
                     System.currentTimeMillis() - started, false, "TOPIC_GENERATION_FAILED");
-            credits.release(userId, task.getId(), freezeKey, TOPIC_CREDIT_COST, "AI 选题生成失败，释放预冻结额度");
+            credits.release(userId, task.getId(), freezeKey, creditCost, "AI 选题生成失败，释放预冻结额度");
             markFailed(task, story, exception.getMessage());
             throw new ApiException(
                     HttpStatus.BAD_GATEWAY,

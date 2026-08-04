@@ -55,6 +55,10 @@ app:
     read-timeout: ${AI_READ_TIMEOUT:45s}
     internal-api-key: ${AI_INTERNAL_API_KEY:}
     final-review-max-chars: ${FINAL_REVIEW_MAX_CHARS:500000}
+    # Workflow reservations remain available during manual review until this TTL.
+    workflow-review-timeout-hours: ${AI_WORKFLOW_REVIEW_TIMEOUT_HOURS:24}
+    # A small periodic sweep releases reservations whose review TTL has elapsed.
+    quota-expiry-interval-ms: ${AI_QUOTA_EXPIRY_INTERVAL_MS:60000}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
   workflow:

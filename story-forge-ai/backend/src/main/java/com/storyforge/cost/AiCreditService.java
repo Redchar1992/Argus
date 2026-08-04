@@ -16,9 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class AiCreditService {
     private static final long WELCOME_CREDITS = 100;
     private final JdbcTemplate jdbc;
+    private final AiQuotaService quota;
 
-    public AiCreditService(JdbcTemplate jdbc) {
+    public AiCreditService(JdbcTemplate jdbc, AiQuotaService quota) {
         this.jdbc = jdbc;
+        this.quota = quota;
     }
 
     @Transactional
@@ -39,19 +41,28 @@ public class AiCreditService {
         if (amount <= 0) throw new IllegalArgumentException("积分消耗必须大于0");
         ensureWallet(userId);
         if (existsLog(idempotencyKey)) return;
+        quota.reserve(userId, null, idempotencyKey, amount);
         AiWalletResponse wallet = lockWallet(userId);
         if (wallet.availableCredits() < amount) {
             throw new ApiException(HttpStatus.PAYMENT_REQUIRED, "AI_CREDITS_INSUFFICIENT", "AI 积分余额不足");
         }
         jdbc.update("UPDATE user_ai_wallet SET available_credits=available_credits-?, consumed_credits=consumed_credits+?, updated_time=CURRENT_TIMESTAMP WHERE user_id=?", amount, amount, userId);
         insertLog(userId, null, "SETTLE", -amount, wallet.availableCredits(), wallet.availableCredits() - amount, description, idempotencyKey);
+        quota.settle(userId, idempotencyKey, amount, amount);
     }
 
     @Transactional
     public void freeze(Long userId, Long taskId, String idempotencyKey, long amount, String description) {
+        freeze(userId, taskId, idempotencyKey, amount, description, null);
+    }
+
+    @Transactional
+    public void freeze(Long userId, Long taskId, String idempotencyKey, long amount, String description,
+            LocalDateTime expiresAt) {
         if (amount <= 0) throw new IllegalArgumentException("冻结积分必须大于0");
         ensureWallet(userId);
         if (existsLog(idempotencyKey)) return;
+        quota.reserve(userId, taskId, idempotencyKey, amount, expiresAt);
         AiWalletResponse wallet = lockWallet(userId);
         if (wallet.availableCredits() < amount) throw new ApiException(HttpStatus.PAYMENT_REQUIRED, "AI_CREDITS_INSUFFICIENT", "AI 积分余额不足");
         jdbc.update("UPDATE user_ai_wallet SET available_credits=available_credits-?, frozen_credits=frozen_credits+?, updated_time=CURRENT_TIMESTAMP WHERE user_id=?", amount, amount, userId);
@@ -61,11 +72,17 @@ public class AiCreditService {
     @Transactional
     public void release(Long userId, Long taskId, String idempotencyKey, long amount, String description) {
         ensureWallet(userId);
-        if (existsLog(idempotencyKey)) return;
+        String releaseKey = idempotencyKey + ":release";
+        if (existsLog(releaseKey)) return;
         AiWalletResponse wallet = lockWallet(userId);
+        // A second scheduler/consumer may have passed the first check while
+        // waiting on the wallet row lock. Re-check after serialization so the
+        // unique credit-log key remains a clean idempotency boundary.
+        if (existsLog(releaseKey)) return;
         long actual = Math.min(amount, wallet.frozenCredits());
         jdbc.update("UPDATE user_ai_wallet SET frozen_credits=frozen_credits-?, available_credits=available_credits+?, updated_time=CURRENT_TIMESTAMP WHERE user_id=?", actual, actual, userId);
-        insertLog(userId, taskId, "RELEASE", actual, wallet.availableCredits(), wallet.availableCredits() + actual, description, idempotencyKey);
+        insertLog(userId, taskId, "RELEASE", actual, wallet.availableCredits(), wallet.availableCredits() + actual, description, releaseKey);
+        quota.release(userId, idempotencyKey, actual);
     }
 
     /** Settle a prior reservation and release any unused portion atomically. */
@@ -95,7 +112,12 @@ public class AiCreditService {
         if (actual > 0) {
             jdbc.update("UPDATE user_ai_wallet SET frozen_credits=frozen_credits-?, consumed_credits=consumed_credits+?, updated_time=CURRENT_TIMESTAMP WHERE user_id=?", actual, actual, userId);
             insertLog(userId, taskId, "SETTLE", -actual, available, available, description, settleKey);
+        } else {
+            // Keep the terminal idempotency key durable even when the whole
+            // reservation is released before the first model call.
+            insertLog(userId, taskId, "SETTLE", 0, available, available, description, settleKey);
         }
+        quota.settle(userId, freezeKey, reservedAmount, actual);
     }
 
     public AiWalletResponse get(Long userId) {
@@ -113,6 +135,10 @@ public class AiCreditService {
     /** Used by replay-safe consumers when processing tasks created before quota enforcement. */
     public boolean hasLog(String idempotencyKey) {
         return existsLog(idempotencyKey);
+    }
+
+    public boolean hasActiveFreeze(Long userId, String idempotencyKey) {
+        return quota.isFrozen(userId, idempotencyKey);
     }
 
     private boolean existsLog(String key) {

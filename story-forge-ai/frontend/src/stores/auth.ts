@@ -5,6 +5,7 @@ import * as authApi from '@/api/auth'
 import { useChapterStore } from '@/stores/chapter'
 import { useStoryStore } from '@/stores/story'
 import { useWorkflowStore } from '@/stores/workflow'
+import { useAiStore } from '@/stores/ai'
 import type { AuthResult, EntityId, LoginCredentials, RegisterCredentials } from '@/types'
 import {
   clearStoredAuth,
@@ -73,6 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     chapterStore.reset()
     useStoryStore().reset()
     useWorkflowStore().reset()
+    useAiStore().reset()
     clearTopicSessions()
     clearWorkflowSessions()
     clearChapterStreamCursors()

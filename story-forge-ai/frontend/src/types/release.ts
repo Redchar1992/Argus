@@ -117,6 +117,12 @@ export interface AiWallet {
   frozenCredits: number
   consumedCredits: number
   updatedTime?: string
+  planCode: string
+  dailyLimit: number
+  monthlyLimit: number
+  dailyRemaining: number
+  monthlyRemaining: number
+  maxConcurrentTasks: number
 }
 
 export interface AiCreditLog {

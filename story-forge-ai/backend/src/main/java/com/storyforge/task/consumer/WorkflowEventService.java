@@ -14,6 +14,9 @@ import com.storyforge.analytics.ProductEventNames;
 import com.storyforge.artifact.ArtifactInput;
 import com.storyforge.artifact.StoryArtifactService;
 import com.storyforge.cost.AiUsageRecorder;
+import com.storyforge.cost.AiCreditService;
+import com.storyforge.cost.AiPricingService;
+import com.storyforge.workflow.service.WorkflowTaskPersistenceService;
 import com.storyforge.story.StoryProject;
 import com.storyforge.story.StoryProjectMapper;
 import com.storyforge.story.StoryStatus;
@@ -24,6 +27,7 @@ import com.storyforge.task.AiTaskStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @Service
 public class WorkflowEventService {
@@ -34,6 +38,9 @@ public class WorkflowEventService {
     private final ObjectMapper objectMapper;
     private final AiUsageRecorder usage;
     private final ProductAnalyticsService analytics;
+    private final AiCreditService credits;
+    private final AiPricingService pricing;
+    private final JdbcTemplate jdbc;
 
     public WorkflowEventService(
             AiTaskMapper taskMapper,
@@ -41,7 +48,10 @@ public class WorkflowEventService {
             StoryArtifactService artifactService,
             ObjectMapper objectMapper,
             AiUsageRecorder usage,
-            ProductAnalyticsService analytics
+            ProductAnalyticsService analytics,
+            AiCreditService credits,
+            AiPricingService pricing,
+            JdbcTemplate jdbc
     ) {
         this.taskMapper = taskMapper;
         this.storyMapper = storyMapper;
@@ -49,6 +59,9 @@ public class WorkflowEventService {
         this.objectMapper = objectMapper;
         this.usage = usage;
         this.analytics = analytics;
+        this.credits = credits;
+        this.pricing = pricing;
+        this.jdbc = jdbc;
     }
 
     /**
@@ -150,6 +163,7 @@ public class WorkflowEventService {
         if (isTerminal(task.getStatus())) {
             usage.recordModelCalls(task, task.getTaskType(), fields.get("modelCalls"),
                     AiTaskStatus.SUCCESS.equals(task.getStatus()), task.getErrorCode());
+            settleWorkflowCredits(task);
         }
         if (latestWorkflow && AiTaskStatus.SUCCESS.equals(task.getStatus())) {
             analytics.record(
@@ -161,6 +175,63 @@ public class WorkflowEventService {
             );
         }
         return true;
+    }
+
+    private void settleWorkflowCredits(AiTask task) {
+        if (!"STORY_WORKFLOW".equals(task.getTaskType())
+                && !"WORKFLOW_RESUME".equals(task.getTaskType())) {
+            return;
+        }
+        if (!AiTaskStatus.SUCCESS.equals(task.getStatus())
+                && !AiTaskStatus.FAILED.equals(task.getStatus())) {
+            // REVIEW_REQUIRED deliberately keeps the root reservation frozen;
+            // revisions may still consume the remaining workflow budget.
+            return;
+        }
+        String freezeKey = WorkflowTaskPersistenceService.workflowFreezeKey(task.getStoryId());
+        String settleKey = WorkflowTaskPersistenceService.workflowSettleKey(task.getStoryId());
+        if (!credits.hasLog(freezeKey)
+                || !credits.hasActiveFreeze(task.getUserId(), freezeKey)
+                || credits.hasLog(settleKey)) {
+            return;
+        }
+        long actual = workflowActualCredits(task.getStoryId());
+        long reserved = pricing.credits("WORKFLOW_CHARACTER")
+                + pricing.credits("WORKFLOW_OUTLINE")
+                + pricing.credits("WORKFLOW_SCORE")
+                + 2L * pricing.credits("WORKFLOW_REVISION");
+        credits.settleFrozen(task.getUserId(), task.getId(), freezeKey, settleKey,
+                reserved, actual, "故事工作流完成");
+    }
+
+    private long workflowActualCredits(Long storyId) {
+        long total = 0;
+        for (String payload : jdbc.queryForList("""
+                SELECT result_payload FROM ai_task
+                WHERE story_id=? AND task_type IN ('STORY_WORKFLOW', 'WORKFLOW_RESUME')
+                """, String.class, storyId)) {
+            if (!StringUtils.hasText(payload)) continue;
+            try {
+                JsonNode calls = objectMapper.readTree(payload).path("modelCalls");
+                if (calls.isTextual()) {
+                    calls = objectMapper.readTree(calls.asText());
+                }
+                if (!calls.isArray()) continue;
+                for (JsonNode call : calls) {
+                    String node = call.path("node").asText("");
+                    total += switch (node) {
+                        case "generate_characters" -> pricing.credits("WORKFLOW_CHARACTER");
+                        case "generate_outline" -> pricing.credits("WORKFLOW_OUTLINE");
+                        case "score_outline" -> pricing.credits("WORKFLOW_SCORE");
+                        case "revise_outline" -> pricing.credits("WORKFLOW_REVISION");
+                        default -> 0L;
+                    };
+                }
+            } catch (JsonProcessingException ignored) {
+                // Malformed telemetry must not prevent task state from being committed.
+            }
+        }
+        return total;
     }
 
     private boolean isTerminal(String status) {

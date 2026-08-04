@@ -122,7 +122,7 @@ public class ChapterEventService {
     }
 
     private void settleCredits(AiTask task, String status) {
-        long cost = ChapterTaskService.creditCost(task.getTaskType());
+        long cost = taskService.configuredCreditCost(task.getTaskType());
         if (!credits.hasLog(ChapterTaskService.freezeKey(task))) return;
         if (AiTaskStatus.FAILED.equals(status)) {
             credits.release(task.getUserId(), task.getId(), ChapterTaskService.freezeKey(task), cost,
