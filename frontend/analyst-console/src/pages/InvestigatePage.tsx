@@ -6,6 +6,7 @@ import { DecisionPanel } from '../components/DecisionPanel';
 import { Hero, HowItWorks } from '../components/Hero';
 import { Hint } from '../components/Hint';
 import { useI18n } from '../i18n';
+import type { AuthUser } from '../auth/authMachine';
 
 const REPO = 'https://github.com/Redchar1992/argus';
 
@@ -17,7 +18,13 @@ const DEMO_WALLETS = [
   { value: '0xc1ean000000000000000000000000000000c1ean', short: '0xc1ean…', noteKey: 'demo.clean', verdict: 'CLEAR', vclass: 'v-clear' },
 ] as const;
 
-export function InvestigatePage() {
+interface InvestigatePageProps {
+  user: AuthUser;
+  signingOut: boolean;
+  onLogout: () => Promise<void>;
+}
+
+export function InvestigatePage({ user, signingOut, onLogout }: InvestigatePageProps) {
   const { lang, setLang, t } = useI18n();
   const [address, setAddress] = useState('');
   const [inv, setInv] = useState<Investigation | null>(null);
@@ -79,6 +86,16 @@ export function InvestigatePage() {
           <span className="tagline">{t('tagline')}</span>
         </div>
         <div className="topbar-right">
+          <div className="session-user" aria-label={t('auth.currentSession')}>
+            <span className="session-avatar" aria-hidden>{user.username.slice(0, 1).toUpperCase()}</span>
+            <span>
+              <strong>{user.username}</strong>
+              <small>{user.role}</small>
+            </span>
+          </div>
+          <button className="secondary-btn" disabled={signingOut} onClick={() => void onLogout()}>
+            {signingOut ? t('auth.signingOut') : t('auth.signOut')}
+          </button>
           <button className="lang-toggle" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
             {lang === 'en' ? '繁中' : 'EN'}
           </button>

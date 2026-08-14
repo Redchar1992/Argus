@@ -8,6 +8,10 @@ target/
 node_modules/
 dist/
 *.local
+coverage/
+playwright-report/
+test-results/
+.vite/
 
 # Env / secrets (NEVER commit real keys)
 .env
@@ -24,3 +28,9 @@ dist/
 *.tsbuildinfo
 frontend/*/vite.config.js
 frontend/*/vite.config.d.ts
+
+# Local job-search materials; keep resumes and interview strategy out of the
+# public project history while still allowing the application pack to live
+# beside the working tree.
+/application/binance-identity-security/
+/docs/interview-prep/

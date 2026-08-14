@@ -1,51 +1,90 @@
-# JD Mapping
+# JD Mapping — Binance Full Stack Engineer (Frontend Oriented), Identity & Security
 
-How each requirement from the Binance "Tech Compliance — Full Stack Engineer" JD maps to
-concrete code in this repo. Kept honest: where something is partial, it says so.
+This document maps the target role to **reviewable evidence in this repository**. Status is
+intentionally strict: interview design knowledge is not labelled as an implemented feature.
 
-| JD requirement | Where it's demonstrated | Status |
+## Identity/frontend requirements
+
+| Target capability | Concrete evidence | Status |
 |---|---|---|
-| **React frontend** | `frontend/analyst-console` — React 18 + Vite + TS + Ant Design. Submits a wallet, renders the **live** agent reasoning + tool-call timeline and the final decision. | Built, builds green |
-| **Vue frontend** | `frontend/admin-console` — Vue 3 + Vite + TS + Element Plus. Manage screening policies, enable/disable tools, view audit log + cases. | Built, builds green |
-| **Java / Spring Cloud microservices** | `backend/` Maven reactor: `api-gateway` (Spring Cloud Gateway), `auth-service`, `agent-orchestrator-service`, `screening-tools-service`, `case-service`. Java 17, Spring Boot 3.2, Spring Cloud 2023.0.x. | Built, builds + tests green |
-| **RESTful APIs** | Controllers across all services (`/api/auth`, `/api/investigations`, `/api/tools`, `/api/cases`, `/api/policies`, `/api/audit`). DTOs as records; constructor injection; clean controller/service/dto/config layering. | Built |
-| **Integration with AI model APIs** | `agent-orchestrator-service/.../llm/AnthropicLlmProvider.java` — real Anthropic Messages API tool-use (correct request/response shape, `input_schema` tools, env-supplied key, conversation replay). | Built + wired; runs when a key is supplied |
-| **"Agentic flows … from scratch"** | `AgentOrchestrator` — a real bounded plan→act→observe loop with persisted, auditable steps. Two `LlmProvider` impls (local rule agent + Anthropic) behind `@ConditionalOnProperty`. Verified end-to-end. | **Centerpiece**, built + tested |
-| **Compliance systems from scratch** | `screening-tools-service` tools: `sanctions_screen`, `trace_transactions` (real BFS over a tx graph), `address_profile`, `risk_rules` (transparent AML rule engine). Decisions are CLEAR/REVIEW/BLOCK with risk factors. | Built + tested |
-| **Integration with third-party compliance/screening APIs** | A pluggable `ScreeningProvider` design — real **OFAC SDN** ingest plus **Chainalysis / TRM / Elliptic** adapters normalised into one risk model, fail-closed federation — mirroring the existing swappable `LlmProvider`. See [`docs/wallet-screening-providers.md`](wallet-screening-providers.md). | **Designed, not yet built** (OFAC ingest is step 1) |
-| **SQL** | JPA entities in auth/tools/case services (Postgres in prod profile, H2 default). `infra/postgres/*.sql` documents the canonical schema + seed. | Built |
-| **NoSQL** | `agent-orchestrator-service` persists investigation traces in **MongoDB** (`investigations` collection) via `MongoInvestigationStore`; in-memory default for zero-infra demos. `infra/mongo/01-init.js`. | Built (Mongo impl + memory default) |
-| **Auth / RBAC** | bcrypt (cost 12) user store, JWT (HS256) with role claim. RBAC is enforced **per service**: auth-service plus orchestrator, screening-tools and case-service are all OAuth2 resource servers validating the same shared-secret JWT with `@EnableMethodSecurity` + `@PreAuthorize`. Self-registration is fixed at the lowest privilege; role elevation is an admin-only endpoint. Tested per service (401/200/403 with real signed tokens). | Built + tested |
-| **CI** | `.github/workflows/ci.yml` — builds the backend (`mvn package`, runs tests) and both frontends (`npm run build`). | Built |
-| **Containerised infra** | `docker-compose.yml` — Postgres + Mongo + Redis with seed mounts and healthchecks. | Built (DBs; service Dockerfiles are a TODO) |
-| **Auditability** (compliance-critical) | Every agent step persisted; `audit_log` append-only table; admin console audit view. | Built |
+| **React 18 + TypeScript product UI** | `frontend/analyst-console`: React 18, strict TypeScript, accessible labelled login form, protected analyst console, bilingual UI and live investigation timeline | **Built** |
+| **Explicit complex-flow state modelling** | `src/auth/authMachine.ts`: discriminated union + reducer for `checking`, `anonymous`, `authenticating`, `authenticated`, `signingOut`, `expired`, `error`; impossible combinations cannot be represented | **Built + unit tested** |
+| **Route/session guard** | `App.tsx` mounts `InvestigatePage` only when a BFF session is authenticated; protected API 401 dispatches the one `SESSION_EXPIRED` transition | **Built + RTL/Playwright tested** |
+| **Node.js server-side/BFF work** | `bff`: Node 20 + Fastify service with `/bff/auth/login`, `/session`, `/logout` and guarded investigation proxy routes | **BFF built**; no SSR |
+| **Session validation** | Opaque 256-bit session ID in an `HttpOnly`, `SameSite=Strict` cookie; JWT and role are server-side; expiry is bounded by upstream JWT; upstream 401 deletes the session | **Built + tested** |
+| **API aggregation / error boundary** | BFF coordinates `auth-service` and `agent-orchestrator`, attaches the JWT server-side, adds request IDs/timeouts and exposes one normalized error envelope | **Built for two upstreams**; not a general aggregation platform |
+| **Caching judgement** | Identity/BFF responses deliberately send `Cache-Control: no-store`; session data is never browser/CDN cached. Existing investigation polling is preserved | **Security choice built**; no read-through application cache |
+| **CSRF and browser security** | Exact Origin allowlist, `Sec-Fetch-Site`, constant-time double-submit CSRF token, session/CSRF rotation, Helmet and production `Secure`-cookie fail-fast | **Built + negative tested** |
+| **XSS awareness** | React output escaping; no `dangerouslySetInnerHTML`; JWT is not JS-readable. Architecture documents why HttpOnly does not stop an injected script acting as the user and assigns SPA CSP to the hosting layer | **Code + threat model**; deployment CSP not in repo |
+| **Credential-abuse controls** | Uniform invalid-credential response plus configurable per-client login rate limit | **Built + tested**; process-local demo limiter |
+| **Resilient UX** | Loading, invalid-login, service-error, expired-session, authenticated and sign-out views; stale protected data is unmounted on auth loss | **Built + tested** |
+| **Frontend unit tests** | Vitest + React Testing Library + user-event: reducer lifecycle, guard, login success/failure and logout | **6 tests passing** |
+| **Browser/E2E coverage** | Playwright Chromium: anonymous guard, successful login/HttpOnly cookie/no Web Storage token, logout/cookie deletion | **3 journeys passing** |
+| **Performance fundamentals** | Production build is approximately 169 kB JS / 56 kB gzip; auth boot performs one session check; no large UI framework; polling stops on terminal result/unmount | **Measured baseline**; no production RUM/Core Web Vitals yet |
+| **Responsive/accessibility fundamentals** | Mobile layout, semantic form labels, button disabled states, alert roles, reduced-motion handling and keyboard-friendly controls | **Built**; no formal WCAG audit |
 
-## Honest gaps (also in the README)
+## Identity protocol coverage
 
-- Gateway does routing + CORS only; it does **not** centrally validate JWTs. Enforcement is
-  **per-service** (each business service validates the JWT and applies `@PreAuthorize`) —
-  this is the real enforcement boundary, not a placeholder. A gateway-level JWT filter would
-  add defence-in-depth.
-- Internal service-to-service calls propagate the **caller's** bearer token (authorised as the
-  originating analyst/admin). A dedicated machine/service credential would be a cleaner
-  production design.
-- On-chain data is **seeded/synthetic** fixtures, not a live chain indexer; addresses are
-  illustrative (no real OFAC entries **yet** — the pluggable `ScreeningProvider` design in
-  [`docs/wallet-screening-providers.md`](wallet-screening-providers.md) adds real OFAC SDN
-  ingest + Chainalysis/TRM/Elliptic adapters; OFAC ingest is the first build step).
-- Redis is provisioned but not yet used by application code.
-- No per-service Dockerfiles yet (compose covers the databases).
+| Protocol/topic | Repository evidence | Honest status |
+|---|---|---|
+| **JWT** | Spring auth-service issues HS256 JWT; every Java business service validates it; BFF keeps it off the browser | **Built** |
+| **Cookie sessions** | Server-side session store, hardened cookie attributes, renewal boundary and logout | **Built** (in-memory demo store) |
+| **OAuth 2.0 / OIDC** | Covered in `docs/interview-prep/03-oauth-oidc-jwt-webauthn.md` and system-design material | **Understood/designed, not implemented** |
+| **WebAuthn / FIDO2 / Passkey** | Registration/authentication/recovery design in interview-prep docs | **Not implemented** |
+| **MFA / step-up / recovery** | Product/state/service design in `docs/interview-prep/04-binance-login-mfa-system-design.md` | **Not implemented** |
+| **Face/liveness KYC** | Argus has compliance workflows and human-review semantics, but no biometric SDK/model integration | **Not implemented** |
 
-## Compliance-correctness notes
+No screen or API pretends that MFA, Passkey or OIDC already works. This avoids turning a
+portfolio feature into a misleading security claim.
 
-- **Fail-closed decisioning.** A wallet is CLEARED only when both required tools
-  (`sanctions_screen`, `risk_rules`) returned valid observations. If a required tool is
-  missing, errored, or disabled, the agent escalates to REVIEW and names the missing
-  evidence — it never silently CLEARs on incomplete evidence. The Anthropic provider gets
-  the same guarantee via a system-prompt instruction plus a deterministic override.
-- **Policy drives the agent.** The admin-editable `screening_policy` block/review thresholds
-  are read by the orchestrator (`PolicyClient`) and used for the BLOCK/REVIEW/CLEAR bands, so
-  editing the policy in the admin console actually changes agent behaviour (no hardcoded cutoffs).
+## Full-stack and product evidence
 
-These are deliberately listed so reviewers see exactly the boundary between what runs and
-what is scaffolded — the project does not oversell.
+| Capability | Concrete evidence | Status |
+|---|---|---|
+| **Java / Spring microservices** | Five-module Maven reactor: gateway, auth, agent orchestrator, screening tools and case service; Java 17, Spring Boot 3.2, Spring Cloud | **Built + tested** |
+| **REST API design** | Typed DTOs/controllers across `/api/auth`, `/api/investigations`, `/api/tools`, `/api/cases`, `/api/policies`, `/api/audit`; BFF exposes a browser-specific contract | **Built** |
+| **SQL + NoSQL judgement** | JPA/H2/Postgres for relational identity/policy/case data; Mongo implementation for variable investigation traces; zero-infra memory defaults | **Built** |
+| **AI/agent workflows** | Real bounded plan → act → observe loop; local tool-selecting provider plus Anthropic tool-use provider; every step persisted for audit | **Built; Anthropic requires a key** |
+| **Compliance/security product thinking** | Fail-closed CLEAR decision, deterministic policy bands around probabilistic AI, role-gated operations and case/audit trail | **Centerpiece, built** |
+| **Ambiguous end-to-end ownership** | Browser UX → Node security boundary → Java auth/resource servers → data stores → CI/test evidence, with explicit trade-offs and limitations | **Demonstrated** |
+| **Remote/async communication** | Architecture, threat model, runbook, test commands and code-to-JD traceability live alongside the code | **Documented** |
+
+## CI evidence
+
+`.github/workflows/ci.yml` uses reproducible lockfile installs:
+
+1. Maven `package` for all backend modules.
+2. BFF `npm ci`, TypeScript build and Vitest integration/config tests.
+3. Analyst console `npm ci`, type/build and Vitest/RTL tests.
+4. Playwright Chromium install and three browser identity journeys.
+5. Vue admin-console `npm ci` and build.
+
+## Most important interview walkthrough
+
+A concise code tour should follow this order:
+
+1. `frontend/analyst-console/src/auth/authMachine.ts` — make invalid UI states impossible.
+2. `frontend/analyst-console/src/auth/AuthContext.tsx` — boot/session/expiry transitions.
+3. `frontend/analyst-console/src/api/bff.ts` — same-origin credentials and CSRF header; no JWT.
+4. `bff/src/app.ts` — login/session/cookie/CSRF/rate-limit and guarded proxy boundary.
+5. `bff/src/session-store.ts` — server-only JWT and bounded expiry.
+6. `bff/test/app.test.ts` — adversarial/expiry/upstream evidence.
+7. `frontend/analyst-console/e2e/auth.spec.ts` — browser proof of the contract.
+8. `docs/architecture.md` — production trade-offs and the MFA/Passkey extension seam.
+
+## Remaining gaps and the correct production answer
+
+- Replace process-local sessions/rate limits with Redis or a managed shared store; design
+  encryption/access controls, TTL eviction, availability behavior and metrics.
+- Add real OIDC Authorization Code + PKCE, token rotation/revocation and IdP key discovery.
+- Add WebAuthn/passkey registration, authentication, credential inventory and recovery; never
+  ship a cosmetic mock.
+- Add risk-based step-up, MFA factor orchestration and resumable/replay-safe multi-step flows.
+- Add edge/ingress TLS, restrictive SPA CSP, HSTS and asset integrity/deployment controls.
+- Add OpenTelemetry traces, login funnel/RUM/Core Web Vitals, SLOs and alerting.
+- Add a live KYC/liveness provider only behind explicit consent, privacy/retention controls,
+  vendor fallback and human review.
+
+The implementation is deliberately the smallest credible evidence slice for this frontend-oriented
+identity role: **real login + server-side session + guarded product page + Node BFF + security
+controls + test pyramid**, without claiming unbuilt authentication factors.

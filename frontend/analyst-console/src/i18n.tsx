@@ -6,6 +6,27 @@ export type Lang = 'en' | 'zh';
 export const DICT = {
   tagline: { en: 'agentic crypto-compliance screening', zh: '代理式加密合規篩查' },
 
+  // identity and session
+  'auth.title': { en: 'Sign in to Argus', zh: '登入 Argus' },
+  'auth.intro': {
+    en: 'Use your analyst account to open the protected investigation console.',
+    zh: '使用分析師帳戶開啟受保護的調查控制台。',
+  },
+  'auth.username': { en: 'Username', zh: '使用者名稱' },
+  'auth.password': { en: 'Password', zh: '密碼' },
+  'auth.signIn': { en: 'Sign in', zh: '登入' },
+  'auth.signingIn': { en: 'Signing in…', zh: '登入中…' },
+  'auth.signOut': { en: 'Sign out', zh: '登出' },
+  'auth.signingOut': { en: 'Signing out…', zh: '登出中…' },
+  'auth.demo': { en: 'Local demo account', zh: '本機示範帳戶' },
+  'auth.demoOnly': { en: 'Seeded by auth-service; never use in production.', zh: '由 auth-service 預置;請勿用於正式環境。' },
+  'auth.retry': { en: 'Retry session check', zh: '重試工作階段檢查' },
+  'auth.security': {
+    en: 'The browser receives an HttpOnly session cookie. The upstream JWT stays inside the Node BFF.',
+    zh: '瀏覽器只接收 HttpOnly 工作階段 Cookie;上游 JWT 保留在 Node BFF 內。',
+  },
+  'auth.currentSession': { en: 'Current session', zh: '目前工作階段' },
+
   // hero
   'hero.headline': {
     en: 'An AI agent that investigates every wallet — and shows its work.',

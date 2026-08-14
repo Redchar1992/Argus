@@ -1,0 +1,34 @@
+export type ErrorCode =
+  | 'BAD_REQUEST'
+  | 'CSRF_INVALID'
+  | 'FORBIDDEN_ORIGIN'
+  | 'INVALID_CREDENTIALS'
+  | 'RATE_LIMITED'
+  | 'UNAUTHENTICATED'
+  | 'SESSION_EXPIRED'
+  | 'UPSTREAM_REJECTED'
+  | 'UPSTREAM_TIMEOUT'
+  | 'UPSTREAM_UNAVAILABLE'
+  | 'INTERNAL_ERROR';
+
+export class AppError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: ErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AppError';
+  }
+}
+
+export class UpstreamError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly kind: 'rejected' | 'timeout' | 'unavailable',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'UpstreamError';
+  }
+}
