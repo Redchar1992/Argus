@@ -5,7 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { AppConfig } from './config.js';
 import { AppError, UpstreamError } from './errors.js';
-import { SessionStore, type ServerSession } from './session-store.js';
+import { SessionStore, type ServerSession, type SessionRepository } from './session-store.js';
 import { HttpUpstreamClient, MockUpstreamClient, type UpstreamClient } from './upstream.js';
 
 const SESSION_COOKIE = 'argus_session';
@@ -23,7 +23,9 @@ interface InvestigationParams {
 
 export interface AppDependencies {
   upstream?: UpstreamClient;
-  sessions?: SessionStore;
+  sessions?: SessionRepository;
+  rateLimitRedis?: unknown;
+  close?: () => Promise<void>;
 }
 
 function token(): string {
@@ -45,7 +47,17 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
 
   await app.register(cookie);
   await app.register(helmet);
-  await app.register(rateLimit, { global: false });
+  await app.register(rateLimit, {
+    global: false,
+    ...(dependencies.rateLimitRedis ? { redis: dependencies.rateLimitRedis } : {}),
+    nameSpace: 'argus:bff:login-rate:',
+    // Authentication must fail closed when the shared limiter is unavailable.
+    skipOnError: false,
+  });
+
+  if (dependencies.close) {
+    app.addHook('onClose', dependencies.close);
+  }
 
   app.addHook('onSend', async (request, reply, payload) => {
     if (request.url.startsWith('/bff/')) {
@@ -92,7 +104,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     });
   }
 
-  function currentSession(request: FastifyRequest): ServerSession | undefined {
+  async function currentSession(request: FastifyRequest): Promise<ServerSession | undefined> {
     return sessions.get(request.cookies[SESSION_COOKIE]);
   }
 
@@ -118,7 +130,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   }
 
   async function requireSession(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const session = currentSession(request);
+    const session = await currentSession(request);
     if (!session) {
       const hadCookie = Boolean(request.cookies[SESSION_COOKIE]);
       clearSessionCookie(reply);
@@ -142,7 +154,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       return await action(session);
     } catch (error) {
       if (error instanceof UpstreamError && error.status === 401) {
-        sessions.delete(session.id);
+        await sessions.delete(session.id);
         clearSessionCookie(reply);
         throw new AppError(401, 'SESSION_EXPIRED', 'Your session expired. Sign in again.');
       }
@@ -150,11 +162,11 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     }
   }
 
-  app.get('/health', async () => ({ status: 'ok' }));
+  app.get('/health', async () => ({ status: 'ok', sessionStore: config.sessionStore }));
 
   app.get('/bff/auth/session', async (request, reply) => {
     ensureCsrf(request, reply);
-    const session = currentSession(request);
+    const session = await currentSession(request);
     if (!session) {
       const hadCookie = Boolean(request.cookies[SESSION_COOKIE]);
       clearSessionCookie(reply);
@@ -181,11 +193,11 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       }
 
       const previousId = request.cookies[SESSION_COOKIE];
-      sessions.delete(previousId);
+      await sessions.delete(previousId);
       clearSessionCookie(reply);
 
       const result = await upstream.login(username, password, request.id);
-      const session = sessions.create(
+      const session = await sessions.create(
         result.token,
         { username: result.username, role: result.role },
         result.expiresInSeconds,
@@ -197,7 +209,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   );
 
   app.post('/bff/auth/logout', { preHandler: verifyCsrf }, async (request, reply) => {
-    sessions.delete(request.cookies[SESSION_COOKIE]);
+    await sessions.delete(request.cookies[SESSION_COOKIE]);
     clearSessionCookie(reply);
     ensureCsrf(request, reply, true);
     return reply.code(204).send();

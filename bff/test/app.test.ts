@@ -19,6 +19,8 @@ const config: AppConfig = {
   loginRateLimitWindowMs: 60_000,
   cookieSecure: false,
   mockUpstream: true,
+  sessionStore: 'memory',
+  redisConnectTimeoutMs: 1_000,
   logger: false,
 };
 

@@ -10,6 +10,10 @@ export interface AppConfig {
   loginRateLimitWindowMs: number;
   cookieSecure: boolean;
   mockUpstream: boolean;
+  sessionStore: 'memory' | 'redis';
+  redisUrl?: string;
+  sessionEncryptionKey?: Buffer;
+  redisConnectTimeoutMs: number;
   logger: boolean;
 }
 
@@ -43,15 +47,46 @@ function originSet(value: string | undefined): ReadonlySet<string> {
   return new Set(origins);
 }
 
+function sessionStoreValue(value: string | undefined, production: boolean): 'memory' | 'redis' {
+  const store = value ?? (production ? 'redis' : 'memory');
+  if (store !== 'memory' && store !== 'redis') {
+    throw new Error('BFF_SESSION_STORE must be memory or redis');
+  }
+  return store;
+}
+
+function encryptionKey(value: string | undefined): Buffer | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim();
+  const decoded = Buffer.from(normalized, 'base64');
+  const canonical = decoded.toString('base64').replace(/=+$/, '');
+  if (decoded.length !== 32 || canonical !== normalized.replace(/=+$/, '')) {
+    throw new Error('BFF_SESSION_ENCRYPTION_KEY must be a base64-encoded 32-byte key');
+  }
+  return decoded;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const production = env.NODE_ENV === 'production';
   const mockUpstream = booleanValue(env.BFF_MOCK_UPSTREAM, false);
   const cookieSecure = booleanValue(env.BFF_COOKIE_SECURE, production);
+  const sessionStore = sessionStoreValue(env.BFF_SESSION_STORE, production);
+  const redisUrl = env.BFF_REDIS_URL?.trim() || undefined;
+  const sessionEncryptionKey = encryptionKey(env.BFF_SESSION_ENCRYPTION_KEY);
   if (production && mockUpstream) {
     throw new Error('BFF_MOCK_UPSTREAM cannot be enabled in production');
   }
   if (production && !cookieSecure) {
     throw new Error('BFF_COOKIE_SECURE must be true in production');
+  }
+  if (production && sessionStore !== 'redis') {
+    throw new Error('BFF_SESSION_STORE must be redis in production');
+  }
+  if (sessionStore === 'redis' && !redisUrl) {
+    throw new Error('BFF_REDIS_URL is required when BFF_SESSION_STORE=redis');
+  }
+  if (sessionStore === 'redis' && !sessionEncryptionKey) {
+    throw new Error('BFF_SESSION_ENCRYPTION_KEY is required when BFF_SESSION_STORE=redis');
   }
 
   return {
@@ -66,6 +101,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     loginRateLimitWindowMs: positiveInteger(env.BFF_LOGIN_RATE_LIMIT_WINDOW_MS, 60_000, 'BFF_LOGIN_RATE_LIMIT_WINDOW_MS'),
     cookieSecure,
     mockUpstream,
+    sessionStore,
+    ...(redisUrl ? { redisUrl } : {}),
+    ...(sessionEncryptionKey ? { sessionEncryptionKey } : {}),
+    redisConnectTimeoutMs: positiveInteger(env.BFF_REDIS_CONNECT_TIMEOUT_MS, 1_000, 'BFF_REDIS_CONNECT_TIMEOUT_MS'),
     logger: booleanValue(env.BFF_LOGGER, production),
   };
 }

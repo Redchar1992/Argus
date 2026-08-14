@@ -135,6 +135,17 @@ Open `http://localhost:5173` and sign in with one of the local accounts below. T
 investigation console is not rendered until `GET /bff/auth/session` succeeds. No token is
 written to `localStorage`, `sessionStorage`, JavaScript state, or a build-time `VITE_*` variable.
 
+Development uses the zero-infrastructure memory Session store. To exercise the implemented
+multi-instance path, start Redis and configure a shared encrypted store:
+
+```bash
+docker compose up -d redis
+export BFF_SESSION_STORE=redis
+export BFF_REDIS_URL=redis://127.0.0.1:6379
+export BFF_SESSION_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+cd bff && npm run dev
+```
+
 The admin console remains separately runnable:
 
 ```bash
@@ -164,17 +175,22 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                 # 11 BFF/config tests
+npm ci && npm run build && npm test                 # 19 pass; real-Redis test skips
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 20/20 incl. two-instance Redis
 
 cd ../frontend/analyst-console
-npm ci && npm run build && npm run test:unit        # reducer + RTL login/guard/logout
+npm ci && npm run build && npm run test:unit        # 7 reducer/RTL lifecycle tests
 npx playwright install chromium                     # once per machine
 npm run test:e2e                                    # anonymous, login, HttpOnly cookie, logout
+
+cd ../admin-console
+npm ci && npm audit && npm run build                # 0 vulnerabilities; Vue/Vite build
 ```
 
-CI uses `npm ci`, runs both Node build/test suites, and installs Chromium for the three
-Playwright journeys. Playwright starts the BFF with its explicit test-only deterministic
-upstream; production startup refuses that mode.
+CI uses `npm ci`, runs the BFF suite against a Redis 7 service, runs both frontend test
+layers, and installs Chromium for the three Playwright journeys. Playwright starts the BFF
+with its explicit test-only deterministic upstream; production startup refuses mock mode,
+insecure cookies and the memory Session store.
 
 ---
 
@@ -202,9 +218,14 @@ upstream; production startup refuses that mode.
   CSRF token on mutations, login rate limiting, upstream timeouts, normalized errors,
   `Cache-Control: no-store`, Helmet headers, session invalidation when an upstream returns
   401, and fail-fast production configuration for insecure cookies or mock mode.
+- **Shared encrypted Session path:** `BFF_SESSION_STORE=redis` shares Session restore, logout
+  and login-rate-limit state across BFF replicas. Bearer tokens are encrypted with AES-256-GCM
+  before Redis storage, bound to the opaque Session ID as authenticated data and lifetime-capped.
+  Redis outage fails startup/login closed. The real two-instance integration test runs in CI.
 - **Explicit frontend state model:** a TypeScript discriminated union/reducer models
   `checking → anonymous → authenticating → authenticated → signingOut/expired/error`.
-  The route guard never renders investigation data for an anonymous/expired state.
+  The route guard never renders investigation data for an anonymous/expired state, and a
+  client-side deadline unmounts protected data at the server-declared Session expiry.
 - **Identity test pyramid:** Fastify injection tests cover cookies, CSRF, expiry, upstream
   timeout/401 and rate limiting; Vitest/RTL covers reducer/login/guard/logout; Playwright
   drives the three browser journeys and asserts the session cookie is `HttpOnly`.
@@ -218,10 +239,10 @@ upstream; production startup refuses that mode.
 - Both frontends build and render the real API shapes.
 
 **Scaffolded / simplified / TODO (called out so nothing is oversold):**
-- The BFF session and login-rate-limit stores are deliberately **in-memory and single-node**
-  for this portfolio demo. Restarting the BFF signs everyone out; horizontal production
-  deployment needs a shared store such as Redis, key rotation, eviction metrics and a
-  deliberate availability/fail-closed policy.
+- Memory Session/rate-limit state remains the convenient development default. Production now
+  refuses it and requires the implemented Redis path, but a real deployment still needs a
+  private authenticated `rediss://` endpoint, encryption-key rotation, eviction/availability
+  metrics, backup policy and a tested regional outage strategy.
 - There is no refresh-token rotation, OAuth/OIDC identity-provider integration, MFA,
   account recovery, WebAuthn or Passkey implementation. Those are documented design topics,
   not simulated features. The built scope is password login → BFF session → protected route.
@@ -238,8 +259,6 @@ upstream; production startup refuses that mode.
   working approach.
 - The on-chain data is **seeded/synthetic**, not a live chain indexer. The graph and
   sanctions list are illustrative fixtures (no real OFAC addresses).
-- **Redis** is provisioned in compose but is not yet used by application code—including the
-  demo BFF session store (documented in `infra/redis/README.md`).
 - No Dockerfiles for the services yet (compose covers the DBs); services run via `java -jar`.
 
 See [`docs/agent-design.md`](docs/agent-design.md) for the prompt, tool schema, and the

@@ -58,6 +58,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('argus:session-expired', expire);
   }, []);
 
+  useEffect(() => {
+    if (state.status !== 'authenticated') return;
+    const expiresAt = Date.parse(state.session.expiresAt);
+    let timer: number | undefined;
+    const schedule = () => {
+      const remaining = expiresAt - Date.now();
+      if (!Number.isFinite(expiresAt) || remaining <= 0) {
+        dispatch({ type: 'SESSION_EXPIRED', message: 'Your session expired. Sign in again.' });
+        return;
+      }
+      // Browser timers clamp very large delays. Re-check at each clamp instead
+      // of leaving protected data mounted past the server-declared deadline.
+      timer = window.setTimeout(schedule, Math.min(remaining, 2_147_483_647));
+    };
+    schedule();
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [state]);
+
   const login = useCallback(async (username: string, password: string) => {
     const normalizedUsername = username.trim();
     dispatch({ type: 'LOGIN_STARTED', username: normalizedUsername });

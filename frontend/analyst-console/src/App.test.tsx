@@ -16,11 +16,11 @@ function anonymousResponse(): Response {
   return jsonResponse({ error: { code: 'UNAUTHENTICATED', message: 'Sign in to continue.' } }, 401);
 }
 
-function authenticatedResponse(): Response {
+function authenticatedResponse(expiresAt = '2026-08-15T12:00:00.000Z'): Response {
   return jsonResponse({
     state: 'authenticated',
     user: { username: 'analyst', role: 'ANALYST' },
-    expiresAt: '2026-08-15T12:00:00.000Z',
+    expiresAt,
   });
 }
 
@@ -95,5 +95,20 @@ describe('protected analyst console', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password');
     expect(screen.queryByText(/run an investigation/i)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText(/username/i)).toHaveValue('analyst'));
+  });
+
+  it('unmounts protected data at the server-declared session deadline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValueOnce(
+        authenticatedResponse(new Date(Date.now() + 800).toISOString()),
+      ),
+    );
+
+    render(<App />);
+    expect(await screen.findByText(/run an investigation/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /sign in to argus/i }, { timeout: 2_000 })).toBeInTheDocument();
+    expect(screen.queryByText(/run an investigation/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/session expired/i);
   });
 });

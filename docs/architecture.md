@@ -15,11 +15,13 @@ flowchart LR
     Cases["case-service :8084"]
     Admin["Vue admin console :5174"]
     Gateway["Spring Cloud Gateway :8080"]
+    Redis["Redis 7 — shared Sessions + login limits"]
 
     Browser -->|"same-origin /bff; opaque cookies"| BFF
     BFF -->|"password login"| Auth
     Auth -->|"JWT — server-to-server only"| BFF
     BFF -->|"Bearer JWT + investigation API"| Agent
+    BFF -->|"AES-GCM Session records + rate keys"| Redis
     Agent -->|"tool calls"| Tools
     Agent -->|"case mirror"| Cases
     Admin --> Gateway
@@ -38,6 +40,7 @@ orchestrator directly.
 |---|---:|---|---|
 | `frontend/analyst-console` | 5173 | React 18, TypeScript, Vite | Login UX, explicit auth state model, route guard, investigation timeline |
 | `bff` | 3001 | Node 20, Fastify | Server-side sessions, CSRF/origin checks, login throttling, error normalization, guarded API proxy |
+| `redis` | 6379 | Redis 7 | Optional development / required production shared BFF Sessions and distributed login limiter |
 | `api-gateway` | 8080 | Spring Cloud Gateway | Routing/CORS for the existing service and admin-console paths |
 | `auth-service` | 8081 | Spring Boot, Security, JPA | bcrypt user store, JWT issue/parse, RBAC |
 | `agent-orchestrator-service` | 8082 | Spring Boot, WebFlux, optional Mongo | Agent loop and investigation trace store |
@@ -55,6 +58,7 @@ sequenceDiagram
     participant Browser
     participant BFF as Node BFF
     participant Auth as auth-service
+    participant Redis as Redis Session store
 
     Browser->>BFF: GET /bff/auth/session
     BFF-->>Browser: 401 + readable SameSite=Strict CSRF cookie
@@ -63,7 +67,8 @@ sequenceDiagram
     BFF->>Auth: POST /api/auth/login<br/>{ username, password }
     Auth->>Auth: Verify bcrypt password
     Auth-->>BFF: JWT + username + role + expiry
-    BFF->>BFF: Store JWT in server-side session<br/>generate new 256-bit opaque ID
+    BFF->>BFF: Generate new 256-bit opaque ID<br/>AES-256-GCM encrypt JWT
+    BFF->>Redis: SETEX encrypted Session record<br/>(production/shared mode)
     BFF-->>Browser: HttpOnly session cookie + rotated CSRF cookie<br/>{ user, expiresAt } — no JWT
     Browser->>BFF: GET /bff/auth/session + session cookie
     BFF-->>Browser: { user, expiresAt }
@@ -79,7 +84,9 @@ Cookie properties:
 - The BFF session lifetime never exceeds either the upstream JWT lifetime or the configured
   BFF maximum.
 
-Production startup fails if `BFF_COOKIE_SECURE=false` or `BFF_MOCK_UPSTREAM=true`.
+Development defaults to an in-memory store. Production startup fails if
+`BFF_COOKIE_SECURE=false`, `BFF_MOCK_UPSTREAM=true`, the Session store is not Redis, or the
+Redis URL/encryption key is missing. Redis connection failure also fails startup.
 
 ## Protected investigation flow
 
@@ -134,7 +141,9 @@ stateDiagram-v2
 
 This avoids contradictory flags such as `isLoggedIn && isExpired`. Only `authenticated` and
 `signingOut` carry a session, and the investigation component is mounted only for those two
-states. A 401 from any investigation call emits the single session-expired transition.
+states. A 401 from any investigation call emits the single session-expired transition. The
+frontend also schedules against the server-declared `expiresAt` value and unmounts protected
+data at that deadline even when the user makes no further API request.
 
 ## Security controls
 
@@ -143,7 +152,8 @@ states. A 401 from any investigation call emits the single session-expired trans
 | Browser token theft | JWT is stored only in the BFF session; no `VITE_API_TOKEN`, Web Storage or JS-readable auth cookie |
 | CSRF | Exact Origin allowlist, optional `Sec-Fetch-Site` enforcement when present, and constant-time double-submit token comparison |
 | Session fixation | Previous session is deleted and a fresh opaque session ID + CSRF token are issued after login |
-| Credential stuffing | `/bff/auth/login` has per-client rate limiting; auth errors do not reveal whether a username exists |
+| Shared-store token disclosure | Redis stores only AES-256-GCM ciphertext; the opaque Session ID is authenticated as AAD, and records have an upstream-capped TTL |
+| Credential stuffing | `/bff/auth/login` has per-client rate limiting; Redis mode shares counters across replicas and fails closed on store errors |
 | Stale/revoked token | Local expiry enforcement plus immediate session deletion on upstream 401 |
 | Slow/broken dependency | Abort timeout, `UPSTREAM_TIMEOUT`/`UPSTREAM_UNAVAILABLE` normalization and request IDs |
 | Browser caching | Every `/bff/*` response gets `Cache-Control: no-store` and `Pragma: no-cache` |
@@ -162,23 +172,24 @@ CDN/ingress and keep dependencies patched.
   status, cases, audit entries and policy.
 - **NoSQL (Mongo or in-memory default):** variable-length investigation documents and their
   step/tool observations.
-- **BFF session store (current demo):** in-process `Map`; the JWT is not persisted.
-- **Redis:** provisioned by Compose but not wired to application code yet.
+- **BFF development session store:** in-process `Map`; restart intentionally signs users out.
+- **BFF shared/production store:** Redis `SETEX` records containing user metadata and an
+  AES-256-GCM-encrypted upstream token; Redis also backs the login limiter.
 
 ## Deliberate demo boundaries
 
 These are limitations, not hidden features:
 
-1. The BFF session and rate-limit stores are in-memory and single-instance. A restart signs
-   users out; multiple replicas would not share sessions. Production needs Redis or another
-   shared, encrypted/controlled store, eviction metrics and an explicit outage policy.
+1. The Redis implementation is real and two-instance tested, but the Compose service is a
+   passwordless development fixture. Production still needs private authenticated TLS Redis,
+   encryption-key rotation, eviction/availability metrics and a regional outage policy.
 2. Password login is real, but refresh-token rotation, OAuth/OIDC IdP integration, MFA,
    account recovery, WebAuthn and Passkeys are not implemented. Interview design notes must
    not be presented as shipped code.
 3. HTTPS/TLS termination and the SPA document CSP belong to deployment infrastructure, which
    is outside this repository. The BFF itself fails closed on insecure production cookies.
-4. The login limiter is process-local. A distributed edge and shared-store limiter is needed
-   before horizontally scaling.
+4. Redis mode makes the application limiter distributed, but an edge/WAF limiter is still
+   needed to absorb volumetric traffic before it reaches Node or Redis.
 5. On-chain data is seeded/synthetic; it is not a live chain indexer or production sanctions
    provider.
 6. Service-to-service calls inside the Java workflow propagate the originating user's token;
@@ -186,11 +197,11 @@ These are limitations, not hidden features:
 
 ## Test evidence
 
-- `bff/test`: cookie attributes, no-token response, CSRF/origin, route guard, logout, session
-  expiry, upstream 401 invalidation, timeout normalization, rate limiting and production
-  configuration safeguards.
-- `frontend/analyst-console/src`: reducer plus React Testing Library login failure/success,
-  guard and logout behavior.
+- `bff/test`: 20 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
+  the suite checks encrypted-at-rest Session records, tamper/copy rejection, Redis TTL,
+  two-instance Session restore/logout, distributed login limits and production fail-fast config.
+- `frontend/analyst-console/src`: seven reducer/React Testing Library tests covering login
+  failure/success, guard, automatic deadline expiry and logout behavior.
 - `frontend/analyst-console/e2e`: real Chromium anonymous/login/logout journeys using the BFF
   test upstream; asserts the browser session cookie is `HttpOnly` and no JWT/Bearer value is
   placed in Web Storage.

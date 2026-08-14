@@ -24,6 +24,18 @@ jobs:
   identity-bff:
     name: BFF (Node + Fastify)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      BFF_TEST_REDIS_URL: redis://127.0.0.1:6379/15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,6 +47,7 @@ jobs:
         working-directory: bff
         run: |
           npm ci
+          npm audit --audit-level=moderate
           npm run build
           npm test
 
@@ -52,6 +65,7 @@ jobs:
         working-directory: frontend/analyst-console
         run: |
           npm ci
+          npm audit --audit-level=moderate
           npm run build
           npm run test:unit
 
@@ -94,4 +108,5 @@ jobs:
         working-directory: frontend/admin-console
         run: |
           npm ci
+          npm audit --audit-level=moderate
           npm run build

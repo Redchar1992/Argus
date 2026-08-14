@@ -14,7 +14,13 @@ export interface ServerSession {
   expiresAt: number;
 }
 
-export class SessionStore {
+export interface SessionRepository {
+  create(accessToken: string, user: AuthUser, upstreamTtlSeconds: number): Promise<ServerSession>;
+  get(id: string | undefined): Promise<ServerSession | undefined>;
+  delete(id: string | undefined): Promise<void>;
+}
+
+export class SessionStore implements SessionRepository {
   private readonly sessions = new Map<string, ServerSession>();
 
   constructor(
@@ -22,12 +28,12 @@ export class SessionStore {
     private readonly now: () => number = Date.now,
   ) {}
 
-  create(accessToken: string, user: AuthUser, upstreamTtlSeconds: number): ServerSession {
+  async create(accessToken: string, user: AuthUser, upstreamTtlSeconds: number): Promise<ServerSession> {
     if (!Number.isFinite(upstreamTtlSeconds) || upstreamTtlSeconds <= 0) {
       throw new Error('upstreamTtlSeconds must be a positive finite number');
     }
     this.pruneExpired();
-    const ttlSeconds = Math.max(1, Math.min(upstreamTtlSeconds, this.maximumTtlSeconds));
+    const ttlSeconds = Math.min(upstreamTtlSeconds, this.maximumTtlSeconds);
     const session: ServerSession = {
       id: randomBytes(32).toString('base64url'),
       accessToken,
@@ -38,7 +44,7 @@ export class SessionStore {
     return session;
   }
 
-  get(id: string | undefined): ServerSession | undefined {
+  async get(id: string | undefined): Promise<ServerSession | undefined> {
     if (!id) return undefined;
     const session = this.sessions.get(id);
     if (!session) return undefined;
@@ -49,7 +55,7 @@ export class SessionStore {
     return session;
   }
 
-  delete(id: string | undefined): void {
+  async delete(id: string | undefined): Promise<void> {
     if (id) this.sessions.delete(id);
   }
 
