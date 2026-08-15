@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 
+const SECURE_PRODUCTION = {
+  NODE_ENV: 'production',
+  ARGUS_AUTH_URL: 'https://auth.internal:8443',
+  BFF_AUTH_MTLS_ENABLED: 'true',
+  BFF_AUTH_TLS_CA_FILE: '/run/secrets/auth-ca.pem',
+  BFF_AUTH_TLS_CERT_FILE: '/run/secrets/bff-client.pem',
+  BFF_AUTH_TLS_KEY_FILE: '/run/secrets/bff-client-key.pem',
+  BFF_REDIS_URL: 'rediss://redis.internal:6379',
+  BFF_REDIS_PASSWORD: 'production-redis-password',
+  BFF_ENCRYPTION_PRIMARY_KEY_ID: 'prod-v2',
+  BFF_ENCRYPTION_KEYS: `prod-v2:${Buffer.alloc(32, 7).toString('base64')}`,
+};
+
 describe('production configuration safeguards', () => {
   it('refuses insecure cookies in production', () => {
     expect(() => loadConfig({ NODE_ENV: 'production', BFF_COOKIE_SECURE: 'false' })).toThrow(
@@ -28,7 +41,7 @@ describe('production configuration safeguards', () => {
       'BFF_REDIS_URL is required when BFF_SESSION_STORE=redis',
     );
     expect(() => loadConfig({ BFF_SESSION_STORE: 'redis', BFF_REDIS_URL: 'redis://127.0.0.1:6379' })).toThrow(
-      'BFF_SESSION_ENCRYPTION_KEY is required when BFF_SESSION_STORE=redis',
+      'BFF_ENCRYPTION_KEYS is required when BFF_SESSION_STORE=redis',
     );
   });
 
@@ -39,29 +52,68 @@ describe('production configuration safeguards', () => {
         BFF_REDIS_URL: 'redis://127.0.0.1:6379',
         BFF_SESSION_ENCRYPTION_KEY: 'not-a-32-byte-base64-key',
       }),
-    ).toThrow('BFF_SESSION_ENCRYPTION_KEY must be a base64-encoded 32-byte key');
+    ).toThrow('BFF_SESSION_ENCRYPTION_KEY must contain base64-encoded 32-byte keys');
+  });
+
+  it('validates a versioned encryption key ring for online rotation', () => {
+    const oldKey = Buffer.alloc(32, 1).toString('base64');
+    const newKey = Buffer.alloc(32, 2).toString('base64');
+    const config = loadConfig({
+      BFF_SESSION_STORE: 'redis',
+      BFF_REDIS_URL: 'redis://127.0.0.1:6379',
+      BFF_ENCRYPTION_PRIMARY_KEY_ID: 'new-v2',
+      BFF_ENCRYPTION_KEYS: `old-v1:${oldKey},new-v2:${newKey}`,
+    });
+    expect(config.encryptionPrimaryKeyId).toBe('new-v2');
+    expect([...config.encryptionKeys!.keys()]).toEqual(['old-v1', 'new-v2']);
+    expect(() => loadConfig({
+      BFF_SESSION_STORE: 'redis',
+      BFF_REDIS_URL: 'redis://127.0.0.1:6379',
+      BFF_ENCRYPTION_PRIMARY_KEY_ID: 'missing',
+      BFF_ENCRYPTION_KEYS: `old-v1:${oldKey}`,
+    })).toThrow('BFF_ENCRYPTION_PRIMARY_KEY_ID must reference');
   });
 
   it('accepts a complete production Redis configuration', () => {
     const config = loadConfig({
-      NODE_ENV: 'production',
-      BFF_REDIS_URL: 'rediss://redis.internal:6379',
-      BFF_SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      ...SECURE_PRODUCTION,
       BFF_WEBAUTHN_RP_ID: 'argus.example',
       BFF_WEBAUTHN_ORIGIN: 'https://argus.example',
       ARGUS_INTERNAL_BFF_SECRET: 'production-bff-workload-secret-1234567890',
     });
     expect(config.sessionStore).toBe('redis');
     expect(config.cookieSecure).toBe(true);
-    expect(config.sessionEncryptionKey).toHaveLength(32);
+    expect(config.encryptionPrimaryKeyId).toBe('prod-v2');
+    expect(config.encryptionKeys?.get('prod-v2')).toHaveLength(32);
     expect(config.webauthnOrigin).toBe('https://argus.example');
+    expect(config.authMtlsEnabled).toBe(true);
+    expect(config.redisPassword).toBe('production-redis-password');
+  });
+
+  it('requires mTLS to auth-service and authenticated rediss in production', () => {
+    const withoutMtls = {
+      NODE_ENV: 'production',
+      BFF_REDIS_URL: 'rediss://redis.internal:6379',
+      BFF_REDIS_PASSWORD: 'redis-secret',
+      BFF_ENCRYPTION_PRIMARY_KEY_ID: 'prod-v2',
+      BFF_ENCRYPTION_KEYS: `prod-v2:${Buffer.alloc(32, 7).toString('base64')}`,
+      BFF_PASSKEY_ENABLED: 'false',
+    };
+    expect(() => loadConfig(withoutMtls)).toThrow('Production requires authenticated TLS for the auth service');
+    expect(() => loadConfig({ ...SECURE_PRODUCTION, BFF_REDIS_URL: 'redis://redis.internal:6379' })).toThrow(
+      'BFF_REDIS_URL must use rediss in production',
+    );
+    expect(() => loadConfig({ ...SECURE_PRODUCTION, BFF_REDIS_PASSWORD: undefined })).toThrow(
+      'BFF_REDIS_PASSWORD is required for production Redis authentication',
+    );
+    expect(() => loadConfig({ BFF_AUTH_MTLS_ENABLED: 'true', ARGUS_AUTH_URL: 'https://auth.internal' })).toThrow(
+      'BFF auth mTLS requires CA, client certificate, and client key files',
+    );
   });
 
   it('requires an exact HTTPS WebAuthn origin and a rotated workload secret in production', () => {
     const production = {
-      NODE_ENV: 'production',
-      BFF_REDIS_URL: 'rediss://redis.internal:6379',
-      BFF_SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      ...SECURE_PRODUCTION,
       BFF_WEBAUTHN_RP_ID: 'argus.example',
     };
     expect(() => loadConfig({ ...production, BFF_WEBAUTHN_ORIGIN: 'http://argus.example' })).toThrow(
@@ -84,9 +136,7 @@ describe('production configuration safeguards', () => {
       'BFF_OIDC_ISSUER, BFF_OIDC_CLIENT_ID, and BFF_OIDC_REDIRECT_URI are required',
     );
     expect(() => loadConfig({
-      NODE_ENV: 'production',
-      BFF_REDIS_URL: 'rediss://redis.internal:6379',
-      BFF_SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      ...SECURE_PRODUCTION,
       BFF_OIDC_ENABLED: 'true',
       BFF_OIDC_ISSUER: 'http://idp.internal',
       BFF_OIDC_CLIENT_ID: 'argus',

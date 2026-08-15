@@ -87,4 +87,18 @@ class AuthRbacWebTest {
 
         assertEquals("ADMIN", repository.findByUsername("tobepromoted").orElseThrow().getRole().name());
     }
+
+    @Test
+    void identityKeyRotationIsAdminOnly() throws Exception {
+        mvc.perform(post("/api/auth/admin/identity-keys/rotate"))
+                .andExpect(status().isUnauthorized());
+
+        mvc.perform(post("/api/auth/admin/identity-keys/rotate")
+                        .header("Authorization", bearerFor("analyst")))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(post("/api/auth/admin/identity-keys/rotate")
+                        .header("Authorization", bearerFor("admin")))
+                .andExpect(status().isOk());
+    }
 }

@@ -77,6 +77,18 @@ public class IdentitySecretCipher {
         return primaryKeyId;
     }
 
+    /** Returns true when a valid envelope was written with a retained, non-primary key. */
+    public boolean needsRotation(String envelope) {
+        String keyId = envelopeKeyId(envelope);
+        if (keyId.isEmpty()) throw new IllegalArgumentException("Invalid identity secret envelope");
+        return !primaryKeyId.equals(keyId);
+    }
+
+    /** Re-encrypts an old envelope with the current primary key without exposing plaintext. */
+    public String rotate(String envelope) {
+        return needsRotation(envelope) ? encrypt(decrypt(envelope)) : envelope;
+    }
+
     public String envelopeKeyId(String envelope) {
         String[] parts = envelope == null ? new String[0] : envelope.split("\\.", -1);
         if (parts.length != 4 || !"v1".equals(parts[0])) return "";

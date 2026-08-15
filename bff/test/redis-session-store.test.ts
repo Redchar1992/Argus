@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RedisSessionStore, type RedisSessionCommands } from '../src/redis-session-store.js';
+import { EncryptionKeyRing } from '../src/encryption-keyring.js';
 
 class FakeRedis implements RedisSessionCommands {
   readonly values = new Map<string, string>();
@@ -113,5 +114,63 @@ describe('RedisSessionStore', () => {
     await expect(store.get(first.id)).resolves.toBeUndefined();
     await expect(store.get(second.id)).resolves.toBeUndefined();
     await expect(store.get(other.id)).resolves.toEqual(other);
+  });
+
+  it('lazily re-encrypts an active session with the new primary key', async () => {
+    const redis = new FakeRedis();
+    const oldKey = Buffer.alloc(32, 1);
+    const newKey = Buffer.alloc(32, 2);
+    const oldRing = new EncryptionKeyRing('old', new Map([['old', oldKey]]));
+    const oldStore = new RedisSessionStore(redis, oldRing, 300);
+    const session = await oldStore.create('rotating-jwt', USER, 300);
+    const redisKey = `argus:bff:session:${session.id}`;
+    const before = JSON.parse(redis.values.get(redisKey)!) as { token: { kid?: string; ciphertext: string } };
+    expect(before.token.kid).toBe('old');
+
+    const rotatingRing = new EncryptionKeyRing('new', new Map([['old', oldKey], ['new', newKey]]));
+    const rotatingStore = new RedisSessionStore(redis, rotatingRing, 300);
+    await expect(rotatingStore.get(session.id)).resolves.toEqual(session);
+    const after = JSON.parse(redis.values.get(redisKey)!) as { token: { kid?: string; ciphertext: string } };
+    expect(after.token.kid).toBe('new');
+    expect(after.token.ciphertext).not.toBe(before.token.ciphertext);
+
+    const newOnly = new RedisSessionStore(
+      redis,
+      new EncryptionKeyRing('new', new Map([['new', newKey]])),
+      300,
+    );
+    await expect(newOnly.get(session.id)).resolves.toEqual(session);
+  });
+
+  it('migrates a pre-key-id envelope and fails closed if its retired key is removed too soon', async () => {
+    const redis = new FakeRedis();
+    const legacyStore = new RedisSessionStore(redis, KEY, 300);
+    const session = await legacyStore.create('legacy-jwt', USER, 300);
+    const redisKey = `argus:bff:session:${session.id}`;
+    const value = JSON.parse(redis.values.get(redisKey)!) as { token: { kid?: string } };
+    delete value.token.kid;
+    redis.values.set(redisKey, JSON.stringify(value));
+
+    const newKey = Buffer.alloc(32, 4);
+    const rotating = new RedisSessionStore(
+      redis,
+      new EncryptionKeyRing('new', new Map([['legacy-v1', KEY], ['new', newKey]])),
+      300,
+    );
+    await expect(rotating.get(session.id)).resolves.toEqual(session);
+    expect((JSON.parse(redis.values.get(redisKey)!) as { token: { kid: string } }).token.kid).toBe('new');
+
+    const stranded = await legacyStore.create('stranded-jwt', USER, 300);
+    const strandedKey = `argus:bff:session:${stranded.id}`;
+    const strandedValue = JSON.parse(redis.values.get(strandedKey)!) as { token: { kid?: string } };
+    delete strandedValue.token.kid;
+    redis.values.set(strandedKey, JSON.stringify(strandedValue));
+    const withoutLegacy = new RedisSessionStore(
+      redis,
+      new EncryptionKeyRing('new', new Map([['new', newKey]])),
+      300,
+    );
+    await expect(withoutLegacy.get(stranded.id)).resolves.toBeUndefined();
+    expect(redis.values.has(strandedKey)).toBe(false);
   });
 });

@@ -111,6 +111,13 @@ public final class AuthDtos {
             long remaining) {
     }
 
+    /** Bounded admin operation for draining retained identity-encryption keys. */
+    public record IdentityKeyRotationResponse(
+            String primaryKeyId,
+            int scanned,
+            int rotated) {
+    }
+
     public record PasskeyMaterialResponse(
             String credentialId,
             String publicKey,

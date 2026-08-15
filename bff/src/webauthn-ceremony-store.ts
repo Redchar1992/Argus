@@ -1,4 +1,5 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope } from './encryption-keyring.js';
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{32,256}$/;
@@ -18,12 +19,7 @@ export interface RedisWebAuthnCommands {
   getdel(key: string): Promise<string | null>;
 }
 
-interface SealedValue {
-  version: 1;
-  iv: string;
-  ciphertext: string;
-  tag: string;
-}
+interface SealedValue extends KeyedAesGcmEnvelope { version: 1 }
 
 function valid(value: unknown): value is WebAuthnCeremony {
   if (!value || typeof value !== 'object') return false;
@@ -40,36 +36,29 @@ function valid(value: unknown): value is WebAuthnCeremony {
 }
 
 class CeremonyCipher {
-  constructor(private readonly key: Buffer) {
-    if (key.length !== 32) throw new Error('WebAuthn ceremony key must be exactly 32 bytes');
+  private readonly encryption: EncryptionKeyRing;
+
+  constructor(encryption: Buffer | EncryptionKeyRing) {
+    this.encryption = keyRing(encryption);
   }
 
   seal(id: string, ceremony: WebAuthnCeremony): string {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.key, iv);
-    cipher.setAAD(Buffer.from(`argus-bff-webauthn:v1:${id}`));
-    const ciphertext = Buffer.concat([cipher.update(JSON.stringify(ceremony), 'utf8'), cipher.final()]);
     return JSON.stringify({
       version: 1,
-      iv: iv.toString('base64url'),
-      ciphertext: ciphertext.toString('base64url'),
-      tag: cipher.getAuthTag().toString('base64url'),
+      ...this.encryption.seal('argus-bff-webauthn:v1', id, JSON.stringify(ceremony)),
     } satisfies SealedValue);
   }
 
   open(id: string, raw: string): unknown {
     const sealed = JSON.parse(raw) as Partial<SealedValue>;
     if (sealed.version !== 1 || typeof sealed.iv !== 'string'
-      || typeof sealed.ciphertext !== 'string' || typeof sealed.tag !== 'string') {
+      || typeof sealed.ciphertext !== 'string' || typeof sealed.tag !== 'string'
+      || (sealed.kid !== undefined && typeof sealed.kid !== 'string')) {
       throw new Error('Invalid WebAuthn ceremony envelope');
     }
-    const decipher = createDecipheriv('aes-256-gcm', this.key, Buffer.from(sealed.iv, 'base64url'));
-    decipher.setAAD(Buffer.from(`argus-bff-webauthn:v1:${id}`));
-    decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'));
-    return JSON.parse(Buffer.concat([
-      decipher.update(Buffer.from(sealed.ciphertext, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8')) as unknown;
+    return JSON.parse(
+      this.encryption.open('argus-bff-webauthn:v1', id, sealed as SealedValue).plaintext,
+    ) as unknown;
   }
 }
 
@@ -79,10 +68,10 @@ export class MemoryWebAuthnCeremonyStore implements WebAuthnCeremonyRepository {
   private readonly cipher: CeremonyCipher;
 
   constructor(
-    encryptionKey: Buffer = randomBytes(32),
+    encryption: Buffer | EncryptionKeyRing = randomBytes(32),
     private readonly now: () => number = Date.now,
   ) {
-    this.cipher = new CeremonyCipher(encryptionKey);
+    this.cipher = new CeremonyCipher(encryption);
   }
 
   async create(ceremony: WebAuthnCeremony): Promise<string> {
@@ -112,11 +101,11 @@ export class RedisWebAuthnCeremonyStore implements WebAuthnCeremonyRepository {
 
   constructor(
     private readonly redis: RedisWebAuthnCommands,
-    encryptionKey: Buffer,
+    encryption: Buffer | EncryptionKeyRing,
     private readonly maximumTtlSeconds: number,
     private readonly now: () => number = Date.now,
   ) {
-    this.cipher = new CeremonyCipher(encryptionKey);
+    this.cipher = new CeremonyCipher(encryption);
   }
 
   async create(ceremony: WebAuthnCeremony): Promise<string> {

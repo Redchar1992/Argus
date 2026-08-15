@@ -1,4 +1,7 @@
 import { Redis } from 'ioredis';
+import { readFileSync, statSync } from 'node:fs';
+import type { ConnectionOptions } from 'node:tls';
+import { EncryptionKeyRing } from './encryption-keyring.js';
 import type { AppDependencies } from './app.js';
 import type { AppConfig } from './config.js';
 import {
@@ -26,8 +29,24 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
       ...(oidc ? { oidc, oidcTransactions: new MemoryOidcTransactionStore() } : {}),
     };
   }
-  if (!config.redisUrl || !config.sessionEncryptionKey) {
+  if (!config.redisUrl || !config.encryptionPrimaryKeyId || !config.encryptionKeys) {
     throw new Error('Redis session configuration is incomplete');
+  }
+  const encryption = new EncryptionKeyRing(config.encryptionPrimaryKeyId, config.encryptionKeys);
+
+  let tls: ConnectionOptions | undefined;
+  if (new URL(config.redisUrl).protocol === 'rediss:') {
+    if (config.redisTlsKeyFile && (statSync(config.redisTlsKeyFile).mode & 0o077) !== 0) {
+      throw new Error('BFF Redis TLS private key must not be readable by group or other users');
+    }
+    tls = {
+      rejectUnauthorized: true,
+      minVersion: 'TLSv1.2',
+      servername: config.redisTlsServerName ?? new URL(config.redisUrl).hostname,
+      ...(config.redisTlsCaFile ? { ca: readFileSync(config.redisTlsCaFile) } : {}),
+      ...(config.redisTlsCertFile ? { cert: readFileSync(config.redisTlsCertFile) } : {}),
+      ...(config.redisTlsKeyFile ? { key: readFileSync(config.redisTlsKeyFile) } : {}),
+    };
   }
 
   const redis = new Redis(config.redisUrl, {
@@ -36,6 +55,9 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
     connectTimeout: config.redisConnectTimeoutMs,
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
+    ...(config.redisUsername ? { username: config.redisUsername } : {}),
+    ...(config.redisPassword ? { password: config.redisPassword } : {}),
+    ...(tls ? { tls } : {}),
   });
   redis.on('error', (error: Error) => {
     // Do not include configuration or commands: URLs can carry credentials and
@@ -77,18 +99,18 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
   return {
     sessions: new RedisSessionStore(
       commands,
-      config.sessionEncryptionKey,
+      encryption,
       config.sessionTtlSeconds,
     ),
     rateLimitRedis: redis,
     mfaChallenges: new RedisMfaChallengeStore(
       mfaCommands,
-      config.sessionEncryptionKey,
+      encryption,
       config.mfaChallengeTtlSeconds,
     ),
     webauthnCeremonies: new RedisWebAuthnCeremonyStore(
       webauthnCommands,
-      config.sessionEncryptionKey,
+      encryption,
       config.webauthnCeremonyTtlSeconds,
     ),
     ...(oidc
@@ -96,7 +118,7 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
           oidc,
           oidcTransactions: new RedisOidcTransactionStore(
             oidcCommands,
-            config.sessionEncryptionKey,
+            encryption,
             config.oidcTransactionTtlSeconds,
           ),
         }

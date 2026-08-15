@@ -20,6 +20,7 @@ import com.argus.auth.dto.AuthDtos.PasskeyMaterialResponse;
 import com.argus.auth.dto.AuthDtos.PasskeyRegistrationContextResponse;
 import com.argus.auth.dto.AuthDtos.PasskeyRegistrationRequest;
 import com.argus.auth.dto.AuthDtos.PasskeyView;
+import com.argus.auth.dto.AuthDtos.IdentityKeyRotationResponse;
 import com.argus.auth.dto.AuthDtos.UserView;
 import com.argus.auth.security.JwtService;
 import com.argus.auth.service.AuthService;
@@ -41,6 +42,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -182,6 +184,14 @@ public class AuthController {
     public UserView assignRole(@PathVariable String username,
                                @Valid @RequestBody AssignRoleRequest request) {
         return authService.assignRole(username, request.role());
+    }
+
+    /** Admin-only bounded drain of TOTP envelopes written by retained encryption keys. */
+    @PostMapping("/admin/identity-keys/rotate")
+    @PreAuthorize("hasRole('ADMIN')")
+    public IdentityKeyRotationResponse rotateIdentityKeys(
+            @RequestParam(defaultValue = "100") int limit) {
+        return mfaService.rotateIdentitySecrets(limit);
     }
 
     /** Returns the caller's identity decoded from a valid token. Any authenticated role. */

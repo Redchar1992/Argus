@@ -88,7 +88,7 @@ Full detail: [`docs/architecture.md`](docs/architecture.md).
 ```bash
 cd backend
 mvn -q -DskipTests package      # build all 5 modules
-mvn -q test                     # 47 tests (identity/RBAC, tools, agent loop, security)
+mvn -q test                     # 51 tests (identity/RBAC, tools, agent loop, security)
 ```
 
 Run the three Java services needed for the authenticated analyst demo (they default to in-memory stores —
@@ -143,9 +143,25 @@ multi-instance path, start Redis and configure a shared encrypted store:
 docker compose up -d redis
 export BFF_SESSION_STORE=redis
 export BFF_REDIS_URL=redis://127.0.0.1:6379
-export BFF_SESSION_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export BFF_ENCRYPTION_PRIMARY_KEY_ID=local-v1
+export BFF_ENCRYPTION_KEYS="local-v1:$(openssl rand -base64 32)"
 cd bff && npm run dev
 ```
+
+To exercise authenticated transport locally, generate a short-lived development CA, start
+the opt-in Redis TLS/ACL/mTLS fixture and source the generated environment values:
+
+```bash
+./infra/tls/generate-dev-pki.sh
+docker compose --profile security up -d redis-secure
+set -a; source infra/tls/generated/.env.mtls; set +a
+export BFF_SESSION_STORE=redis
+# Start auth-service with the sourced PKCS12 settings, then start the BFF.
+```
+
+The auth service requires a trusted BFF client certificate; Redis requires both TLS client
+authentication and an ACL password. Generated keys live under an ignored directory and expire
+after 14 days. Plain HTTP/passwordless Redis remain development-only conveniences.
 
 The admin console remains separately runnable:
 
@@ -176,8 +192,8 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                 # 35 pass; 3 real-Redis tests skip
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 38/38 incl. two-instance Redis
+npm ci && npm run build && npm test                   # 39 pass; 4 real-Redis tests skip
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 43/43 incl. replicas + key rotation
 
 cd ../frontend/analyst-console
 npm ci && npm run build && npm run test:unit        # 13 reducer/RTL lifecycle tests
@@ -222,7 +238,19 @@ insecure cookies and the memory Session store.
 - **Shared encrypted Session path:** `BFF_SESSION_STORE=redis` shares Session restore, logout
   and login-rate-limit state across BFF replicas. Bearer tokens are encrypted with AES-256-GCM
   before Redis storage, bound to the opaque Session ID as authenticated data and lifetime-capped.
-  Redis outage fails startup/login closed. The real two-instance integration test runs in CI.
+  Redis outage fails startup/login closed. Versioned AES-GCM key rings write only with the
+  primary key, retain old keys for reads and lazily re-encrypt live Sessions. The real
+  two-instance and rolling-key-rotation integration tests run in CI.
+- **Authenticated internal transport:** production BFF startup requires HTTPS mTLS to
+  `auth-service` (private CA verification plus BFF client certificate). Production Redis
+  requires `rediss://` and ACL authentication; optional Redis client certificates support
+  mTLS. Private-key permission checks, TLS 1.2+ and an executable short-lived local PKI fixture
+  make the contract testable instead of documentation-only.
+- **Online identity-key rotation:** BFF Session/OIDC/MFA/WebAuthn envelopes carry a key ID;
+  a rolling deployment can add, promote and later retire a key without signing out active
+  users. Java TOTP envelopes rotate after successful use or through a bounded ADMIN drain
+  endpoint, so dormant accounts do not pin retired keys forever. See
+  [`docs/runbooks/identity-key-rotation.md`](docs/runbooks/identity-key-rotation.md).
 - **Explicit frontend state model:** a TypeScript discriminated union/reducer models
   `checking → anonymous → authenticating/authenticating_passkey → authenticated → signingOut/expired/error`.
   The route guard never renders investigation data for an anonymous/expired state, and a
@@ -247,16 +275,17 @@ insecure cookies and the memory Session store.
 
 **Scaffolded / simplified / TODO (called out so nothing is oversold):**
 - Memory Session/rate-limit state remains the convenient development default. Production now
-  refuses it and requires the implemented Redis path, but a real deployment still needs a
-  private authenticated `rediss://` endpoint, encryption-key rotation, eviction/availability
-  metrics, backup policy and a tested regional outage strategy.
+  refuses it and requires the implemented authenticated `rediss://` path. Online encryption-key
+  rotation is implemented, while a real deployment still needs managed certificate/ACL lifecycle,
+  eviction/availability metrics, backup policy and a tested regional outage strategy.
 - OIDC Authorization Code + PKCE, TOTP MFA, one-time offline recovery codes and Passkeys are implemented,
   including encrypted server-side pre-authentication state, replay counters, attempt lockout,
   MFA fallback, password reset and discoverable passwordless credentials. Refresh-token
   rotation and provider-specific account linking remain unbuilt.
-- HTTPS is expected to terminate at the deployment ingress; production mode refuses a
-  non-`Secure` session cookie. Helmet protects the JSON BFF responses, while the SPA document's
-  CSP/HSTS/asset-integrity policy must be configured by the CDN or web server that hosts it.
+- Browser HTTPS is expected to terminate at the deployment ingress; production mode refuses a
+  non-`Secure` session cookie. BFF→auth-service mTLS is implemented independently. Helmet
+  protects the JSON BFF responses, while the SPA document's CSP/HSTS/asset-integrity policy
+  must be configured by the CDN or web server that hosts it.
 - The gateway does **not** validate JWTs centrally — it is routing + CORS only. Enforcement
   is **per-service**: each service is an OAuth2 resource server validating the same
   shared-secret JWT and applying `@PreAuthorize`. (A JWT filter at the gateway would add

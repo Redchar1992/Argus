@@ -17,6 +17,8 @@ intentionally strict: interview design knowledge is not labelled as an implement
 | **CSRF and browser security** | Exact Origin allowlist, `Sec-Fetch-Site`, constant-time double-submit CSRF token, session/CSRF rotation, Helmet and production `Secure`-cookie fail-fast | **Built + negative tested** |
 | **XSS awareness** | React output escaping; no `dangerouslySetInnerHTML`; JWT is not JS-readable. Architecture documents why HttpOnly does not stop an injected script acting as the user and assigns SPA CSP to the hosting layer | **Code + threat model**; deployment CSP not in repo |
 | **Credential-abuse controls** | Uniform invalid-credential response plus configurable per-client login rate limit; Redis mode shares counters across replicas and fails closed on store errors | **Built + two-instance tested** |
+| **Authenticated service transport** | Production BFF requires CA-validated mTLS to auth-service; Spring requires the BFF client certificate; Redis requires `rediss://` + ACL auth and supports client-cert mTLS; short-lived local PKI/secure-Redis fixture is executable | **Built + smoke/Redis tested** |
+| **Online key rotation** | Versioned BFF envelope key ring, old-key reads, lazy live-Session rewrite, real Redis rolling-rotation test; Java TOTP lazy rewrite plus bounded ADMIN drain for dormant accounts | **Built + tested** |
 | **Resilient UX** | Loading, invalid-login, service-error, expired-session, authenticated and sign-out views; stale protected data is unmounted on auth loss or the server-declared expiry deadline | **Built + tested** |
 | **Frontend unit tests** | Vitest + React Testing Library + user-event: reducer, guard, password/MFA/recovery/Passkey flows, deadline expiry and logout | **13 tests passing** |
 | **Browser/E2E coverage** | Playwright Chromium: anonymous guard, password login/HttpOnly cookie/no Web Storage token, logout and virtual-authenticator Passkey registration/passwordless login | **4 journeys passing** |
@@ -56,7 +58,7 @@ policy remain deployment/product decisions rather than implied features.
 `.github/workflows/ci.yml` uses reproducible lockfile installs:
 
 1. Maven `package` for all backend modules.
-2. BFF `npm ci`, dependency audit, TypeScript build and 38 Vitest tests against a Redis 7 CI service.
+2. BFF `npm ci`, dependency audit, TypeScript build and 39 Vitest tests against a Redis 7 CI service.
 3. Analyst console `npm ci`, dependency audit, type/build and Vitest/RTL tests.
 4. Playwright Chromium install and four browser identity journeys, including virtual WebAuthn.
 5. Vue admin-console `npm ci`, dependency audit and build.
@@ -77,8 +79,8 @@ A concise code tour should follow this order:
 
 ## Remaining gaps and the correct production answer
 
-- Deploy the implemented Redis path on a private authenticated TLS endpoint; add encryption-key
-  rotation, eviction/availability metrics, regional outage drills and an edge/WAF limiter.
+- Deploy the implemented authenticated TLS/Redis path with managed certificate and ACL lifecycle;
+  add encryption-key rotation, eviction/availability metrics, regional drills and an edge/WAF limiter.
 - Add refresh-token rotation/revocation; OIDC code + PKCE and IdP key discovery are built.
 - Define authenticator-attestation trust and enterprise enrollment policy where managed-device
   assurance is required; the current `attestation=none` consumer-style flow is deliberate.

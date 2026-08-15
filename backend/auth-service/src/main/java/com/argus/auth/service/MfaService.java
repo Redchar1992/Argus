@@ -3,6 +3,7 @@ package com.argus.auth.service;
 import com.argus.auth.dto.AuthDtos.MfaChallengeResponse;
 import com.argus.auth.dto.AuthDtos.MfaEnrollmentResponse;
 import com.argus.auth.dto.AuthDtos.MfaStatusResponse;
+import com.argus.auth.dto.AuthDtos.IdentityKeyRotationResponse;
 import com.argus.auth.dto.AuthDtos.RecoveryCodesResponse;
 import com.argus.auth.dto.AuthDtos.RecoveryStatusResponse;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
@@ -16,6 +17,8 @@ import com.argus.auth.security.IdentitySecretCipher;
 import com.argus.auth.security.JwtService;
 import com.argus.auth.security.TotpService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -95,6 +98,9 @@ public class MfaService {
         String secret = cipher.decrypt(user.getPendingTotpSecretEncrypted());
         OptionalLong counter = totp.verify(secret, code, -1);
         if (counter.isEmpty()) throw new ResponseStatusException(UNAUTHORIZED, "Invalid verification code");
+        if (cipher.needsRotation(user.getPendingTotpSecretEncrypted())) {
+            user.rotatePendingTotpSecret(cipher.encrypt(secret));
+        }
         user.confirmTotpEnrollment(counter.getAsLong(), now);
         UserAccount saved = users.save(user);
         RecoveryCodesResponse recovery = recoveryService.replaceCodes(saved);
@@ -149,6 +155,40 @@ public class MfaService {
                 challengeTtlSeconds, user.getUsername());
     }
 
+    /**
+     * Re-encrypts a bounded batch of active and pending TOTP seeds under the primary key.
+     * Retired keys must remain configured until this reports zero rotations and all active
+     * nodes have completed their deployment overlap window.
+     */
+    @Transactional
+    public IdentityKeyRotationResponse rotateIdentitySecrets(int limit) {
+        if (limit < 1 || limit > 500) {
+            throw new ResponseStatusException(BAD_REQUEST, "limit must be between 1 and 500");
+        }
+        List<UserAccount> candidates = users
+                .findIdentitySecretsNeedingRotation("v1." + cipher.primaryKeyId() + ".%",
+                        PageRequest.of(0, limit, Sort.by("id").ascending()));
+        int rotated = 0;
+        for (UserAccount user : candidates) {
+            boolean changed = false;
+            String active = user.getTotpSecretEncrypted();
+            if (active != null && cipher.needsRotation(active)) {
+                user.rotateTotpSecret(cipher.rotate(active));
+                changed = true;
+            }
+            String pending = user.getPendingTotpSecretEncrypted();
+            if (pending != null && cipher.needsRotation(pending)) {
+                user.rotatePendingTotpSecret(cipher.rotate(pending));
+                changed = true;
+            }
+            if (changed) {
+                users.save(user);
+                rotated++;
+            }
+        }
+        return new IdentityKeyRotationResponse(cipher.primaryKeyId(), candidates.size(), rotated);
+    }
+
     /** Wrong-code attempt updates must commit so brute-force counters cannot be rolled back. */
     @Transactional(noRollbackFor = ResponseStatusException.class)
     public TokenResponse verifyChallenge(String challengeToken, MfaMethod method, String code) {
@@ -186,7 +226,13 @@ public class MfaService {
     private OptionalLong verifyTotp(UserAccount user, String code) {
         if (!user.isEnabled() || !user.isMfaEnabled()) return OptionalLong.empty();
         long lastCounter = user.getTotpLastCounter() == null ? -1 : user.getTotpLastCounter();
-        return totp.verify(cipher.decrypt(user.getTotpSecretEncrypted()), code, lastCounter);
+        String envelope = user.getTotpSecretEncrypted();
+        String secret = cipher.decrypt(envelope);
+        OptionalLong accepted = totp.verify(secret, code, lastCounter);
+        if (accepted.isPresent() && cipher.needsRotation(envelope)) {
+            user.rotateTotpSecret(cipher.encrypt(secret));
+        }
+        return accepted;
     }
 
     private UserAccount requireUser(String username) {

@@ -53,6 +53,48 @@ services:
       timeout: 5s
       retries: 10
 
+  # Opt-in local security fixture. Generate short-lived certificates first with
+  # ./infra/tls/generate-dev-pki.sh, then run: docker compose --profile security up -d redis-secure
+  redis-secure:
+    profiles: ["security"]
+    image: redis:7-alpine
+    container_name: argus-redis-secure
+    user: "0:0"
+    environment:
+      ARGUS_DEV_REDIS_PASSWORD: ${ARGUS_DEV_REDIS_PASSWORD:-argus-dev-redis-secret}
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6380"
+      - --tls-cert-file
+      - /tls/redis-server.crt
+      - --tls-key-file
+      - /tls/redis-server.key
+      - --tls-ca-cert-file
+      - /tls/ca.crt
+      - --tls-auth-clients
+      - "yes"
+      - --requirepass
+      - ${ARGUS_DEV_REDIS_PASSWORD:-argus-dev-redis-secret}
+    ports:
+      - "6380:6380"
+    volumes:
+      - ./infra/tls/generated:/tls:ro
+      - argus-redis-secure:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          REDISCLI_AUTH=$${ARGUS_DEV_REDIS_PASSWORD:-argus-dev-redis-secret}
+          redis-cli --tls -h localhost -p 6380 --cacert /tls/ca.crt
+          --cert /tls/bff-redis-client.crt --key /tls/bff-redis-client.key ping
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   argus-pg:
   argus-mongo:
+  argus-redis-secure:

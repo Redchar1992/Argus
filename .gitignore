@@ -34,3 +34,6 @@ frontend/*/vite.config.d.ts
 # beside the working tree.
 /application/binance-identity-security/
 /docs/interview-prep/
+
+# Locally generated development PKI; never commit private keys/cert bundles.
+/infra/tls/generated/

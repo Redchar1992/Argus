@@ -1,5 +1,6 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { OidcTransaction } from './oidc.js';
+import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope } from './encryption-keyring.js';
 
 const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const VALUE_PATTERN = /^[A-Za-z0-9._~-]{32,256}$/;
@@ -15,12 +16,7 @@ export interface RedisOidcCommands {
   getdel(key: string): Promise<string | null>;
 }
 
-interface SealedValue {
-  version: 1;
-  iv: string;
-  ciphertext: string;
-  tag: string;
-}
+interface SealedValue extends KeyedAesGcmEnvelope { version: 1 }
 
 function validTransaction(value: unknown): value is OidcTransaction {
   if (!value || typeof value !== 'object') return false;
@@ -62,13 +58,15 @@ export class MemoryOidcTransactionStore implements OidcTransactionRepository {
 
 /** Redis-backed, encrypted, one-time OIDC state/nonce/PKCE transaction store. */
 export class RedisOidcTransactionStore implements OidcTransactionRepository {
+  private readonly encryption: EncryptionKeyRing;
+
   constructor(
     private readonly redis: RedisOidcCommands,
-    private readonly encryptionKey: Buffer,
+    encryption: Buffer | EncryptionKeyRing,
     private readonly ttlSeconds: number,
     private readonly now: () => number = Date.now,
   ) {
-    if (encryptionKey.length !== 32) throw new Error('OIDC transaction key must be exactly 32 bytes');
+    this.encryption = keyRing(encryption);
   }
 
   async create(transaction: OidcTransaction): Promise<string> {
@@ -98,18 +96,9 @@ export class RedisOidcTransactionStore implements OidcTransactionRepository {
   }
 
   private seal(id: string, transaction: OidcTransaction): string {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    cipher.setAAD(Buffer.from(`argus-bff-oidc:v1:${id}`));
-    const ciphertext = Buffer.concat([
-      cipher.update(JSON.stringify(transaction), 'utf8'),
-      cipher.final(),
-    ]);
     const value: SealedValue = {
       version: 1,
-      iv: iv.toString('base64url'),
-      ciphertext: ciphertext.toString('base64url'),
-      tag: cipher.getAuthTag().toString('base64url'),
+      ...this.encryption.seal('argus-bff-oidc:v1', id, JSON.stringify(transaction)),
     };
     return JSON.stringify(value);
   }
@@ -120,16 +109,11 @@ export class RedisOidcTransactionStore implements OidcTransactionRepository {
       sealed.version !== 1 ||
       typeof sealed.iv !== 'string' ||
       typeof sealed.ciphertext !== 'string' ||
-      typeof sealed.tag !== 'string'
+      typeof sealed.tag !== 'string' ||
+      (sealed.kid !== undefined && typeof sealed.kid !== 'string')
     ) {
       throw new Error('Invalid OIDC transaction envelope');
     }
-    const decipher = createDecipheriv('aes-256-gcm', this.encryptionKey, Buffer.from(sealed.iv, 'base64url'));
-    decipher.setAAD(Buffer.from(`argus-bff-oidc:v1:${id}`));
-    decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'));
-    return JSON.parse(Buffer.concat([
-      decipher.update(Buffer.from(sealed.ciphertext, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8')) as unknown;
+    return JSON.parse(this.encryption.open('argus-bff-oidc:v1', id, sealed as SealedValue).plaintext) as unknown;
   }
 }

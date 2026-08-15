@@ -1,4 +1,5 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope } from './encryption-keyring.js';
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{32,256}$/;
@@ -25,12 +26,7 @@ export interface RedisMfaCommands {
   del(key: string): Promise<unknown>;
 }
 
-interface SealedValue {
-  version: 1;
-  iv: string;
-  ciphertext: string;
-  tag: string;
-}
+interface SealedValue extends KeyedAesGcmEnvelope { version: 1 }
 
 function valid(value: unknown): value is StoredMfaChallenge {
   if (!value || typeof value !== 'object') return false;
@@ -78,13 +74,15 @@ export class MemoryMfaChallengeStore implements MfaChallengeRepository {
 
 /** Encrypted pre-authentication challenge storage; the Java challenge token never reaches JS. */
 export class RedisMfaChallengeStore implements MfaChallengeRepository {
+  private readonly encryption: EncryptionKeyRing;
+
   constructor(
     private readonly redis: RedisMfaCommands,
-    private readonly encryptionKey: Buffer,
+    encryption: Buffer | EncryptionKeyRing,
     private readonly maximumTtlSeconds: number,
     private readonly now: () => number = Date.now,
   ) {
-    if (encryptionKey.length !== 32) throw new Error('MFA challenge key must be exactly 32 bytes');
+    this.encryption = keyRing(encryption);
   }
 
   async create(challenge: StoredMfaChallenge): Promise<string> {
@@ -104,10 +102,15 @@ export class RedisMfaChallengeStore implements MfaChallengeRepository {
     const raw = await this.redis.get(this.key(id));
     if (!raw) return undefined;
     try {
-      const challenge = this.open(id, raw);
+      const opened = this.open(id, raw);
+      const challenge = opened.value;
       if (!valid(challenge) || challenge.expiresAt <= this.now()) {
         await this.delete(id);
         return undefined;
+      }
+      if (this.encryption.needsRotation(opened.envelope, opened.keyId)) {
+        const remaining = Math.max(1, Math.ceil((challenge.expiresAt - this.now()) / 1_000));
+        await this.redis.setex(this.key(id), Math.min(this.maximumTtlSeconds, remaining), this.seal(id, challenge));
       }
       return challenge;
     } catch {
@@ -125,31 +128,23 @@ export class RedisMfaChallengeStore implements MfaChallengeRepository {
   }
 
   private seal(id: string, challenge: StoredMfaChallenge): string {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    cipher.setAAD(Buffer.from(`argus-bff-mfa:v1:${id}`));
-    const ciphertext = Buffer.concat([cipher.update(JSON.stringify(challenge), 'utf8'), cipher.final()]);
+    const encrypted = this.encryption.seal('argus-bff-mfa:v1', id, JSON.stringify(challenge));
     const sealed: SealedValue = {
       version: 1,
-      iv: iv.toString('base64url'),
-      ciphertext: ciphertext.toString('base64url'),
-      tag: cipher.getAuthTag().toString('base64url'),
+      ...encrypted,
     };
     return JSON.stringify(sealed);
   }
 
-  private open(id: string, raw: string): unknown {
+  private open(id: string, raw: string): { value: unknown; envelope: SealedValue; keyId: string } {
     const sealed = JSON.parse(raw) as Partial<SealedValue>;
     if (sealed.version !== 1 || typeof sealed.iv !== 'string'
-      || typeof sealed.ciphertext !== 'string' || typeof sealed.tag !== 'string') {
+      || typeof sealed.ciphertext !== 'string' || typeof sealed.tag !== 'string'
+      || (sealed.kid !== undefined && typeof sealed.kid !== 'string')) {
       throw new Error('Invalid MFA challenge envelope');
     }
-    const decipher = createDecipheriv('aes-256-gcm', this.encryptionKey, Buffer.from(sealed.iv, 'base64url'));
-    decipher.setAAD(Buffer.from(`argus-bff-mfa:v1:${id}`));
-    decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'));
-    return JSON.parse(Buffer.concat([
-      decipher.update(Buffer.from(sealed.ciphertext, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8')) as unknown;
+    const envelope = sealed as SealedValue;
+    const opened = this.encryption.open('argus-bff-mfa:v1', id, envelope);
+    return { value: JSON.parse(opened.plaintext) as unknown, envelope, keyId: opened.keyId };
   }
 }

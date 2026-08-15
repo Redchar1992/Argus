@@ -157,6 +157,18 @@ public class UserAccount {
         this.totpLastCounter = acceptedCounter;
     }
 
+    /** Used only by the identity-key rotation service after authenticating the old envelope. */
+    public void rotateTotpSecret(String encryptedSecret) {
+        if (totpSecretEncrypted == null) throw new IllegalStateException("TOTP is not enabled");
+        this.totpSecretEncrypted = encryptedSecret;
+    }
+
+    /** Keeps an in-flight enrollment usable while its encryption key is being retired. */
+    public void rotatePendingTotpSecret(String encryptedSecret) {
+        if (pendingTotpSecretEncrypted == null) throw new IllegalStateException("No TOTP enrollment is pending");
+        this.pendingTotpSecretEncrypted = encryptedSecret;
+    }
+
     public void clearPendingTotpEnrollment() {
         this.pendingTotpSecretEncrypted = null;
         this.pendingTotpExpiresAt = null;

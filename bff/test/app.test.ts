@@ -20,6 +20,7 @@ const config: AppConfig = {
   port: 3001,
   authBaseUrl: 'http://127.0.0.1:8081',
   investigationBaseUrl: 'http://127.0.0.1:8082',
+  authMtlsEnabled: false,
   allowedOrigins: new Set([ORIGIN]),
   requestTimeoutMs: 500,
   sessionTtlSeconds: 3_600,

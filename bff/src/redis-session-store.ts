@@ -1,4 +1,5 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope, type OpenedValue } from './encryption-keyring.js';
 import type { AuthUser, ServerSession, SessionRepository } from './session-store.js';
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -14,11 +15,7 @@ export interface RedisSessionCommands {
   expire(key: string, seconds: number): Promise<number>;
 }
 
-interface EncryptedToken {
-  iv: string;
-  ciphertext: string;
-  tag: string;
-}
+type EncryptedToken = KeyedAesGcmEnvelope;
 
 interface StoredSession {
   version: 1;
@@ -50,7 +47,8 @@ function validStoredSession(value: unknown): value is StoredSession {
     Boolean(token) &&
     typeof token?.iv === 'string' &&
     typeof token.ciphertext === 'string' &&
-    typeof token.tag === 'string'
+    typeof token.tag === 'string' &&
+    (token.kid === undefined || (typeof token.kid === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(token.kid)))
   );
 }
 
@@ -62,13 +60,15 @@ function validStoredSession(value: unknown): value is StoredSession {
  * ciphertext copied to another Redis key fails closed during decryption.
  */
 export class RedisSessionStore implements SessionRepository {
+  private readonly encryption: EncryptionKeyRing;
+
   constructor(
     private readonly redis: RedisSessionCommands,
-    private readonly encryptionKey: Buffer,
+    encryption: Buffer | EncryptionKeyRing,
     private readonly maximumTtlSeconds: number,
     private readonly now: () => number = Date.now,
   ) {
-    if (encryptionKey.length !== 32) throw new Error('Session encryption key must be exactly 32 bytes');
+    this.encryption = keyRing(encryption);
   }
 
   async create(accessToken: string, user: AuthUser, upstreamTtlSeconds: number): Promise<ServerSession> {
@@ -113,9 +113,17 @@ export class RedisSessionStore implements SessionRepository {
         if (validStoredSession(stored)) await this.redis.srem(this.userIndexKey(stored.user.username), id);
         return undefined;
       }
+      const opened = this.decrypt(stored.token, id);
+      if (this.encryption.needsRotation(stored.token, opened.keyId)) {
+        const remainingTtl = Math.max(1, Math.ceil((stored.expiresAt - this.now()) / 1_000));
+        await this.redis.setex(this.key(id), remainingTtl, JSON.stringify({
+          ...stored,
+          token: this.encrypt(opened.plaintext, id),
+        } satisfies StoredSession));
+      }
       return {
         id,
-        accessToken: this.decrypt(stored.token, id),
+        accessToken: opened.plaintext,
         user: stored.user,
         expiresAt: stored.expiresAt,
       };
@@ -157,24 +165,10 @@ export class RedisSessionStore implements SessionRepository {
   }
 
   private encrypt(accessToken: string, sessionId: string): EncryptedToken {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    cipher.setAAD(Buffer.from(`argus-bff-session:v1:${sessionId}`));
-    const ciphertext = Buffer.concat([cipher.update(accessToken, 'utf8'), cipher.final()]);
-    return {
-      iv: iv.toString('base64url'),
-      ciphertext: ciphertext.toString('base64url'),
-      tag: cipher.getAuthTag().toString('base64url'),
-    };
+    return this.encryption.seal('argus-bff-session:v1', sessionId, accessToken);
   }
 
-  private decrypt(token: EncryptedToken, sessionId: string): string {
-    const decipher = createDecipheriv('aes-256-gcm', this.encryptionKey, Buffer.from(token.iv, 'base64url'));
-    decipher.setAAD(Buffer.from(`argus-bff-session:v1:${sessionId}`));
-    decipher.setAuthTag(Buffer.from(token.tag, 'base64url'));
-    return Buffer.concat([
-      decipher.update(Buffer.from(token.ciphertext, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8');
+  private decrypt(token: EncryptedToken, sessionId: string): OpenedValue {
+    return this.encryption.open('argus-bff-session:v1', sessionId, token);
   }
 }

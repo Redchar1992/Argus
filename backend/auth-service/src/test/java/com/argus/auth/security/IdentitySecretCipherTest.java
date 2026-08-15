@@ -24,6 +24,11 @@ class IdentitySecretCipherTest {
                 "new", "old:" + oldKey + ",new:" + newKey, new MockEnvironment());
 
         assertEquals("TOP-SECRET-SEED", rotated.decrypt(oldEnvelope));
+        assertEquals(true, rotated.needsRotation(oldEnvelope));
+        String reencrypted = rotated.rotate(oldEnvelope);
+        assertEquals("new", rotated.envelopeKeyId(reencrypted));
+        assertEquals("TOP-SECRET-SEED", rotated.decrypt(reencrypted));
+        assertEquals(false, rotated.needsRotation(reencrypted));
         String newEnvelope = rotated.encrypt("TOP-SECRET-SEED");
         assertEquals("new", rotated.envelopeKeyId(newEnvelope));
         assertNotEquals("TOP-SECRET-SEED", newEnvelope);

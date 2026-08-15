@@ -129,6 +129,9 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   if (dependencies.close) {
     app.addHook('onClose', dependencies.close);
   }
+  if (!dependencies.upstream && 'close' in upstream && typeof upstream.close === 'function') {
+    app.addHook('onClose', async () => upstream.close?.());
+  }
 
   app.addHook('onSend', async (request, reply, payload) => {
     if (request.url.startsWith('/bff/')) {

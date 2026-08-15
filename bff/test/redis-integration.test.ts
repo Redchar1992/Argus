@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
@@ -12,6 +13,7 @@ const config: AppConfig = {
   port: 3001,
   authBaseUrl: 'http://127.0.0.1:8081',
   investigationBaseUrl: 'http://127.0.0.1:8082',
+  authMtlsEnabled: false,
   allowedOrigins: new Set([ORIGIN]),
   requestTimeoutMs: 500,
   sessionTtlSeconds: 3_600,
@@ -21,7 +23,14 @@ const config: AppConfig = {
   mockUpstream: true,
   sessionStore: 'redis',
   redisUrl: REDIS_URL,
-  sessionEncryptionKey: Buffer.alloc(32, 5),
+  ...(process.env.BFF_REDIS_USERNAME ? { redisUsername: process.env.BFF_REDIS_USERNAME } : {}),
+  ...(process.env.BFF_REDIS_PASSWORD ? { redisPassword: process.env.BFF_REDIS_PASSWORD } : {}),
+  ...(process.env.BFF_REDIS_TLS_CA_FILE ? { redisTlsCaFile: process.env.BFF_REDIS_TLS_CA_FILE } : {}),
+  ...(process.env.BFF_REDIS_TLS_CERT_FILE ? { redisTlsCertFile: process.env.BFF_REDIS_TLS_CERT_FILE } : {}),
+  ...(process.env.BFF_REDIS_TLS_KEY_FILE ? { redisTlsKeyFile: process.env.BFF_REDIS_TLS_KEY_FILE } : {}),
+  ...(process.env.BFF_REDIS_TLS_SERVER_NAME ? { redisTlsServerName: process.env.BFF_REDIS_TLS_SERVER_NAME } : {}),
+  encryptionPrimaryKeyId: 'test-v1',
+  encryptionKeys: new Map([['test-v1', Buffer.alloc(32, 5)]]),
   redisConnectTimeoutMs: 1_000,
   oidcEnabled: false,
   oidcScopes: 'openid profile email',
@@ -53,7 +62,22 @@ redisDescribe('Redis-backed BFF integration', () => {
   const apps: FastifyInstance[] = [];
 
   beforeAll(async () => {
-    admin = new Redis(REDIS_URL, { maxRetriesPerRequest: 1 });
+    const secure = new URL(REDIS_URL).protocol === 'rediss:';
+    admin = new Redis(REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      ...(process.env.BFF_REDIS_USERNAME ? { username: process.env.BFF_REDIS_USERNAME } : {}),
+      ...(process.env.BFF_REDIS_PASSWORD ? { password: process.env.BFF_REDIS_PASSWORD } : {}),
+      ...(secure ? { tls: {
+        rejectUnauthorized: true,
+        servername: process.env.BFF_REDIS_TLS_SERVER_NAME ?? new URL(REDIS_URL).hostname,
+        ...(process.env.BFF_REDIS_TLS_CA_FILE
+          ? { ca: readFileSync(process.env.BFF_REDIS_TLS_CA_FILE) } : {}),
+        ...(process.env.BFF_REDIS_TLS_CERT_FILE
+          ? { cert: readFileSync(process.env.BFF_REDIS_TLS_CERT_FILE) } : {}),
+        ...(process.env.BFF_REDIS_TLS_KEY_FILE
+          ? { key: readFileSync(process.env.BFF_REDIS_TLS_KEY_FILE) } : {}),
+      } } : {}),
+    });
     await admin.flushdb();
   });
 
@@ -177,6 +201,42 @@ redisDescribe('Redis-backed BFF integration', () => {
     } finally {
       await runtimeA.close?.();
       await runtimeB.close?.();
+    }
+  });
+
+  it('rotates active Session ciphertext across replicas without signing the user out', async () => {
+    const oldKey = Buffer.alloc(32, 21);
+    const newKey = Buffer.alloc(32, 22);
+    const oldRuntime = await createRuntimeDependencies({
+      ...config,
+      encryptionPrimaryKeyId: 'old-v1',
+      encryptionKeys: new Map([['old-v1', oldKey]]),
+    });
+    let rotatingRuntime: Awaited<ReturnType<typeof createRuntimeDependencies>> | undefined;
+    let newOnlyRuntime: Awaited<ReturnType<typeof createRuntimeDependencies>> | undefined;
+    try {
+      const session = await oldRuntime.sessions!.create(
+        'rotation-integration-token', { username: 'rotate-me', role: 'ANALYST' }, 3_600,
+      );
+      rotatingRuntime = await createRuntimeDependencies({
+        ...config,
+        encryptionPrimaryKeyId: 'new-v2',
+        encryptionKeys: new Map([['old-v1', oldKey], ['new-v2', newKey]]),
+      });
+      await expect(rotatingRuntime.sessions!.get(session.id)).resolves.toEqual(session);
+      const raw = JSON.parse((await admin.get(`argus:bff:session:${session.id}`))!) as { token: { kid: string } };
+      expect(raw.token.kid).toBe('new-v2');
+
+      newOnlyRuntime = await createRuntimeDependencies({
+        ...config,
+        encryptionPrimaryKeyId: 'new-v2',
+        encryptionKeys: new Map([['new-v2', newKey]]),
+      });
+      await expect(newOnlyRuntime.sessions!.get(session.id)).resolves.toEqual(session);
+    } finally {
+      await oldRuntime.close?.();
+      await rotatingRuntime?.close?.();
+      await newOnlyRuntime?.close?.();
     }
   });
 });

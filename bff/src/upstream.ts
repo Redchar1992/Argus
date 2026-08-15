@@ -3,6 +3,7 @@ import type { AppConfig } from './config.js';
 import { UpstreamError } from './errors.js';
 import type { AuthUser, Role } from './session-store.js';
 import type { MfaMethod } from './mfa-challenge-store.js';
+import { AuthenticatedHttpsTransport, type TransportResponse } from './authenticated-https.js';
 import type {
   PasskeyMaterial,
   PasskeyRegistrationContext,
@@ -58,9 +59,10 @@ export interface UpstreamClient {
   ): Promise<LoginResult>;
   submitInvestigation(accessToken: string, body: unknown, requestId: string): Promise<unknown>;
   getInvestigation(accessToken: string, id: string, requestId: string): Promise<unknown>;
+  close?(): void;
 }
 
-async function parseResponse(response: Response): Promise<unknown> {
+async function parseResponse(response: Response | TransportResponse): Promise<unknown> {
   const text = await response.text();
   if (!text) return undefined;
   try {
@@ -71,7 +73,15 @@ async function parseResponse(response: Response): Promise<unknown> {
 }
 
 export class HttpUpstreamClient implements UpstreamClient {
-  constructor(private readonly config: AppConfig) {}
+  private readonly authTransport?: AuthenticatedHttpsTransport;
+
+  constructor(private readonly config: AppConfig) {
+    this.authTransport = config.authMtlsEnabled ? new AuthenticatedHttpsTransport(config) : undefined;
+  }
+
+  close(): void {
+    this.authTransport?.close();
+  }
 
   async login(username: string, password: string, requestId: string): Promise<AuthenticationResult> {
     const data = await this.request(
@@ -385,12 +395,14 @@ export class HttpUpstreamClient implements UpstreamClient {
   }
 
   private async request(url: string, init: RequestInit, purpose: 'login' | 'api'): Promise<unknown> {
-    let response: Response;
+    let response: Response | TransportResponse;
     try {
-      response = await fetch(url, {
-        ...init,
-        signal: AbortSignal.timeout(this.config.requestTimeoutMs),
-      });
+      response = this.authTransport && new URL(url).origin === new URL(this.config.authBaseUrl).origin
+        ? await this.authTransport.request(url, init, this.config.requestTimeoutMs)
+        : await fetch(url, {
+            ...init,
+            signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+          });
     } catch (error) {
       if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
         throw new UpstreamError(504, 'timeout', 'The upstream service timed out');

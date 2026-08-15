@@ -19,12 +19,12 @@ flowchart LR
     IdP["OpenID Provider — discovery + JWKS"]
 
     Browser -->|"same-origin /bff; opaque cookies"| BFF
-    BFF -->|"password, verified provider token or Passkey result"| Auth
+    BFF -->|"mTLS: password, provider token or Passkey result"| Auth
     Browser <-->|"Authorization Code + PKCE"| IdP
     BFF -->|"discovery, authorize, token exchange"| IdP
     Auth -->|"JWT — server-to-server only"| BFF
     BFF -->|"Bearer JWT + investigation API"| Agent
-    BFF -->|"AES-GCM Session/ceremony records + rate keys"| Redis
+    BFF -->|"rediss + ACL/mTLS: AES-GCM records + rate keys"| Redis
     Agent -->|"tool calls"| Tools
     Agent -->|"case mirror"| Cases
     Admin --> Gateway
@@ -94,7 +94,39 @@ Cookie properties:
 
 Development defaults to an in-memory store. Production startup fails if
 `BFF_COOKIE_SECURE=false`, `BFF_MOCK_UPSTREAM=true`, the Session store is not Redis, or the
-Redis URL/encryption key is missing. Redis connection failure also fails startup.
+Redis URL/encryption key is missing. It additionally requires auth-service HTTPS with a CA-
+validated BFF client certificate and `rediss://` with Redis authentication. Redis connection
+failure also fails startup.
+
+### Authenticated service transport
+
+The browser-facing TLS connection still terminates at the ingress, but the identity hop has a
+separate trust boundary. In production, the BFF loads a private CA, client certificate and
+permission-restricted private key, requires TLS 1.2+, validates the auth-service hostname and
+presents its client identity. The Spring auth service uses a PKCS12 server key store and CA trust
+store with `client-auth=need`; its production guard rejects plain HTTP or optional client auth.
+
+Production Redis uses `rediss://`, certificate validation and ACL credentials. A Redis client
+certificate/key pair is also supported for environments that require mTLS. The opt-in
+`redis-secure` Compose profile and `infra/tls/generate-dev-pki.sh` provide 14-day local
+certificates so positive and missing-client-certificate behavior can be exercised.
+
+### Online encryption-key rotation
+
+Redis identity records use a versioned AES-256-GCM envelope containing a non-secret key ID.
+Every new Session, MFA challenge, OIDC transaction and WebAuthn ceremony is written with the
+configured primary key. During a rolling rotation, all instances retain both keys; a live
+Session read under the old key is atomically rewritten under the primary while preserving its
+remaining TTL. One-time pre-authentication records are decrypted with a retained key and then
+consumed, so they never need a rewrite. Legacy Session envelopes without a key ID remain readable
+only while the explicitly retained legacy key is present.
+
+Java TOTP seeds already use a key-ID envelope. Successful MFA use lazily promotes an old seed,
+and `POST /api/auth/admin/identity-keys/rotate?limit=100` drains bounded batches for dormant
+accounts and pending enrollments. The operation is JWT-authenticated and ADMIN-only. Old keys are
+removed only after the drain reports zero, the longest BFF record TTL has elapsed, and every
+region reports the new primary. The executable order and rollback rules live in
+[`runbooks/identity-key-rotation.md`](runbooks/identity-key-rotation.md).
 
 ### OIDC Authorization Code + PKCE
 
@@ -142,8 +174,8 @@ sequenceDiagram
 ```
 
 The internal Passkey material endpoints require a constant-time checked, production-rotated
-workload secret. This narrows exposure now; authenticated service TLS is the next defense-in-
-depth layer and is tracked separately rather than being implied by the shared secret.
+workload secret in addition to the authenticated BFF client certificate. The two controls are
+independent defense-in-depth layers.
 
 ## Protected investigation flow
 
@@ -231,6 +263,9 @@ data at that deadline even when the user makes no further API request.
 | Post-recovery session theft | Successful reset deletes pending Java challenges and every BFF Session through a hashed Redis per-user index |
 | Passkey phishing/replay | Exact origin + RP ID, required user verification, encrypted one-time challenge, signature verification and atomic authenticator-counter update |
 | Passkey material exposure | Public keys/counters stay on BFF↔Java routes guarded by a workload secret; browser APIs expose only standard WebAuthn options and credential responses |
+| Internal credential interception | Production BFF→auth requires mutually authenticated TLS and hostname/CA validation; auth-service refuses optional client auth |
+| Redis network/anonymous access | Production requires `rediss://` plus ACL password; CA validation is mandatory and Redis client certificates are supported |
+| Encryption-key compromise/retirement | Versioned key rings support overlap; live Sessions and TOTP seeds re-encrypt online, with a bounded ADMIN drain for dormant accounts |
 
 React's normal text rendering provides output escaping for investigation data. No code uses
 `dangerouslySetInnerHTML`. XSS is not "solved" by cookies: a same-origin script could still
@@ -251,13 +286,14 @@ CDN/ingress and keep dependencies patched.
 
 These are limitations, not hidden features:
 
-1. The Redis implementation is real and two-instance tested, but the Compose service is a
-   passwordless development fixture. Production still needs private authenticated TLS Redis,
-   encryption-key rotation, eviction/availability metrics and a regional outage policy.
+1. The Redis implementation is real and two-instance tested. Production transport enforces
+   `rediss://` plus authentication and supports mTLS. Online record-key rotation is implemented;
+   deployment still needs managed certificate/ACL lifecycle, eviction/availability metrics and
+   a regional outage policy.
 2. Password/OIDC login, TOTP MFA, offline-code recovery and Passkeys are real. Refresh-token
    rotation and provider-specific account-linking policy are not implemented yet.
-3. HTTPS/TLS termination and the SPA document CSP belong to deployment infrastructure, which
-   is outside this repository. The BFF itself fails closed on insecure production cookies.
+3. BFF→auth-service mTLS is implemented. Public ingress TLS termination and the SPA document CSP
+   remain deployment infrastructure; the BFF also fails closed on insecure production cookies.
 4. Redis mode makes the application limiter distributed, but an edge/WAF limiter is still
    needed to absorb volumetric traffic before it reaches Node or Redis.
 5. On-chain data is seeded/synthetic; it is not a live chain indexer or production sanctions
@@ -267,7 +303,7 @@ These are limitations, not hidden features:
 
 ## Test evidence
 
-- `bff/test`: 38 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
+- `bff/test`: 43 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
   the suite checks encrypted-at-rest Session records, tamper/copy rejection, Redis TTL,
   one-time encrypted OIDC transactions, replay rejection, two-instance Session restore/logout,
   encrypted MFA/WebAuthn pre-authentication state, cross-replica one-time consumption,

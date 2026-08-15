@@ -1,5 +1,15 @@
 server:
   port: 8081
+  ssl:
+    enabled: ${ARGUS_AUTH_TLS_ENABLED:false}
+    key-store: ${ARGUS_AUTH_TLS_KEY_STORE:}
+    key-store-password: ${ARGUS_AUTH_TLS_KEY_STORE_PASSWORD:}
+    key-store-type: PKCS12
+    trust-store: ${ARGUS_AUTH_TLS_TRUST_STORE:}
+    trust-store-password: ${ARGUS_AUTH_TLS_TRUST_STORE_PASSWORD:}
+    trust-store-type: PKCS12
+    client-auth: ${ARGUS_AUTH_TLS_CLIENT_AUTH:none}
+    enabled-protocols: TLSv1.2,TLSv1.3
 
 spring:
   application:
