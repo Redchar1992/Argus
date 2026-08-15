@@ -9,10 +9,24 @@ updates:
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
     groups:
+      spring-release-train-patches:
+        patterns:
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
+        update-types: [patch]
       safe-non-major-updates:
         patterns: ["*"]
+        exclude-patterns:
+          - "org.springframework.boot:*"
+          - "org.springframework.cloud:*"
         update-types: [minor, patch]
     ignore:
+      # Boot and Cloud release trains must be advanced together against the
+      # official compatibility matrix. Dependabot may still propose patches.
+      - dependency-name: "org.springframework.boot:*"
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      - dependency-name: "org.springframework.cloud:*"
+        update-types: [version-update:semver-minor, version-update:semver-major]
       - dependency-name: "*"
         update-types: [version-update:semver-major]
 
