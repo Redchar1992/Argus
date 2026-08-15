@@ -32,3 +32,6 @@ frontend/*/vite.config.d.ts
 # Locally generated development PKI; never commit private keys/cert bundles.
 /infra/tls/generated/
 /infra/drills/results/
+
+# One-command local demo runtime (PIDs, logs and generated encryption keys).
+/.demo/

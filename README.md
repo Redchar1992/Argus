@@ -83,6 +83,33 @@ Full detail: [`docs/architecture.md`](docs/architecture.md).
 
 ## Run it
 
+### One-command reviewable local demo (recommended)
+
+```bash
+./scripts/demo-up.sh
+```
+
+This builds and starts the real Java services, a real Fastify BFF, the React console, short-lived
+auth-service mTLS, TLS/ACL/mTLS Redis with encrypted Sessions, Prometheus and a clearly labelled
+local mock OIDC identity source. Open <http://localhost:5173>, or run four browser journeys against
+the live stack:
+
+```bash
+./scripts/demo-verify.sh
+./scripts/demo-down.sh
+```
+
+The external OIDC account/directory is mocked while the code + PKCE/state/nonce/JWKS validation is
+real. Chain/provider evidence is seeded, and the default local agent is deterministic. The exact
+real-versus-mock matrix and ten-minute walkthrough are in
+[`docs/local-demo.md`](docs/local-demo.md). Use `./scripts/demo-up.sh --lite` only when Docker is
+unavailable; it omits authenticated transport, shared Redis and Prometheus rather than pretending
+to provide them.
+
+### Manual startup
+
+The commands below expose each service separately when you want to inspect or replace one layer.
+
 ### Backend (Java 17, Spring Boot 3.5 / Spring Cloud 2025.0)
 
 ```bash
@@ -192,21 +219,23 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                   # 43 pass; 4 real-Redis tests skip
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 47/47 incl. replicas + key rotation
+npm ci && npm run build && npm test                   # 46 pass; 4 real-Redis tests skip
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 50/50 incl. replicas + key rotation
 
 cd ../frontend/analyst-console
-npm ci && npm run build && npm run test:unit        # 13 reducer/RTL lifecycle tests
+npm ci && npm run build && npm run test:unit        # 14 reducer/RTL identity lifecycle tests
 npx playwright install chromium                     # once per machine
 npm run test:e2e                                    # 4 journeys incl. a virtual WebAuthn authenticator
+../../scripts/demo-verify.sh                         # 4 more journeys against the real local stack
 
 cd ../admin-console
 npm ci && npm audit && npm run build                # 0 vulnerabilities; Vue/Vite build
 ```
 
-CI uses `npm ci`, runs the BFF suite against a Redis 7 service, runs both frontend test
-layers, and installs Chromium for four Playwright journeys. Playwright starts the BFF
-with its explicit test-only deterministic upstream; production startup refuses mock mode,
+CI uses `npm ci`, runs the BFF suite against a Redis 7 service and installs Chromium for both
+browser layers. One four-journey suite starts the BFF with its explicit test-only deterministic
+upstream; a second four-journey suite launches the real Java/BFF/React stack in the no-Docker
+profile and exercises OIDC, TOTP/recovery and WebAuthn. Production startup refuses mock mode,
 insecure cookies and the memory Session store. A separate CI job runs the authenticated-TLS
 regional failover drill against disposable Redis primary/replica containers. Repository
 Dependabot alerts/security updates are enabled, and weekly grouped update PRs cover all three
@@ -310,6 +339,14 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
   RP ID, challenge and signature, Java persists the COSE public key and atomically advances
   authenticator counters, and the browser receives neither key material nor the issued JWT.
   Encrypted, one-time ceremonies work across Redis-backed BFF replicas.
+- **Demonstrable MFA/recovery UX:** the protected React console enrolls/disables TOTP, displays
+  the provisioning secret, confirms codes, shows plaintext recovery codes once, reports the
+  remaining count and performs TOTP-gated replacement. The login surface already completes TOTP,
+  recovery-code fallback and offline password reset.
+- **Executable real-stack demo:** one launcher owns seven local processes plus secure Redis and
+  Prometheus; a second command verifies password/Session/investigation, local-provider OIDC,
+  TOTP/recovery and WebAuthn end-to-end. The mock IdP page and documentation explicitly distinguish
+  the external identity source from the real OIDC protocol validation.
 - **Identity test pyramid:** Fastify injection tests cover cookies, CSRF, expiry, upstream
   timeout/401, rate limiting and Passkey replay; Vitest/RTL covers reducer/login/guard/logout
   and WebAuthn UX; Playwright uses a Chromium virtual authenticator and asserts the session

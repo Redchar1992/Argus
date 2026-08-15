@@ -115,6 +115,39 @@ jobs:
         working-directory: frontend/analyst-console
         run: npm run test:e2e
 
+  real-stack-demo-e2e:
+    name: Local demo (real stack Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            bff/package-lock.json
+            frontend/analyst-console/package-lock.json
+      - name: Install BFF
+        working-directory: bff
+        run: npm ci
+      - name: Install analyst console and Chromium
+        working-directory: frontend/analyst-console
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run the product journeys against real services
+        run: |
+          trap './scripts/demo-down.sh --quiet' EXIT
+          ./scripts/demo-up.sh --lite
+          ./scripts/demo-verify.sh
+
   admin-console:
     name: Frontend (Vue admin-console)
     runs-on: ubuntu-latest

@@ -144,6 +144,18 @@ describe('production configuration safeguards', () => {
       BFF_OIDC_CLIENT_ID: 'argus',
       BFF_OIDC_REDIRECT_URI: 'https://argus.example/bff/auth/oidc/callback',
     })).toThrow('OIDC issuer and redirect URI must use https in production');
+    expect(() => loadConfig({
+      BFF_OIDC_ENABLED: 'true',
+      BFF_OIDC_ISSUER: 'http://idp.internal',
+      BFF_OIDC_CLIENT_ID: 'argus',
+      BFF_OIDC_REDIRECT_URI: 'http://localhost:5173/bff/auth/oidc/callback',
+    })).toThrow('HTTP OIDC issuer is allowed only on a loopback host');
+    expect(loadConfig({
+      BFF_OIDC_ENABLED: 'true',
+      BFF_OIDC_ISSUER: 'http://localhost:9091',
+      BFF_OIDC_CLIENT_ID: 'argus',
+      BFF_OIDC_REDIRECT_URI: 'http://localhost:5173/bff/auth/oidc/callback',
+    }).oidcEnabled).toBe(true);
   });
 
   it('requires protected metrics in production and validates the region label', () => {

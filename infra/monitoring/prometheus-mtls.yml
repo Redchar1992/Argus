@@ -1,0 +1,26 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    environment: local-secure-demo
+
+rule_files:
+  - /etc/prometheus/identity-alerts.yml
+
+scrape_configs:
+  - job_name: argus-identity-bff
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:3001]
+
+  - job_name: argus-auth-service
+    scheme: https
+    metrics_path: /actuator/prometheus
+    tls_config:
+      ca_file: /etc/prometheus/tls/ca.crt
+      cert_file: /etc/prometheus/tls/prometheus-auth-client.crt
+      key_file: /etc/prometheus/tls/prometheus-auth-client.key
+      server_name: localhost
+      insecure_skip_verify: false
+    static_configs:
+      - targets: [host.docker.internal:8081]

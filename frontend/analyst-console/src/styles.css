@@ -90,6 +90,11 @@ body {
 .auth-divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; margin: 7px 0; }
 .auth-divider::before, .auth-divider::after { content: ''; height: 1px; background: var(--line); flex: 1; }
 .passkey-login { min-height: 41px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.oidc-login {
+  min-height: 41px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0; text-decoration: none;
+}
+.oidc-login small { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
 
 @media (max-width: 680px) {
   .topbar { align-items: flex-start; }
@@ -152,8 +157,9 @@ body {
 .link:hover { text-decoration: underline; }
 .subbar-note { color: var(--muted); margin-left: auto; }
 
-/* ── passkey security settings ─────────────────────── */
-.passkey-settings { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; margin: -8px 0 16px; }
+/* ── identity security settings ────────────────────── */
+.identity-settings-row { display: flex; justify-content: flex-end; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin: -8px 0 16px; }
+.passkey-settings, .security-settings { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .passkey-panel { width: min(620px, 100%); }
 .passkey-panel h2 { margin: 0; font-size: 17px; }
 .passkey-panel p { color: var(--muted); margin: 5px 0 14px; font-size: 13px; }
@@ -166,6 +172,31 @@ body {
 .passkey-list li > span { display: flex; flex-direction: column; min-width: 0; }
 .passkey-list small { color: var(--muted); margin-top: 2px; }
 .passkey-empty { border: 1px dashed var(--line); border-radius: 8px; padding: 10px; }
+.security-panel { width: min(700px, calc(100vw - 48px)); }
+.security-panel h2 { margin: 0; font-size: 17px; }
+.security-panel h3 { margin: 14px 0 6px; font-size: 15px; }
+.security-panel p { color: var(--muted); margin: 5px 0 14px; font-size: 13px; }
+.security-loading { display: flex; align-items: center; gap: 8px; }
+.security-summary, .totp-setup { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.security-summary > .btn { align-self: flex-start; }
+.security-status-line { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.security-panel label { color: var(--muted); font-size: 12px; font-weight: 700; }
+.totp-setup ol { margin: 0 0 4px; padding-left: 20px; color: var(--muted); }
+.secret-code {
+  display: block; overflow-wrap: anywhere; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: #0f0c17; color: var(--accent-2); font-size: 14px;
+}
+.demo-helper { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border: 1px dashed #6c5224; border-radius: 8px; color: #d8c18f; background: #211a0e; font-size: 12px; }
+.demo-helper code { overflow-wrap: anywhere; color: #ffdb91; }
+.security-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.danger-btn { background: transparent; color: #ffb4ac; border: 1px solid #63302f; border-radius: 8px; padding: 7px 11px; font-size: 12px; font-weight: 650; cursor: pointer; }
+.danger-btn:hover { border-color: var(--danger); }
+.danger-btn:disabled { opacity: .55; cursor: wait; }
+.recovery-codes { margin-top: 18px; padding-top: 4px; border-top: 1px solid var(--line); }
+.recovery-codes ul { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 0; }
+.recovery-codes li { padding: 7px 9px; border-radius: 7px; background: #0f0c17; border: 1px solid var(--line); }
+.recovery-codes code { color: var(--accent-2); font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 620px) { .recovery-codes ul { grid-template-columns: 1fr; } }
 
 /* ── how it works ───────────────────────────────────── */
 .how { margin-bottom: 22px; }

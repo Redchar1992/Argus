@@ -37,6 +37,7 @@ EOF
 
 issue_certificate auth-server auth-service serverAuth 'DNS:localhost,DNS:auth-service,IP:127.0.0.1'
 issue_certificate bff-auth-client identity-bff clientAuth 'DNS:identity-bff'
+issue_certificate prometheus-auth-client prometheus clientAuth 'DNS:prometheus'
 issue_certificate redis-server redis serverAuth 'DNS:localhost,DNS:redis,DNS:redis-secure,IP:127.0.0.1'
 issue_certificate bff-redis-client identity-bff-redis clientAuth 'DNS:identity-bff'
 issue_certificate redis-drill-primary redis-drill-primary 'serverAuth,clientAuth' \

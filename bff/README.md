@@ -17,15 +17,20 @@ the service intentionally does not read a committed secret file.
 
 ```bash
 npm run build
-npm test                    # 30 deterministic tests; Redis integration skips without its URL
+npm test                    # 46 deterministic tests; 4 Redis integration tests skip without a URL
 npm start                   # run compiled dist/server.js
 ```
 
 Run the real shared-store integration suite against an isolated Redis database:
 
 ```bash
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 32/32
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 50/50
 ```
+
+For the complete real-upstream browser demo, run `../scripts/demo-up.sh` from the repository root.
+It enables a loopback-only mock IdP for the external account source; the BFF still performs the
+real code + PKCE exchange and validates state, nonce and the signed ID Token. HTTP issuers are
+accepted only on loopback in development, and production continues to require HTTPS.
 
 ## Browser contract
 
@@ -69,11 +74,14 @@ replicas share login/logout state, records retain the upstream lifetime cap, and
 are encrypted with AES-256-GCM before storage. The random Session ID is authenticated as AAD,
 so ciphertext copied to another Redis key fails closed.
 
-Production refuses the memory store and requires `BFF_REDIS_URL` plus a base64-encoded 32-byte
-`BFF_SESSION_ENCRYPTION_KEY`. Redis connection failure also fails startup, while limiter errors
-fail the login request rather than bypassing the control. A real deployment still needs TLS/
-authenticated Redis, encryption-key rotation, monitoring, revocation policy, TLS ingress, and a
-restrictive CSP on the separately hosted SPA document.
+Production refuses the memory store and requires `BFF_REDIS_URL` plus a versioned AES-256-GCM key
+ring (`BFF_ENCRYPTION_PRIMARY_KEY_ID` + `BFF_ENCRYPTION_KEYS`). Production Redis must use
+`rediss://` plus authentication; optional client certificates support mTLS. Redis connection
+failure fails startup, while limiter errors fail the login request rather than bypassing the
+control. Rolling application-key rotation, metrics/readiness, authenticated BFF→auth transport and
+the local regional failure drill are implemented. A real deployment still needs managed
+certificate/secret lifecycles, TLS ingress and a restrictive CSP on the separately hosted SPA
+document.
 
 `BFF_MOCK_UPSTREAM=true` exists only for deterministic Playwright/local UI runs. It is not an
 authentication bypass available in production—the configuration loader refuses that combination.

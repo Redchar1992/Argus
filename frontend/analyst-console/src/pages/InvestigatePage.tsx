@@ -8,6 +8,7 @@ import { Hint } from '../components/Hint';
 import { useI18n } from '../i18n';
 import type { AuthUser } from '../auth/authMachine';
 import { PasskeySettings } from '../components/PasskeySettings';
+import { MfaSettings } from '../components/MfaSettings';
 
 const REPO = 'https://github.com/Redchar1992/argus';
 
@@ -103,7 +104,10 @@ export function InvestigatePage({ user, signingOut, onLogout }: InvestigatePageP
         </div>
       </header>
 
-      <PasskeySettings />
+      <div className="identity-settings-row">
+        <MfaSettings />
+        <PasskeySettings />
+      </div>
 
       <Hero />
       <HowItWorks />

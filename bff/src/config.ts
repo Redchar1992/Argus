@@ -274,6 +274,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (oidcEnabled && (!oidcIssuer || !oidcClientId || !oidcRedirectUri)) {
     throw new Error('BFF_OIDC_ISSUER, BFF_OIDC_CLIENT_ID, and BFF_OIDC_REDIRECT_URI are required when OIDC is enabled');
   }
+  if (!production && oidcEnabled && new URL(oidcIssuer!).protocol === 'http:'
+    && !['localhost', '127.0.0.1', '::1'].includes(new URL(oidcIssuer!).hostname)) {
+    throw new Error('An HTTP OIDC issuer is allowed only on a loopback host for local development');
+  }
   if (production && oidcEnabled) {
     const issuer = new URL(oidcIssuer!);
     const redirect = new URL(oidcRedirectUri!);

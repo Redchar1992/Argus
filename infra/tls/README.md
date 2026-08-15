@@ -5,7 +5,9 @@ Argus uses two independent production transport controls:
 1. the identity BFF validates `auth-service` and presents a client certificate; Spring requires
    that certificate (`client-auth=need`);
 2. Redis uses `rediss://`, server-certificate validation and ACL credentials, with optional
-   client-certificate authentication.
+   client-certificate authentication; and
+3. the secure local Prometheus fixture uses a separate client identity when scraping
+   auth-service.
 
 ## Local proof
 
@@ -15,6 +17,12 @@ Generate a short-lived local CA and server/client identities:
 ./infra/tls/generate-dev-pki.sh
 set -a; source infra/tls/generated/.env.mtls; set +a
 docker compose --profile security up -d redis-secure
+```
+
+Older generated bundles can be extended without replacing their CA:
+
+```bash
+./infra/tls/ensure-dev-monitoring-pki.sh
 ```
 
 The generated directory is gitignored. Private keys are mode `0600`, server certificates expire

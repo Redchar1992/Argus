@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react';
 import type { AuthState, MfaMethod } from '../auth/authMachine';
 import { useI18n } from '../i18n';
 
+const OIDC_ENABLED = import.meta.env.VITE_OIDC_ENABLED === 'true';
+
 interface LoginPageProps {
   state: Extract<AuthState, {
     status: 'anonymous' | 'authenticating' | 'expired' | 'error' | 'mfa_required' | 'verifying_mfa'
@@ -44,6 +46,9 @@ export function LoginPage({
   const message = state.status === 'expired' || state.status === 'error' || state.status === 'anonymous'
     ? state.message
     : state.status === 'mfa_required' ? state.message
+    : undefined;
+  const oidcError = new URLSearchParams(window.location.search).get('auth') === 'oidc_error'
+    ? t('auth.oidcFailed')
     : undefined;
 
   const submit = (event: FormEvent) => {
@@ -100,6 +105,7 @@ export function LoginPage({
         </p>
 
         {message && <div className={`alert ${state.status === 'anonymous' ? 'info' : 'error'}`} role="alert">{message}</div>}
+        {oidcError && <div className="alert error" role="alert">{oidcError}</div>}
         {recoveryError && <div className="alert error" role="alert">{recoveryError}</div>}
 
         {recoveryMode ? (
@@ -214,6 +220,12 @@ export function LoginPage({
             {authenticatingPassword ? t('auth.signingIn') : t('auth.signIn')}
           </button>
           <div className="auth-divider"><span>{t('auth.or')}</span></div>
+          {OIDC_ENABLED && (
+            <a className="secondary-btn oidc-login" href="/bff/auth/oidc/start">
+              {t('auth.oidcSignIn')}
+              {import.meta.env.VITE_LOCAL_DEMO === 'true' && <small>{t('auth.localMock')}</small>}
+            </a>
+          )}
           <button className="secondary-btn passkey-login" type="button" disabled={authenticating}
             onClick={() => void onLoginWithPasskey()}>
             {authenticatingPasskey && <span className="spinner" />}

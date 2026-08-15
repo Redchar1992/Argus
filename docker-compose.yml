@@ -198,18 +198,19 @@ services:
     profiles: ["monitoring"]
     image: prom/prometheus:v3.13.1
     container_name: argus-prometheus
+    user: "${ARGUS_PROMETHEUS_UID:-65534}:${ARGUS_PROMETHEUS_GID:-65534}"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.path=/tmp/prometheus
       - --storage.tsdb.retention.time=24h
     ports:
       - "9090:9090"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${ARGUS_PROMETHEUS_CONFIG:-./infra/monitoring/prometheus.yml}:/etc/prometheus/prometheus.yml:ro
       - ./infra/monitoring/identity-alerts.yml:/etc/prometheus/identity-alerts.yml:ro
-      - argus-prometheus:/prometheus
+      - ./infra/tls/generated:/etc/prometheus/tls:ro
     healthcheck:
       test: ["CMD", "promtool", "check", "ready"]
       interval: 10s
@@ -220,4 +221,3 @@ volumes:
   argus-pg:
   argus-mongo:
   argus-redis-secure:
-  argus-prometheus:

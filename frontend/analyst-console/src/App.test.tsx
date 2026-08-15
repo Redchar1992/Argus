@@ -156,6 +156,43 @@ describe('protected analyst console', () => {
     expect(String(fetchMock.mock.calls[3]?.[1]?.body)).toContain('Work MacBook');
   });
 
+  it('enrolls TOTP and renders one-time recovery codes from protected settings', async () => {
+    const recoveryCodes = [
+      'ABCD-EFGH-JKLM-NPQR-STUV-WXYZ',
+      '2345-6789-ABCD-EFGH-JKLM-NPQR',
+    ];
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(authenticatedResponse())
+      .mockResolvedValueOnce(jsonResponse({ enabled: false, enrolledAt: null }))
+      .mockResolvedValueOnce(jsonResponse({ remaining: 0 }))
+      .mockResolvedValueOnce(jsonResponse({
+        secret: 'JBSWY3DPEHPK3PXP',
+        provisioningUri: 'otpauth://totp/Argus%3Aanalyst?secret=JBSWY3DPEHPK3PXP&issuer=Argus',
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        enabled: true,
+        enrolledAt: '2026-08-15T00:00:00.000Z',
+        recoveryCodes,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /manage mfa & recovery/i }));
+    await user.click(await screen.findByRole('button', { name: /set up authenticator/i }));
+    expect(await screen.findByTestId('totp-secret')).toHaveTextContent('JBSWY3DPEHPK3PXP');
+    await user.type(screen.getByLabelText(/6-digit authenticator code/i), '123456');
+    await user.click(screen.getByRole('button', { name: /enable mfa/i }));
+
+    expect(await screen.findByText(/save these recovery codes now/i)).toBeInTheDocument();
+    expect(screen.getByText(recoveryCodes[0]!)).toBeInTheDocument();
+    expect(fetchMock.mock.calls[3]?.[0]).toBe('/bff/auth/mfa/totp/setup');
+    expect(fetchMock.mock.calls[4]?.[0]).toBe('/bff/auth/mfa/totp/confirm');
+    expect(String(fetchMock.mock.calls[4]?.[1]?.body)).toBe(JSON.stringify({ code: '123456' }));
+  });
+
   it('shows a normalized login failure and leaves the protected page guarded', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

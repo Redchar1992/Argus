@@ -43,10 +43,15 @@ export class OpenIdClientRelyingParty implements OidcRelyingParty {
     const metadata: Partial<client.ClientMetadata> | string = config.oidcClientSecret
       ? config.oidcClientSecret
       : { token_endpoint_auth_method: 'none' };
+    const issuer = new URL(config.oidcIssuer);
     const configuration = await client.discovery(
-      new URL(config.oidcIssuer),
+      issuer,
       config.oidcClientId,
       metadata,
+      undefined,
+      // Production configuration already rejects HTTP issuers. This explicit
+      // extension is limited to the loopback mock used by the local demo.
+      ...(issuer.protocol === 'http:' ? [{ execute: [client.allowInsecureRequests] }] : []),
     );
     return new OpenIdClientRelyingParty(
       configuration,
