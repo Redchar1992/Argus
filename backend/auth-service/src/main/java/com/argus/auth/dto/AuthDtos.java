@@ -18,6 +18,12 @@ public final class AuthDtos {
             @NotBlank String password) {
     }
 
+    /** A provider ID token completed by the BFF's code + PKCE flow. */
+    public record OidcLoginRequest(
+            @NotBlank @Size(max = 16_384) String idToken,
+            @NotBlank @Size(max = 256) String nonce) {
+    }
+
     /**
      * Self-service registration. Intentionally carries NO role field: a caller must
      * never be able to choose their own privilege. New users are always created at the

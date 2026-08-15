@@ -21,6 +21,10 @@ argus:
     # Demo secret. In production this MUST come from the environment (ARGUS_JWT_SECRET).
     secret: ${ARGUS_JWT_SECRET:argus-dev-secret-change-me-please-32bytes-minimum-length}
     expiry-seconds: 3600
+  oidc:
+    enabled: ${ARGUS_OIDC_ENABLED:false}
+    issuer: ${ARGUS_OIDC_ISSUER:}
+    audience: ${ARGUS_OIDC_AUDIENCE:}
 
 management:
   endpoints:

@@ -12,7 +12,7 @@
 > come from admin-editable policy — not from the model.
 
 Portfolio project — **React 18 + TypeScript · Node/Fastify BFF · Java 17/Spring Cloud · Vue**.
-The analyst console now has a real, protected identity flow: the browser receives only an
+The analyst console now has real password and OIDC Authorization Code + PKCE identity flows: the browser receives only an
 opaque `HttpOnly` session cookie while the upstream JWT stays server-side in the BFF. The
 README is deliberately
 **honest**: it claims only what is built and runs. [`docs/jd-mapping.md`](docs/jd-mapping.md)
@@ -175,8 +175,8 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                 # 19 pass; real-Redis test skips
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 20/20 incl. two-instance Redis
+npm ci && npm run build && npm test                 # 25 pass; real-Redis test skips
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 26/26 incl. two-instance Redis
 
 cd ../frontend/analyst-console
 npm ci && npm run build && npm run test:unit        # 7 reducer/RTL lifecycle tests
@@ -243,9 +243,9 @@ insecure cookies and the memory Session store.
   refuses it and requires the implemented Redis path, but a real deployment still needs a
   private authenticated `rediss://` endpoint, encryption-key rotation, eviction/availability
   metrics, backup policy and a tested regional outage strategy.
-- There is no refresh-token rotation, OAuth/OIDC identity-provider integration, MFA,
-  account recovery, WebAuthn or Passkey implementation. Those are documented design topics,
-  not simulated features. The built scope is password login → BFF session → protected route.
+- OIDC Authorization Code + PKCE is implemented with encrypted one-time state and independent
+  Java ID-token verification. Refresh-token rotation, MFA, account recovery, WebAuthn and
+  Passkeys are not implemented yet; those remaining items are not simulated features.
 - HTTPS is expected to terminate at the deployment ingress; production mode refuses a
   non-`Secure` session cookie. Helmet protects the JSON BFF responses, while the SPA document's
   CSP/HSTS/asset-integrity policy must be configured by the CDN or web server that hosts it.

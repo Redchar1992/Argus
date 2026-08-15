@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import type { AppConfig } from '../src/config.js';
 import { UpstreamError } from '../src/errors.js';
+import type { OidcRelyingParty } from '../src/oidc.js';
 import { SessionStore } from '../src/session-store.js';
 import { MockUpstreamClient, type UpstreamClient } from '../src/upstream.js';
 
@@ -21,6 +22,11 @@ const config: AppConfig = {
   mockUpstream: true,
   sessionStore: 'memory',
   redisConnectTimeoutMs: 1_000,
+  oidcEnabled: false,
+  oidcScopes: 'openid profile email',
+  oidcSuccessRedirect: '/?auth=oidc_success',
+  oidcErrorRedirect: '/?auth=oidc_error',
+  oidcTransactionTtlSeconds: 300,
   logger: false,
 };
 
@@ -209,6 +215,7 @@ describe('identity BFF', () => {
     const mock = new MockUpstreamClient();
     const expiredUpstream: UpstreamClient = {
       login: (...args) => mock.login(...args),
+      oidcLogin: (...args) => mock.oidcLogin(...args),
       submitInvestigation: (...args) => mock.submitInvestigation(...args),
       getInvestigation: async () => {
         throw new UpstreamError(401, 'rejected', 'JWT expired');
@@ -242,6 +249,9 @@ describe('identity BFF', () => {
   it('normalizes an upstream timeout without leaking implementation detail', async () => {
     const timeoutUpstream: UpstreamClient = {
       login: async () => {
+        throw new UpstreamError(504, 'timeout', 'internal socket detail');
+      },
+      oidcLogin: async () => {
         throw new UpstreamError(504, 'timeout', 'internal socket detail');
       },
       submitInvestigation: async () => undefined,
@@ -279,5 +289,68 @@ describe('identity BFF', () => {
     });
     expect(second.statusCode).toBe(429);
     expect(second.json()).toMatchObject({ error: { code: 'RATE_LIMITED' } });
+  });
+
+  it('completes OIDC with one-time state while keeping provider and Argus tokens server-side', async () => {
+    const state = 'state-value-that-is-at-least-thirty-two-characters';
+    const nonce = 'nonce-value-that-is-at-least-thirty-two-characters';
+    const codeVerifier = 'pkce-verifier-that-is-at-least-thirty-two-characters';
+    const oidc: OidcRelyingParty = {
+      begin: async () => ({
+        redirectUrl: `https://idp.example/authorize?state=${state}`,
+        state,
+        nonce,
+        codeVerifier,
+        expiresAt: Date.now() + 60_000,
+      }),
+      complete: async (callbackUrl, transaction) => {
+        expect(callbackUrl.origin).toBe('http://localhost:3001');
+        expect(callbackUrl.searchParams.get('code')).toBe('provider-code');
+        expect(transaction).toMatchObject({ state, nonce, codeVerifier });
+        return { idToken: 'mock-oidc-id-token' };
+      },
+    };
+    const { app } = await appWithCsrf(
+      { oidc },
+      {
+        oidcEnabled: true,
+        oidcIssuer: 'https://idp.example/',
+        oidcClientId: 'argus-client',
+        oidcRedirectUri: 'http://localhost:3001/bff/auth/oidc/callback',
+      },
+    );
+
+    const start = await app.inject({ method: 'GET', url: '/bff/auth/oidc/start' });
+    expect(start.statusCode).toBe(302);
+    expect(start.headers.location).toContain('https://idp.example/authorize');
+    const serialized = Array.isArray(start.headers['set-cookie'])
+      ? start.headers['set-cookie'].join('\n')
+      : start.headers['set-cookie'] ?? '';
+    expect(serialized).toMatch(/argus_oidc_tx=.*HttpOnly/i);
+    expect(serialized).toMatch(/SameSite=Lax/i);
+    expect(serialized).toMatch(/Path=\/bff\/auth\/oidc\/callback/i);
+    const transactionId = cookieValue(start.headers['set-cookie'], 'argus_oidc_tx');
+
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/bff/auth/oidc/callback?code=provider-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: `argus_oidc_tx=${transactionId}` },
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe('/?auth=oidc_success');
+    expect(callback.body).not.toContain('mock-oidc-id-token');
+    const callbackCookies = Array.isArray(callback.headers['set-cookie'])
+      ? callback.headers['set-cookie'].join('\n')
+      : callback.headers['set-cookie'] ?? '';
+    expect(callbackCookies).toMatch(/argus_session=.*HttpOnly/i);
+    expect(callbackCookies).toMatch(/argus_session=.*SameSite=Strict/i);
+
+    const replay = await app.inject({
+      method: 'GET',
+      url: `/bff/auth/oidc/callback?code=provider-code&state=${encodeURIComponent(state)}`,
+      headers: { cookie: `argus_oidc_tx=${transactionId}` },
+    });
+    expect(replay.statusCode).toBe(302);
+    expect(replay.headers.location).toBe('/?auth=oidc_error');
   });
 });

@@ -1,8 +1,8 @@
 # Argus Identity BFF
 
 Same-origin Node/Fastify boundary between the React analyst console and the Java services.
-The BFF exchanges a username/password for an upstream JWT, keeps that JWT in a server-side
-session, and returns only an opaque `HttpOnly` cookie to the browser.
+The BFF exchanges a password or an OIDC Authorization Code + PKCE result for an Argus JWT,
+keeps that JWT in a server-side session, and returns only an opaque `HttpOnly` cookie.
 
 ## Run
 
@@ -17,20 +17,23 @@ the service intentionally does not read a committed secret file.
 
 ```bash
 npm run build
-npm test                    # 19 deterministic tests; Redis integration skips without its URL
+npm test                    # 25 deterministic tests; Redis integration skips without its URL
 npm start                   # run compiled dist/server.js
 ```
 
 Run the real shared-store integration suite against an isolated Redis database:
 
 ```bash
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 20/20
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 26/26
 ```
 
 ## Browser contract
 
 - `GET /bff/auth/session` — bootstrap the CSRF cookie and restore a session.
 - `POST /bff/auth/login` — validate Origin + CSRF, call Java auth, create/rotate session.
+- `GET /bff/auth/oidc/start` — generate state, nonce and PKCE, then redirect to the provider.
+- `GET /bff/auth/oidc/callback` — atomically consume the transaction, validate the provider
+  response and create a normal Argus session without exposing either token to JavaScript.
 - `POST /bff/auth/logout` — delete the server session and clear/rotate cookies.
 - `POST /bff/api/investigations` and `GET /bff/api/investigations/:id` — guarded proxy;
   Bearer JWT is added only on the BFF-to-Java request.
@@ -45,6 +48,8 @@ requestId }` error shape. Login is rate-limited per client.
 - Mutation defense: exact Origin allowlist + `Sec-Fetch-Site` + double-submit CSRF token.
 - Upstream timeout/401: normalized failure; 401 destroys the local session.
 - `NODE_ENV=production` refuses insecure cookies and the deterministic mock upstream.
+- OIDC transactions are one-time, expiry-bounded and encrypted in Redis; the callback-only
+  `HttpOnly`, `SameSite=Lax` cookie binds the browser redirect to its server-side transaction.
 
 Development defaults to an in-process `Map` and process-local limiter for a zero-infrastructure
 demo. `BFF_SESSION_STORE=redis` switches both the Session repository and login limiter to Redis:

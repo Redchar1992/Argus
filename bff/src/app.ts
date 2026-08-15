@@ -5,11 +5,17 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { AppConfig } from './config.js';
 import { AppError, UpstreamError } from './errors.js';
+import type { OidcRelyingParty } from './oidc.js';
+import {
+  MemoryOidcTransactionStore,
+  type OidcTransactionRepository,
+} from './oidc-transaction-store.js';
 import { SessionStore, type ServerSession, type SessionRepository } from './session-store.js';
 import { HttpUpstreamClient, MockUpstreamClient, type UpstreamClient } from './upstream.js';
 
 const SESSION_COOKIE = 'argus_session';
 const CSRF_COOKIE = 'argus_csrf';
+const OIDC_TRANSACTION_COOKIE = 'argus_oidc_tx';
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 
 interface LoginBody {
@@ -25,6 +31,8 @@ export interface AppDependencies {
   upstream?: UpstreamClient;
   sessions?: SessionRepository;
   rateLimitRedis?: unknown;
+  oidc?: OidcRelyingParty;
+  oidcTransactions?: OidcTransactionRepository;
   close?: () => Promise<void>;
 }
 
@@ -43,6 +51,9 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   const sessions = dependencies.sessions ?? new SessionStore(config.sessionTtlSeconds);
   const upstream =
     dependencies.upstream ?? (config.mockUpstream ? new MockUpstreamClient() : new HttpUpstreamClient(config));
+  const oidc = dependencies.oidc;
+  const oidcTransactions = dependencies.oidcTransactions ?? new MemoryOidcTransactionStore();
+  if (config.oidcEnabled && !oidc) throw new Error('OIDC is enabled but no relying party was configured');
   const requestSessions = new WeakMap<FastifyRequest, ServerSession>();
 
   await app.register(cookie);
@@ -104,6 +115,25 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     });
   }
 
+  function setOidcTransactionCookie(reply: FastifyReply, id: string): void {
+    reply.setCookie(OIDC_TRANSACTION_COOKIE, id, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'lax',
+      path: '/bff/auth/oidc/callback',
+      maxAge: config.oidcTransactionTtlSeconds,
+    });
+  }
+
+  function clearOidcTransactionCookie(reply: FastifyReply): void {
+    reply.clearCookie(OIDC_TRANSACTION_COOKIE, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'lax',
+      path: '/bff/auth/oidc/callback',
+    });
+  }
+
   async function currentSession(request: FastifyRequest): Promise<ServerSession | undefined> {
     return sessions.get(request.cookies[SESSION_COOKIE]);
   }
@@ -162,7 +192,51 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     }
   }
 
-  app.get('/health', async () => ({ status: 'ok', sessionStore: config.sessionStore }));
+  app.get('/health', async () => ({
+    status: 'ok',
+    sessionStore: config.sessionStore,
+    oidc: config.oidcEnabled ? 'enabled' : 'disabled',
+  }));
+
+  if (config.oidcEnabled && oidc) {
+    app.get('/bff/auth/oidc/start', async (_request, reply) => {
+      const authorization = await oidc.begin();
+      const transactionId = await oidcTransactions.create({
+        state: authorization.state,
+        nonce: authorization.nonce,
+        codeVerifier: authorization.codeVerifier,
+        expiresAt: authorization.expiresAt,
+      });
+      setOidcTransactionCookie(reply, transactionId);
+      return reply.code(302).redirect(authorization.redirectUrl);
+    });
+
+    app.get('/bff/auth/oidc/callback', async (request, reply) => {
+      const transactionId = request.cookies[OIDC_TRANSACTION_COOKIE];
+      clearOidcTransactionCookie(reply);
+      const transaction = await oidcTransactions.consume(transactionId);
+      if (!transaction) return reply.code(302).redirect(config.oidcErrorRedirect);
+
+      try {
+        const callbackUrl = new URL(request.url, config.oidcRedirectUri);
+        const result = await oidc.complete(callbackUrl, transaction);
+        const login = await upstream.oidcLogin(result.idToken, transaction.nonce, request.id);
+
+        await sessions.delete(request.cookies[SESSION_COOKIE]);
+        clearSessionCookie(reply);
+        const session = await sessions.create(
+          login.token,
+          { username: login.username, role: login.role },
+          login.expiresInSeconds,
+        );
+        setSessionCookie(reply, session);
+        ensureCsrf(request, reply, true);
+        return reply.code(302).redirect(config.oidcSuccessRedirect);
+      } catch {
+        return reply.code(302).redirect(config.oidcErrorRedirect);
+      }
+    });
+  }
 
   app.get('/bff/auth/session', async (request, reply) => {
     ensureCsrf(request, reply);

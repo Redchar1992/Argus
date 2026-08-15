@@ -16,9 +16,12 @@ flowchart LR
     Admin["Vue admin console :5174"]
     Gateway["Spring Cloud Gateway :8080"]
     Redis["Redis 7 — shared Sessions + login limits"]
+    IdP["OpenID Provider — discovery + JWKS"]
 
     Browser -->|"same-origin /bff; opaque cookies"| BFF
-    BFF -->|"password login"| Auth
+    BFF -->|"password or verified provider token"| Auth
+    Browser <-->|"Authorization Code + PKCE"| IdP
+    BFF -->|"discovery, authorize, token exchange"| IdP
     Auth -->|"JWT — server-to-server only"| BFF
     BFF -->|"Bearer JWT + investigation API"| Agent
     BFF -->|"AES-GCM Session records + rate keys"| Redis
@@ -87,6 +90,15 @@ Cookie properties:
 Development defaults to an in-memory store. Production startup fails if
 `BFF_COOKIE_SECURE=false`, `BFF_MOCK_UPSTREAM=true`, the Session store is not Redis, or the
 Redis URL/encryption key is missing. Redis connection failure also fails startup.
+
+### OIDC Authorization Code + PKCE
+
+The optional OIDC path uses provider discovery, a fresh state, nonce and S256 PKCE verifier
+per attempt. Only an opaque callback-scoped cookie reaches the browser; the server-side
+transaction is encrypted in Redis in production and consumed atomically with `GETDEL`. The
+BFF validates the callback and token response, then auth-service independently validates the
+ID token's JWKS signature, issuer, audience, expiry and nonce. Accounts are keyed by
+`(issuer, subject)` and are never silently linked by email.
 
 ## Protected investigation flow
 
@@ -160,6 +172,7 @@ data at that deadline even when the user makes no further API request.
 | Common response-header attacks | Helmet headers are enabled on the JSON BFF; the SPA hosting layer owns the HTML CSP/HSTS policy |
 | Unauthorized routes | Fastify pre-handler guards every investigation endpoint; Java services independently validate JWT + roles |
 | Unsafe test mode | Mock upstream is explicit and refused when `NODE_ENV=production` |
+| OIDC login CSRF/replay | Browser-bound state cookie, one-time encrypted transaction, nonce and S256 PKCE; Java repeats provider-token validation |
 
 React's normal text rendering provides output escaping for investigation data. No code uses
 `dangerouslySetInnerHTML`. XSS is not "solved" by cookies: a same-origin script could still
@@ -183,9 +196,8 @@ These are limitations, not hidden features:
 1. The Redis implementation is real and two-instance tested, but the Compose service is a
    passwordless development fixture. Production still needs private authenticated TLS Redis,
    encryption-key rotation, eviction/availability metrics and a regional outage policy.
-2. Password login is real, but refresh-token rotation, OAuth/OIDC IdP integration, MFA,
-   account recovery, WebAuthn and Passkeys are not implemented. Interview design notes must
-   not be presented as shipped code.
+2. Password and OIDC login are real. Refresh-token rotation, MFA, account recovery, WebAuthn
+   and Passkeys are not implemented yet and must not be presented as shipped code.
 3. HTTPS/TLS termination and the SPA document CSP belong to deployment infrastructure, which
    is outside this repository. The BFF itself fails closed on insecure production cookies.
 4. Redis mode makes the application limiter distributed, but an edge/WAF limiter is still
@@ -197,9 +209,10 @@ These are limitations, not hidden features:
 
 ## Test evidence
 
-- `bff/test`: 20 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
+- `bff/test`: 26 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
   the suite checks encrypted-at-rest Session records, tamper/copy rejection, Redis TTL,
-  two-instance Session restore/logout, distributed login limits and production fail-fast config.
+  one-time encrypted OIDC transactions, replay rejection, two-instance Session restore/logout,
+  distributed login limits and production fail-fast config.
 - `frontend/analyst-console/src`: seven reducer/React Testing Library tests covering login
   failure/success, guard, automatic deadline expiry and logout behavior.
 - `frontend/analyst-console/e2e`: real Chromium anonymous/login/logout journeys using the BFF

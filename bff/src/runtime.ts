@@ -1,10 +1,21 @@
 import { Redis } from 'ioredis';
 import type { AppDependencies } from './app.js';
 import type { AppConfig } from './config.js';
+import { OpenIdClientRelyingParty } from './oidc.js';
+import {
+  MemoryOidcTransactionStore,
+  RedisOidcTransactionStore,
+  type RedisOidcCommands,
+} from './oidc-transaction-store.js';
 import { RedisSessionStore, type RedisSessionCommands } from './redis-session-store.js';
 
 export async function createRuntimeDependencies(config: AppConfig): Promise<AppDependencies> {
-  if (config.sessionStore === 'memory') return {};
+  const oidc = config.oidcEnabled ? await OpenIdClientRelyingParty.discover(config) : undefined;
+  if (config.sessionStore === 'memory') {
+    return {
+      ...(oidc ? { oidc, oidcTransactions: new MemoryOidcTransactionStore() } : {}),
+    };
+  }
   if (!config.redisUrl || !config.sessionEncryptionKey) {
     throw new Error('Redis session configuration is incomplete');
   }
@@ -35,6 +46,10 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
     setex: (key, seconds, value) => redis.setex(key, seconds, value),
     del: (key) => redis.del(key),
   };
+  const oidcCommands: RedisOidcCommands = {
+    setex: (key, seconds, value) => redis.setex(key, seconds, value),
+    getdel: (key) => redis.getdel(key),
+  };
 
   return {
     sessions: new RedisSessionStore(
@@ -43,6 +58,16 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
       config.sessionTtlSeconds,
     ),
     rateLimitRedis: redis,
+    ...(oidc
+      ? {
+          oidc,
+          oidcTransactions: new RedisOidcTransactionStore(
+            oidcCommands,
+            config.sessionEncryptionKey,
+            config.oidcTransactionTtlSeconds,
+          ),
+        }
+      : {}),
     close: async () => {
       if (redis.status === 'end') return;
       if (redis.status === 'ready') {

@@ -2,6 +2,7 @@ package com.argus.auth.controller;
 
 import com.argus.auth.dto.AuthDtos.AssignRoleRequest;
 import com.argus.auth.dto.AuthDtos.LoginRequest;
+import com.argus.auth.dto.AuthDtos.OidcLoginRequest;
 import com.argus.auth.dto.AuthDtos.RegisterRequest;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
 import com.argus.auth.dto.AuthDtos.UserView;
@@ -39,6 +40,11 @@ public class AuthController {
     @PostMapping("/login")
     public TokenResponse login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request.username(), request.password());
+    }
+
+    @PostMapping("/oidc/login")
+    public TokenResponse oidcLogin(@Valid @RequestBody OidcLoginRequest request) {
+        return authService.oidcLogin(request.idToken(), request.nonce());
     }
 
     @PostMapping("/register")

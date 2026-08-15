@@ -52,4 +52,34 @@ describe('production configuration safeguards', () => {
     expect(config.cookieSecure).toBe(true);
     expect(config.sessionEncryptionKey).toHaveLength(32);
   });
+
+  it('requires complete OIDC settings and HTTPS in production', () => {
+    expect(() => loadConfig({ BFF_OIDC_ENABLED: 'true' })).toThrow(
+      'BFF_OIDC_ISSUER, BFF_OIDC_CLIENT_ID, and BFF_OIDC_REDIRECT_URI are required',
+    );
+    expect(() => loadConfig({
+      NODE_ENV: 'production',
+      BFF_REDIS_URL: 'rediss://redis.internal:6379',
+      BFF_SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      BFF_OIDC_ENABLED: 'true',
+      BFF_OIDC_ISSUER: 'http://idp.internal',
+      BFF_OIDC_CLIENT_ID: 'argus',
+      BFF_OIDC_REDIRECT_URI: 'https://argus.example/bff/auth/oidc/callback',
+    })).toThrow('OIDC issuer and redirect URI must use https in production');
+  });
+
+  it('rejects an OIDC scope without openid and external post-login redirects', () => {
+    const oidc = {
+      BFF_OIDC_ENABLED: 'true',
+      BFF_OIDC_ISSUER: 'https://idp.example',
+      BFF_OIDC_CLIENT_ID: 'argus',
+      BFF_OIDC_REDIRECT_URI: 'http://localhost:3001/bff/auth/oidc/callback',
+    };
+    expect(() => loadConfig({ ...oidc, BFF_OIDC_SCOPES: 'profile email' })).toThrow(
+      'BFF_OIDC_SCOPES must include openid',
+    );
+    expect(() => loadConfig({ ...oidc, BFF_OIDC_SUCCESS_REDIRECT: 'https://attacker.example' })).toThrow(
+      'BFF_OIDC_SUCCESS_REDIRECT must be a same-origin absolute path',
+    );
+  });
 });

@@ -10,6 +10,7 @@ export interface LoginResult extends AuthUser {
 
 export interface UpstreamClient {
   login(username: string, password: string, requestId: string): Promise<LoginResult>;
+  oidcLogin(idToken: string, nonce: string, requestId: string): Promise<LoginResult>;
   submitInvestigation(accessToken: string, body: unknown, requestId: string): Promise<unknown>;
   getInvestigation(accessToken: string, id: string, requestId: string): Promise<unknown>;
 }
@@ -37,6 +38,23 @@ export class HttpUpstreamClient implements UpstreamClient {
       },
       'login',
     );
+    return this.parseLoginResult(data);
+  }
+
+  async oidcLogin(idToken: string, nonce: string, requestId: string): Promise<LoginResult> {
+    const data = await this.request(
+      `${this.config.authBaseUrl}/api/auth/oidc/login`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-request-id': requestId },
+        body: JSON.stringify({ idToken, nonce }),
+      },
+      'login',
+    );
+    return this.parseLoginResult(data);
+  }
+
+  private parseLoginResult(data: unknown): LoginResult {
     if (!data || typeof data !== 'object') {
       throw new UpstreamError(502, 'unavailable', 'Authentication service returned an invalid response');
     }
@@ -132,6 +150,18 @@ export class MockUpstreamClient implements UpstreamClient {
       expiresInSeconds: 3_600,
       username,
       role: user.role,
+    };
+  }
+
+  async oidcLogin(idToken: string, nonce: string): Promise<LoginResult> {
+    if (idToken !== 'mock-oidc-id-token' || !nonce) {
+      throw new UpstreamError(401, 'rejected', 'Invalid OIDC identity');
+    }
+    return {
+      token: `mock-only-${randomUUID()}`,
+      expiresInSeconds: 3_600,
+      username: 'oidc.analyst',
+      role: 'ANALYST',
     };
   }
 

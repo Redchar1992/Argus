@@ -8,11 +8,14 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
 
 @Entity
-@Table(name = "user_account")
+@Table(name = "user_account", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_user_oidc_identity", columnNames = {"oidc_issuer", "oidc_subject"})
+})
 public class UserAccount {
 
     @Id
@@ -23,8 +26,18 @@ public class UserAccount {
     private String username;
 
     /** Bcrypt hash. Never the plaintext password. */
-    @Column(name = "password_hash", nullable = false)
+    @Column(name = "password_hash")
     private String passwordHash;
+
+    /** External identities are keyed only by the provider pair, never by email. */
+    @Column(name = "oidc_issuer", length = 512)
+    private String oidcIssuer;
+
+    @Column(name = "oidc_subject", length = 512)
+    private String oidcSubject;
+
+    @Column(length = 320)
+    private String email;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -47,6 +60,18 @@ public class UserAccount {
         this.createdAt = Instant.now();
     }
 
+    public static UserAccount oidc(String username, String issuer, String subject, String email, Role role) {
+        UserAccount account = new UserAccount();
+        account.username = username;
+        account.oidcIssuer = issuer;
+        account.oidcSubject = subject;
+        account.email = email;
+        account.role = role;
+        account.enabled = true;
+        account.createdAt = Instant.now();
+        return account;
+    }
+
     public Long getId() {
         return id;
     }
@@ -57,6 +82,18 @@ public class UserAccount {
 
     public String getPasswordHash() {
         return passwordHash;
+    }
+
+    public String getOidcIssuer() {
+        return oidcIssuer;
+    }
+
+    public String getOidcSubject() {
+        return oidcSubject;
+    }
+
+    public String getEmail() {
+        return email;
     }
 
     public Role getRole() {

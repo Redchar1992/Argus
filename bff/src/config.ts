@@ -14,6 +14,15 @@ export interface AppConfig {
   redisUrl?: string;
   sessionEncryptionKey?: Buffer;
   redisConnectTimeoutMs: number;
+  oidcEnabled: boolean;
+  oidcIssuer?: string;
+  oidcClientId?: string;
+  oidcClientSecret?: string;
+  oidcRedirectUri?: string;
+  oidcScopes: string;
+  oidcSuccessRedirect: string;
+  oidcErrorRedirect: string;
+  oidcTransactionTtlSeconds: number;
   logger: boolean;
 }
 
@@ -66,6 +75,23 @@ function encryptionKey(value: string | undefined): Buffer | undefined {
   return decoded;
 }
 
+function absoluteUrl(value: string | undefined, name: string): string | undefined {
+  if (!value) return undefined;
+  const parsed = new URL(value);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error(`${name} must use http or https`);
+  }
+  return parsed.toString();
+}
+
+function localRedirect(value: string | undefined, fallback: string, name: string): string {
+  const redirect = value ?? fallback;
+  if (!redirect.startsWith('/') || redirect.startsWith('//') || redirect.includes('\\')) {
+    throw new Error(`${name} must be a same-origin absolute path`);
+  }
+  return redirect;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const production = env.NODE_ENV === 'production';
   const mockUpstream = booleanValue(env.BFF_MOCK_UPSTREAM, false);
@@ -73,6 +99,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const sessionStore = sessionStoreValue(env.BFF_SESSION_STORE, production);
   const redisUrl = env.BFF_REDIS_URL?.trim() || undefined;
   const sessionEncryptionKey = encryptionKey(env.BFF_SESSION_ENCRYPTION_KEY);
+  const oidcEnabled = booleanValue(env.BFF_OIDC_ENABLED, false);
+  const oidcIssuer = absoluteUrl(env.BFF_OIDC_ISSUER?.trim(), 'BFF_OIDC_ISSUER');
+  const oidcClientId = env.BFF_OIDC_CLIENT_ID?.trim() || undefined;
+  const oidcClientSecret = env.BFF_OIDC_CLIENT_SECRET?.trim() || undefined;
+  const oidcRedirectUri = absoluteUrl(env.BFF_OIDC_REDIRECT_URI?.trim(), 'BFF_OIDC_REDIRECT_URI');
   if (production && mockUpstream) {
     throw new Error('BFF_MOCK_UPSTREAM cannot be enabled in production');
   }
@@ -87,6 +118,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (sessionStore === 'redis' && !sessionEncryptionKey) {
     throw new Error('BFF_SESSION_ENCRYPTION_KEY is required when BFF_SESSION_STORE=redis');
+  }
+  if (oidcEnabled && (!oidcIssuer || !oidcClientId || !oidcRedirectUri)) {
+    throw new Error('BFF_OIDC_ISSUER, BFF_OIDC_CLIENT_ID, and BFF_OIDC_REDIRECT_URI are required when OIDC is enabled');
+  }
+  if (production && oidcEnabled) {
+    const issuer = new URL(oidcIssuer!);
+    const redirect = new URL(oidcRedirectUri!);
+    if (issuer.protocol !== 'https:' || redirect.protocol !== 'https:') {
+      throw new Error('OIDC issuer and redirect URI must use https in production');
+    }
+  }
+  const oidcScopes = (env.BFF_OIDC_SCOPES ?? 'openid profile email').trim();
+  if (oidcEnabled && !oidcScopes.split(/\s+/).includes('openid')) {
+    throw new Error('BFF_OIDC_SCOPES must include openid');
   }
 
   return {
@@ -105,6 +150,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(redisUrl ? { redisUrl } : {}),
     ...(sessionEncryptionKey ? { sessionEncryptionKey } : {}),
     redisConnectTimeoutMs: positiveInteger(env.BFF_REDIS_CONNECT_TIMEOUT_MS, 1_000, 'BFF_REDIS_CONNECT_TIMEOUT_MS'),
+    oidcEnabled,
+    ...(oidcIssuer ? { oidcIssuer } : {}),
+    ...(oidcClientId ? { oidcClientId } : {}),
+    ...(oidcClientSecret ? { oidcClientSecret } : {}),
+    ...(oidcRedirectUri ? { oidcRedirectUri } : {}),
+    oidcScopes,
+    oidcSuccessRedirect: localRedirect(env.BFF_OIDC_SUCCESS_REDIRECT, '/?auth=oidc_success', 'BFF_OIDC_SUCCESS_REDIRECT'),
+    oidcErrorRedirect: localRedirect(env.BFF_OIDC_ERROR_REDIRECT, '/?auth=oidc_error', 'BFF_OIDC_ERROR_REDIRECT'),
+    oidcTransactionTtlSeconds: positiveInteger(
+      env.BFF_OIDC_TRANSACTION_TTL_SECONDS,
+      300,
+      'BFF_OIDC_TRANSACTION_TTL_SECONDS',
+    ),
     logger: booleanValue(env.BFF_LOGGER, production),
   };
 }

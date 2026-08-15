@@ -7,9 +7,16 @@ import com.argus.auth.model.Role;
 import com.argus.auth.model.UserAccount;
 import com.argus.auth.repository.UserAccountRepository;
 import com.argus.auth.security.JwtService;
+import com.argus.auth.security.OidcTokenVerifier;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
@@ -21,13 +28,16 @@ public class AuthService {
     private final UserAccountRepository repository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final OidcTokenVerifier oidcTokenVerifier;
 
     public AuthService(UserAccountRepository repository,
                        PasswordEncoder passwordEncoder,
-                       JwtService jwtService) {
+                       JwtService jwtService,
+                       OidcTokenVerifier oidcTokenVerifier) {
         this.repository = repository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.oidcTokenVerifier = oidcTokenVerifier;
     }
 
     /**
@@ -58,9 +68,50 @@ public class AuthService {
     public TokenResponse login(String username, String rawPassword) {
         UserAccount user = repository.findByUsername(username)
                 .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Invalid credentials"));
-        if (!user.isEnabled() || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
+        if (!user.isEnabled() || user.getPasswordHash() == null
+                || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
             throw new ResponseStatusException(UNAUTHORIZED, "Invalid credentials");
         }
+        return issue(user);
+    }
+
+    /**
+     * Verifies the provider token independently from the BFF and maps solely by
+     * (issuer, subject). Email is profile data, never an account-linking key.
+     */
+    public TokenResponse oidcLogin(String idToken, String expectedNonce) {
+        OidcTokenVerifier.OidcIdentity identity = oidcTokenVerifier.verify(idToken, expectedNonce);
+        UserAccount user = repository
+                .findByOidcIssuerAndOidcSubject(identity.issuer(), identity.subject())
+                .orElseGet(() -> provisionOidcUser(identity));
+        if (!user.isEnabled()) {
+            throw new ResponseStatusException(UNAUTHORIZED, "Account disabled");
+        }
+        return issue(user);
+    }
+
+    private UserAccount provisionOidcUser(OidcTokenVerifier.OidcIdentity identity) {
+        String username = stableOidcUsername(identity.issuer(), identity.subject());
+        try {
+            return repository.saveAndFlush(UserAccount.oidc(
+                    username, identity.issuer(), identity.subject(), identity.email(), Role.ANALYST));
+        } catch (DataIntegrityViolationException race) {
+            return repository.findByOidcIssuerAndOidcSubject(identity.issuer(), identity.subject())
+                    .orElseThrow(() -> race);
+        }
+    }
+
+    private static String stableOidcUsername(String issuer, String subject) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((issuer + "\u0000" + subject).getBytes(StandardCharsets.UTF_8));
+            return "oidc-" + HexFormat.of().formatHex(digest, 0, 10);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    private TokenResponse issue(UserAccount user) {
         String token = jwtService.issue(user);
         return new TokenResponse(token, "Bearer", jwtService.getExpirySeconds(),
                 user.getUsername(), user.getRole());

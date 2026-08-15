@@ -29,12 +29,12 @@ intentionally strict: interview design knowledge is not labelled as an implement
 |---|---|---|
 | **JWT** | Spring auth-service issues HS256 JWT; every Java business service validates it; BFF keeps it off the browser | **Built** |
 | **Cookie sessions** | Development memory store plus production-required Redis store; AES-256-GCM-encrypted bearer material, opaque cookie, capped TTL and cross-instance restore/logout | **Built + two-instance tested** |
-| **OAuth 2.0 / OIDC** | Covered in `docs/interview-prep/03-oauth-oidc-jwt-webauthn.md` and system-design material | **Understood/designed, not implemented** |
+| **OAuth 2.0 / OIDC** | BFF Authorization Code + PKCE with discovery, state and nonce; encrypted one-time transaction store; Java re-verifies JWKS signature, issuer, audience, expiry and nonce and maps only by issuer + subject | **Built + negative tested** |
 | **WebAuthn / FIDO2 / Passkey** | Registration/authentication/recovery design in interview-prep docs | **Not implemented** |
 | **MFA / step-up / recovery** | Product/state/service design in `docs/interview-prep/04-binance-login-mfa-system-design.md` | **Not implemented** |
 | **Face/liveness KYC** | Argus has compliance workflows and human-review semantics, but no biometric SDK/model integration | **Not implemented** |
 
-No screen or API pretends that MFA, Passkey or OIDC already works. This avoids turning a
+No screen or API pretends that MFA or Passkey already works. This avoids turning a
 portfolio feature into a misleading security claim.
 
 ## Full-stack and product evidence
@@ -77,7 +77,7 @@ A concise code tour should follow this order:
 
 - Deploy the implemented Redis path on a private authenticated TLS endpoint; add encryption-key
   rotation, eviction/availability metrics, regional outage drills and an edge/WAF limiter.
-- Add real OIDC Authorization Code + PKCE, token rotation/revocation and IdP key discovery.
+- Add refresh-token rotation/revocation; OIDC code + PKCE and IdP key discovery are built.
 - Add WebAuthn/passkey registration, authentication, credential inventory and recovery; never
   ship a cosmetic mock.
 - Add risk-based step-up, MFA factor orchestration and resumable/replay-safe multi-step flows.
