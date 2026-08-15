@@ -2,6 +2,7 @@ import { Redis } from 'ioredis';
 import { readFileSync, statSync } from 'node:fs';
 import type { ConnectionOptions } from 'node:tls';
 import { EncryptionKeyRing } from './encryption-keyring.js';
+import { IdentityMetrics } from './metrics.js';
 import type { AppDependencies } from './app.js';
 import type { AppConfig } from './config.js';
 import {
@@ -22,9 +23,16 @@ import {
 } from './webauthn-ceremony-store.js';
 
 export async function createRuntimeDependencies(config: AppConfig): Promise<AppDependencies> {
+  const metrics = new IdentityMetrics(config.region);
+  if (config.authTlsCertFile) metrics.observeCertificate('auth_client', config.authTlsCertFile);
+  if (config.authTlsCaFile) metrics.observeCertificate('auth_ca', config.authTlsCaFile);
+  if (config.redisTlsCertFile) metrics.observeCertificate('redis_client', config.redisTlsCertFile);
+  if (config.redisTlsCaFile) metrics.observeCertificate('redis_ca', config.redisTlsCaFile);
   const oidc = config.oidcEnabled ? await OpenIdClientRelyingParty.discover(config) : undefined;
   if (config.sessionStore === 'memory') {
     return {
+      metrics,
+      readiness: async () => undefined,
       mfaChallenges: new MemoryMfaChallengeStore(),
       ...(oidc ? { oidc, oidcTransactions: new MemoryOidcTransactionStore() } : {}),
     };
@@ -63,11 +71,16 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
     // Do not include configuration or commands: URLs can carry credentials and
     // Session values contain encrypted security material.
     console.error(`Redis connection error: ${error.message}`);
+    metrics.setDependency('redis', false);
+    metrics.recordDependencyError('redis');
   });
+  redis.on('ready', () => metrics.setDependency('redis', true));
+  redis.on('close', () => metrics.setDependency('redis', false));
 
   try {
     await redis.connect();
     await redis.ping();
+    metrics.setDependency('redis', true);
   } catch {
     redis.disconnect();
     throw new Error('Redis is unavailable; refusing to start the identity BFF');
@@ -97,21 +110,32 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
   };
 
   return {
+    metrics,
+    readiness: async () => {
+      await redis.ping();
+      metrics.setDependency('redis', true);
+    },
     sessions: new RedisSessionStore(
       commands,
       encryption,
       config.sessionTtlSeconds,
+      Date.now,
+      metrics,
     ),
     rateLimitRedis: redis,
     mfaChallenges: new RedisMfaChallengeStore(
       mfaCommands,
       encryption,
       config.mfaChallengeTtlSeconds,
+      Date.now,
+      metrics,
     ),
     webauthnCeremonies: new RedisWebAuthnCeremonyStore(
       webauthnCommands,
       encryption,
       config.webauthnCeremonyTtlSeconds,
+      Date.now,
+      metrics,
     ),
     ...(oidc
       ? {
@@ -120,6 +144,8 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
             oidcCommands,
             encryption,
             config.oidcTransactionTtlSeconds,
+            Date.now,
+            metrics,
           ),
         }
       : {}),

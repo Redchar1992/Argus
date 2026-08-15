@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope } from './encryption-keyring.js';
+import type { EncryptedStoreObserver } from './metrics.js';
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{32,256}$/;
@@ -81,6 +82,7 @@ export class RedisMfaChallengeStore implements MfaChallengeRepository {
     encryption: Buffer | EncryptionKeyRing,
     private readonly maximumTtlSeconds: number,
     private readonly now: () => number = Date.now,
+    private readonly observer?: EncryptedStoreObserver,
   ) {
     this.encryption = keyRing(encryption);
   }
@@ -111,9 +113,11 @@ export class RedisMfaChallengeStore implements MfaChallengeRepository {
       if (this.encryption.needsRotation(opened.envelope, opened.keyId)) {
         const remaining = Math.max(1, Math.ceil((challenge.expiresAt - this.now()) / 1_000));
         await this.redis.setex(this.key(id), Math.min(this.maximumTtlSeconds, remaining), this.seal(id, challenge));
+        this.observer?.recordKeyRotation('mfa');
       }
       return challenge;
     } catch {
+      this.observer?.recordRejectedRecord('mfa');
       await this.delete(id);
       return undefined;
     }

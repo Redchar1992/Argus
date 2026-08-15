@@ -1,0 +1,115 @@
+groups:
+  - name: argus-identity-availability
+    rules:
+      - alert: ArgusIdentityBffTargetDown
+        expr: up{job="argus-identity-bff"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Identity BFF metrics target is down
+          runbook: docs/runbooks/identity-monitoring.md
+
+      - alert: ArgusAuthServiceTargetDown
+        expr: up{job="argus-auth-service"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Auth service metrics target is down
+          runbook: docs/runbooks/identity-monitoring.md
+
+      - alert: ArgusIdentityRedisUnavailable
+        expr: max by (region) (argus_bff_dependency_up{dependency="redis"}) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis Session dependency is unavailable in {{ $labels.region }}
+          runbook: docs/runbooks/identity-monitoring.md
+
+      - alert: ArgusIdentityNoHealthyRedisRegion
+        expr: sum(max by (region) (argus_bff_dependency_up{dependency="redis"})) < 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: No identity region reports a healthy Redis Session dependency
+          runbook: docs/runbooks/multi-region-auth-drill.md
+
+  - name: argus-identity-security
+    rules:
+      - alert: ArgusIdentitySystemErrorRatioHigh
+        expr: |
+          (
+            sum(rate(argus_bff_auth_attempts_total{outcome="error"}[5m]))
+            /
+            clamp_min(sum(rate(argus_bff_auth_attempts_total[5m])), 0.01)
+          ) > 0.05
+          and sum(rate(argus_bff_auth_attempts_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: More than 5% of authentication attempts are failing with system errors
+          runbook: docs/runbooks/identity-monitoring.md
+
+      - alert: ArgusIdentityRejectedAttemptsHigh
+        expr: sum by (region, flow) (rate(argus_bff_auth_attempts_total{outcome="rejected"}[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Elevated rejected {{ $labels.flow }} attempts in {{ $labels.region }}
+          runbook: docs/runbooks/identity-monitoring.md
+
+      - alert: ArgusIdentityUpstreamLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, region, service) (rate(argus_bff_upstream_request_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Identity upstream p95 exceeds one second in {{ $labels.region }}
+          runbook: docs/runbooks/identity-monitoring.md
+
+      - alert: ArgusIdentityEncryptedRecordRejected
+        expr: increase(argus_bff_encrypted_record_events_total{event="rejected"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: An encrypted {{ $labels.store }} record failed validation or decryption
+          runbook: docs/runbooks/identity-key-rotation.md
+
+      - alert: ArgusIdentityDependencyErrors
+        expr: increase(argus_bff_dependency_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Identity dependency errors detected for {{ $labels.dependency }}
+          runbook: docs/runbooks/identity-monitoring.md
+
+  - name: argus-identity-certificates
+    rules:
+      - alert: ArgusBffWorkloadCertificateExpiresSoon
+        expr: argus_bff_tls_certificate_expiry_timestamp_seconds - time() < 7 * 24 * 60 * 60
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: BFF {{ $labels.certificate }} certificate expires in less than seven days
+          runbook: infra/tls/README.md
+
+      - alert: ArgusAuthCertificateExpiresSoon
+        expr: argus_identity_tls_certificate_expiry_timestamp_seconds - time() < 7 * 24 * 60 * 60
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: Auth-service TLS certificate expires in less than seven days
+          runbook: infra/tls/README.md

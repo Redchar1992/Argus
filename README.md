@@ -88,7 +88,7 @@ Full detail: [`docs/architecture.md`](docs/architecture.md).
 ```bash
 cd backend
 mvn -q -DskipTests package      # build all 5 modules
-mvn -q test                     # 51 tests (identity/RBAC, tools, agent loop, security)
+mvn -q test                     # 52 tests (identity/RBAC, tools, agent loop, security)
 ```
 
 Run the three Java services needed for the authenticated analyst demo (they default to in-memory stores —
@@ -192,8 +192,8 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                   # 39 pass; 4 real-Redis tests skip
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 43/43 incl. replicas + key rotation
+npm ci && npm run build && npm test                   # 42 pass; 4 real-Redis tests skip
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 46/46 incl. replicas + key rotation
 
 cd ../frontend/analyst-console
 npm ci && npm run build && npm run test:unit        # 13 reducer/RTL lifecycle tests
@@ -208,6 +208,24 @@ CI uses `npm ci`, runs the BFF suite against a Redis 7 service, runs both fronte
 layers, and installs Chromium for four Playwright journeys. Playwright starts the BFF
 with its explicit test-only deterministic upstream; production startup refuses mock mode,
 insecure cookies and the memory Session store.
+
+### Identity monitoring
+
+The BFF exports token-protected Prometheus metrics at `/metrics`, liveness at `/health` and
+Redis-aware readiness at `/ready`. Auth-service exposes Micrometer metrics at
+`/actuator/prometheus` plus liveness/readiness probes; production reaches that listener only
+through mTLS. Metrics use bounded route/flow/outcome/region labels and never user, Session,
+credential or token values. To run the local Prometheus fixture:
+
+```bash
+docker compose --profile monitoring up -d prometheus
+open http://localhost:9090
+```
+
+The fixture includes 11 alert rules for target/dependency outages, authentication error ratio,
+rejection spikes, upstream p95 latency, encrypted-record failures and certificate expiry. See
+[`docs/runbooks/identity-monitoring.md`](docs/runbooks/identity-monitoring.md) for production
+scrape controls and triage.
 
 ---
 
@@ -251,6 +269,10 @@ insecure cookies and the memory Session store.
   users. Java TOTP envelopes rotate after successful use or through a bounded ADMIN drain
   endpoint, so dormant accounts do not pin retired keys forever. See
   [`docs/runbooks/identity-key-rotation.md`](docs/runbooks/identity-key-rotation.md).
+- **Identity observability:** Node and Java export auth outcomes, route/upstream latency,
+  dependency state, key migration and workload-certificate expiry with region labels but no PII.
+  Separate liveness/readiness endpoints, a pinned Prometheus fixture and executable alert rules
+  cover outage, latency, decrypt-failure and expiry signals.
 - **Explicit frontend state model:** a TypeScript discriminated union/reducer models
   `checking → anonymous → authenticating/authenticating_passkey → authenticated → signingOut/expired/error`.
   The route guard never renders investigation data for an anonymous/expired state, and a
@@ -276,8 +298,8 @@ insecure cookies and the memory Session store.
 **Scaffolded / simplified / TODO (called out so nothing is oversold):**
 - Memory Session/rate-limit state remains the convenient development default. Production now
   refuses it and requires the implemented authenticated `rediss://` path. Online encryption-key
-  rotation is implemented, while a real deployment still needs managed certificate/ACL lifecycle,
-  eviction/availability metrics, backup policy and a tested regional outage strategy.
+  rotation and live dependency/availability metrics are implemented, while a real deployment
+  still needs managed certificate/ACL lifecycle, backup policy and a tested regional outage strategy.
 - OIDC Authorization Code + PKCE, TOTP MFA, one-time offline recovery codes and Passkeys are implemented,
   including encrypted server-side pre-authentication state, replay counters, attempt lockout,
   MFA fallback, password reset and discoverable passwordless credentials. Refresh-token

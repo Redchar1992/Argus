@@ -11,6 +11,7 @@ import com.argus.auth.dto.AuthDtos.TotpSetupResponse;
 import com.argus.auth.model.AuthenticationChallenge;
 import com.argus.auth.model.MfaMethod;
 import com.argus.auth.model.UserAccount;
+import com.argus.auth.observability.IdentityMetrics;
 import com.argus.auth.repository.AuthenticationChallengeRepository;
 import com.argus.auth.repository.UserAccountRepository;
 import com.argus.auth.security.IdentitySecretCipher;
@@ -47,6 +48,7 @@ public class MfaService {
     private final TotpService totp;
     private final JwtService jwtService;
     private final RecoveryService recoveryService;
+    private final IdentityMetrics metrics;
     private final SecureRandom random = new SecureRandom();
     private final long challengeTtlSeconds;
     private final long enrollmentTtlSeconds;
@@ -58,6 +60,7 @@ public class MfaService {
                       TotpService totp,
                       JwtService jwtService,
                       RecoveryService recoveryService,
+                      IdentityMetrics metrics,
                       @Value("${argus.mfa.challenge-ttl-seconds:300}") long challengeTtlSeconds,
                       @Value("${argus.mfa.enrollment-ttl-seconds:600}") long enrollmentTtlSeconds,
                       @Value("${argus.mfa.maximum-attempts:5}") int maximumAttempts) {
@@ -67,6 +70,7 @@ public class MfaService {
         this.totp = totp;
         this.jwtService = jwtService;
         this.recoveryService = recoveryService;
+        this.metrics = metrics;
         this.challengeTtlSeconds = challengeTtlSeconds;
         this.enrollmentTtlSeconds = enrollmentTtlSeconds;
         this.maximumAttempts = maximumAttempts;
@@ -100,6 +104,7 @@ public class MfaService {
         if (counter.isEmpty()) throw new ResponseStatusException(UNAUTHORIZED, "Invalid verification code");
         if (cipher.needsRotation(user.getPendingTotpSecretEncrypted())) {
             user.rotatePendingTotpSecret(cipher.encrypt(secret));
+            metrics.recordKeyRotation("lazy");
         }
         user.confirmTotpEnrollment(counter.getAsLong(), now);
         UserAccount saved = users.save(user);
@@ -186,6 +191,7 @@ public class MfaService {
                 rotated++;
             }
         }
+        metrics.recordKeyRotation("batch", rotated);
         return new IdentityKeyRotationResponse(cipher.primaryKeyId(), candidates.size(), rotated);
     }
 
@@ -231,6 +237,7 @@ public class MfaService {
         OptionalLong accepted = totp.verify(secret, code, lastCounter);
         if (accepted.isPresent() && cipher.needsRotation(envelope)) {
             user.rotateTotpSecret(cipher.encrypt(secret));
+            metrics.recordKeyRotation("lazy");
         }
         return accepted;
     }

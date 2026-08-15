@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope, type OpenedValue } from './encryption-keyring.js';
+import type { EncryptedStoreObserver } from './metrics.js';
 import type { AuthUser, ServerSession, SessionRepository } from './session-store.js';
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -67,6 +68,7 @@ export class RedisSessionStore implements SessionRepository {
     encryption: Buffer | EncryptionKeyRing,
     private readonly maximumTtlSeconds: number,
     private readonly now: () => number = Date.now,
+    private readonly observer?: EncryptedStoreObserver,
   ) {
     this.encryption = keyRing(encryption);
   }
@@ -120,6 +122,7 @@ export class RedisSessionStore implements SessionRepository {
           ...stored,
           token: this.encrypt(opened.plaintext, id),
         } satisfies StoredSession));
+        this.observer?.recordKeyRotation('session');
       }
       return {
         id,
@@ -129,6 +132,7 @@ export class RedisSessionStore implements SessionRepository {
       };
     } catch {
       // Corrupt or tampered records are never treated as authenticated.
+      this.observer?.recordRejectedRecord('session');
       await this.redis.del(this.key(id));
       return undefined;
     }

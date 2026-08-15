@@ -43,6 +43,8 @@ const config: AppConfig = {
   webauthnOrigin: ORIGIN,
   webauthnCeremonyTtlSeconds: 300,
   internalBffSecret: 'argus-dev-internal-bff-secret-change-me',
+  region: 'test-region',
+  metricsEnabled: true,
   logger: false,
 };
 
@@ -184,6 +186,49 @@ class PasskeyUpstream extends MockUpstreamClient {
 }
 
 describe('identity BFF', () => {
+  it('exposes token-protected, PII-free metrics and dependency readiness', async () => {
+    const metricsToken = 'metrics-test-token-that-is-long-enough';
+    const { app, csrf } = await appWithCsrf(
+      { readiness: async () => undefined },
+      { metricsToken },
+    );
+    const login = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/login',
+      headers: { ...mutationHeaders(csrf), 'content-type': 'application/json' },
+      payload: { username: 'analyst', password: 'analyst12345' },
+    });
+    expect(login.statusCode).toBe(200);
+
+    expect((await app.inject({ method: 'GET', url: '/metrics' })).statusCode).toBe(401);
+    const scrape = await app.inject({
+      method: 'GET',
+      url: '/metrics',
+      headers: { authorization: `Bearer ${metricsToken}` },
+    });
+    expect(scrape.statusCode).toBe(200);
+    expect(scrape.headers['content-type']).toContain('text/plain');
+    expect(scrape.body).toContain('argus_bff_auth_attempts_total');
+    expect(scrape.body).toContain('flow="password"');
+    expect(scrape.body).toContain('outcome="authenticated"');
+    expect(scrape.body).toContain('region="test-region"');
+    expect(scrape.body).not.toContain('analyst');
+    expect(scrape.body).not.toContain('analyst12345');
+
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toMatchObject({ status: 'ready', region: 'test-region' });
+  });
+
+  it('fails readiness closed without failing liveness', async () => {
+    const { app } = await appWithCsrf({ readiness: async () => { throw new Error('redis unavailable'); } });
+    expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json()).toMatchObject({ status: 'not_ready' });
+    expect(ready.body).not.toContain('redis unavailable');
+  });
+
   it('returns a normalized anonymous response and bootstraps a CSRF cookie', async () => {
     const { app } = await appWithCsrf();
     const response = await app.inject({ method: 'GET', url: '/bff/auth/session' });

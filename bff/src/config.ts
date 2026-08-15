@@ -43,6 +43,9 @@ export interface AppConfig {
   webauthnOrigin: string;
   webauthnCeremonyTtlSeconds: number;
   internalBffSecret: string;
+  region: string;
+  metricsEnabled: boolean;
+  metricsToken?: string;
   logger: boolean;
 }
 
@@ -188,6 +191,14 @@ function rpId(value: string | undefined): string {
   return candidate.toLowerCase();
 }
 
+function regionValue(value: string | undefined): string {
+  const region = value?.trim() || 'local';
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(region)) {
+    throw new Error('ARGUS_REGION must use 1-32 letters, digits, underscores, or hyphens');
+  }
+  return region;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const production = env.NODE_ENV === 'production';
   const mockUpstream = booleanValue(env.BFF_MOCK_UPSTREAM, false);
@@ -223,6 +234,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const webauthnOrigin = origin(env.BFF_WEBAUTHN_ORIGIN, 'http://localhost:5173', 'BFF_WEBAUTHN_ORIGIN');
   const internalBffSecret = env.ARGUS_INTERNAL_BFF_SECRET?.trim()
     || 'argus-dev-internal-bff-secret-change-me';
+  const metricsEnabled = booleanValue(env.BFF_METRICS_ENABLED, true);
+  const metricsToken = env.BFF_METRICS_TOKEN?.trim() || undefined;
   if (production && mockUpstream) {
     throw new Error('BFF_MOCK_UPSTREAM cannot be enabled in production');
   }
@@ -282,6 +295,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (internalBffSecret === 'argus-dev-internal-bff-secret-change-me') {
       throw new Error('ARGUS_INTERNAL_BFF_SECRET must be changed in production');
     }
+  }
+  if (metricsToken && (metricsToken.length < 32 || metricsToken.length > 256)) {
+    throw new Error('BFF_METRICS_TOKEN must be between 32 and 256 characters');
+  }
+  if (production && metricsEnabled && !metricsToken) {
+    throw new Error('BFF_METRICS_TOKEN is required when production metrics are enabled');
   }
   const oidcScopes = (env.BFF_OIDC_SCOPES ?? 'openid profile email').trim();
   if (oidcEnabled && !oidcScopes.split(/\s+/).includes('openid')) {
@@ -349,6 +368,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       'BFF_WEBAUTHN_CEREMONY_TTL_SECONDS',
     ),
     internalBffSecret,
+    region: regionValue(env.ARGUS_REGION),
+    metricsEnabled,
+    ...(metricsToken ? { metricsToken } : {}),
     logger: booleanValue(env.BFF_LOGGER, production),
   };
 }

@@ -128,6 +128,26 @@ removed only after the drain reports zero, the longest BFF record TTL has elapse
 region reports the new primary. The executable order and rollback rules live in
 [`runbooks/identity-key-rotation.md`](runbooks/identity-key-rotation.md).
 
+### Identity monitoring
+
+Every identity instance carries a validated `ARGUS_REGION` label. The Node BFF exposes a
+production-token-protected `/metrics`, process metrics, bounded HTTP route-template latency,
+authentication outcomes, Session events, upstream latency/outcomes, Redis/auth dependency state,
+encrypted-record rotation/rejection events and local workload-certificate expiry. `/health` is
+liveness-only; `/ready` pings Redis in shared-store mode and returns 503 without leaking the
+dependency error.
+
+Auth-service uses Micrometer/Prometheus for JVM, HTTP and custom password/OIDC/MFA/recovery/
+Passkey outcomes, TOTP key migration and TLS server-certificate expiry. Actuator liveness,
+readiness and Prometheus endpoints share the production mTLS listener. No telemetry label accepts
+username, email, subject, Session/credential ID, token, code, request ID or raw URL.
+
+The local Prometheus profile loads 11 validated alert rules for regional/target failure, system
+error ratio, rejection spikes, upstream p95, dependency errors, encrypted-record rejection and
+certificate expiry. Production replaces static local targets with service discovery, secret-file
+credentials, durable storage and Alertmanager routing; the response sequence is documented in
+[`runbooks/identity-monitoring.md`](runbooks/identity-monitoring.md).
+
 ### OIDC Authorization Code + PKCE
 
 The optional OIDC path uses provider discovery, a fresh state, nonce and S256 PKCE verifier
@@ -266,6 +286,7 @@ data at that deadline even when the user makes no further API request.
 | Internal credential interception | Production BFF→auth requires mutually authenticated TLS and hostname/CA validation; auth-service refuses optional client auth |
 | Redis network/anonymous access | Production requires `rediss://` plus ACL password; CA validation is mandatory and Redis client certificates are supported |
 | Encryption-key compromise/retirement | Versioned key rings support overlap; live Sessions and TOTP seeds re-encrypt online, with a bounded ADMIN drain for dormant accounts |
+| Blind identity outage or telemetry leak | Region-labelled, low-cardinality Prometheus metrics; readiness probes and alert rules; explicit ban on identity/credential values in labels |
 
 React's normal text rendering provides output escaping for investigation data. No code uses
 `dangerouslySetInnerHTML`. XSS is not "solved" by cookies: a same-origin script could still
@@ -288,8 +309,8 @@ These are limitations, not hidden features:
 
 1. The Redis implementation is real and two-instance tested. Production transport enforces
    `rediss://` plus authentication and supports mTLS. Online record-key rotation is implemented;
-   deployment still needs managed certificate/ACL lifecycle, eviction/availability metrics and
-   a regional outage policy.
+   availability/decrypt/certificate metrics and alert rules are implemented; deployment still
+   needs managed certificate/ACL lifecycle, durable metrics/Alertmanager and a regional outage policy.
 2. Password/OIDC login, TOTP MFA, offline-code recovery and Passkeys are real. Refresh-token
    rotation and provider-specific account-linking policy are not implemented yet.
 3. BFF→auth-service mTLS is implemented. Public ingress TLS termination and the SPA document CSP
@@ -303,7 +324,7 @@ These are limitations, not hidden features:
 
 ## Test evidence
 
-- `bff/test`: 43 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
+- `bff/test`: 46 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
   the suite checks encrypted-at-rest Session records, tamper/copy rejection, Redis TTL,
   one-time encrypted OIDC transactions, replay rejection, two-instance Session restore/logout,
   encrypted MFA/WebAuthn pre-authentication state, cross-replica one-time consumption,

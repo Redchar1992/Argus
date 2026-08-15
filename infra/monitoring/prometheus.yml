@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+
+rule_files:
+  - /etc/prometheus/identity-alerts.yml
+
+scrape_configs:
+  # Local fixture: the BFF is bound on the host and leaves its metrics token unset.
+  # Production uses HTTPS, bearer_token_file and service discovery instead.
+  - job_name: argus-identity-bff
+    metrics_path: /metrics
+    static_configs:
+      - targets: [host.docker.internal:3001]
+
+  # Local fixture uses plain HTTP. Production auth-service requires a Prometheus
+  # client certificate signed by the workload CA.
+  - job_name: argus-auth-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: [host.docker.internal:8081]

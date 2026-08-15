@@ -128,11 +128,16 @@ describe('RedisSessionStore', () => {
     expect(before.token.kid).toBe('old');
 
     const rotatingRing = new EncryptionKeyRing('new', new Map([['old', oldKey], ['new', newKey]]));
-    const rotatingStore = new RedisSessionStore(redis, rotatingRing, 300);
+    const events: string[] = [];
+    const rotatingStore = new RedisSessionStore(redis, rotatingRing, 300, Date.now, {
+      recordKeyRotation: (store) => events.push(`rotated:${store}`),
+      recordRejectedRecord: (store) => events.push(`rejected:${store}`),
+    });
     await expect(rotatingStore.get(session.id)).resolves.toEqual(session);
     const after = JSON.parse(redis.values.get(redisKey)!) as { token: { kid?: string; ciphertext: string } };
     expect(after.token.kid).toBe('new');
     expect(after.token.ciphertext).not.toBe(before.token.ciphertext);
+    expect(events).toEqual(['rotated:session']);
 
     const newOnly = new RedisSessionStore(
       redis,

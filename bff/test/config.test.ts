@@ -12,6 +12,7 @@ const SECURE_PRODUCTION = {
   BFF_REDIS_PASSWORD: 'production-redis-password',
   BFF_ENCRYPTION_PRIMARY_KEY_ID: 'prod-v2',
   BFF_ENCRYPTION_KEYS: `prod-v2:${Buffer.alloc(32, 7).toString('base64')}`,
+  BFF_METRICS_TOKEN: 'production-metrics-token-1234567890',
 };
 
 describe('production configuration safeguards', () => {
@@ -88,6 +89,7 @@ describe('production configuration safeguards', () => {
     expect(config.webauthnOrigin).toBe('https://argus.example');
     expect(config.authMtlsEnabled).toBe(true);
     expect(config.redisPassword).toBe('production-redis-password');
+    expect(config.metricsToken).toBe('production-metrics-token-1234567890');
   });
 
   it('requires mTLS to auth-service and authenticated rediss in production', () => {
@@ -142,6 +144,17 @@ describe('production configuration safeguards', () => {
       BFF_OIDC_CLIENT_ID: 'argus',
       BFF_OIDC_REDIRECT_URI: 'https://argus.example/bff/auth/oidc/callback',
     })).toThrow('OIDC issuer and redirect URI must use https in production');
+  });
+
+  it('requires protected metrics in production and validates the region label', () => {
+    expect(() => loadConfig({ ...SECURE_PRODUCTION, BFF_PASSKEY_ENABLED: 'false', BFF_METRICS_TOKEN: undefined })).toThrow(
+      'BFF_METRICS_TOKEN is required when production metrics are enabled',
+    );
+    expect(() => loadConfig({ BFF_METRICS_TOKEN: 'short' })).toThrow(
+      'BFF_METRICS_TOKEN must be between 32 and 256 characters',
+    );
+    expect(() => loadConfig({ ARGUS_REGION: 'invalid region!' })).toThrow('ARGUS_REGION must use');
+    expect(loadConfig({ BFF_METRICS_ENABLED: 'false' }).metricsEnabled).toBe(false);
   });
 
   it('rejects an OIDC scope without openid and external post-login redirects', () => {

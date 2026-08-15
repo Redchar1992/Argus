@@ -49,10 +49,19 @@ argus:
     bff-secret: ${ARGUS_INTERNAL_BFF_SECRET:argus-dev-internal-bff-secret-change-me}
 
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
+  metrics:
+    tags:
+      service: auth-service
+      region: ${ARGUS_REGION:local}
 
 ---
 spring:

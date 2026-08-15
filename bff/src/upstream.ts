@@ -3,6 +3,7 @@ import type { AppConfig } from './config.js';
 import { UpstreamError } from './errors.js';
 import type { AuthUser, Role } from './session-store.js';
 import type { MfaMethod } from './mfa-challenge-store.js';
+import type { IdentityMetrics } from './metrics.js';
 import { AuthenticatedHttpsTransport, type TransportResponse } from './authenticated-https.js';
 import type {
   PasskeyMaterial,
@@ -75,7 +76,7 @@ async function parseResponse(response: Response | TransportResponse): Promise<un
 export class HttpUpstreamClient implements UpstreamClient {
   private readonly authTransport?: AuthenticatedHttpsTransport;
 
-  constructor(private readonly config: AppConfig) {
+  constructor(private readonly config: AppConfig, private readonly metrics?: IdentityMetrics) {
     this.authTransport = config.authMtlsEnabled ? new AuthenticatedHttpsTransport(config) : undefined;
   }
 
@@ -395,6 +396,14 @@ export class HttpUpstreamClient implements UpstreamClient {
   }
 
   private async request(url: string, init: RequestInit, purpose: 'login' | 'api'): Promise<unknown> {
+    const started = performance.now();
+    const service = new URL(url).origin === new URL(this.config.authBaseUrl).origin ? 'auth' : 'investigation';
+    let recorded = false;
+    const record = (outcome: 'success' | 'rejected' | 'timeout' | 'unavailable'): void => {
+      if (recorded) return;
+      recorded = true;
+      this.metrics?.observeUpstream(service, purpose, outcome, (performance.now() - started) / 1_000);
+    };
     let response: Response | TransportResponse;
     try {
       response = this.authTransport && new URL(url).origin === new URL(this.config.authBaseUrl).origin
@@ -405,18 +414,38 @@ export class HttpUpstreamClient implements UpstreamClient {
           });
     } catch (error) {
       if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+        record('timeout');
+        if (service === 'auth') {
+          this.metrics?.setDependency('auth', false);
+          this.metrics?.recordDependencyError('auth');
+        }
         throw new UpstreamError(504, 'timeout', 'The upstream service timed out');
+      }
+      record('unavailable');
+      if (service === 'auth') {
+        this.metrics?.setDependency('auth', false);
+        this.metrics?.recordDependencyError('auth');
       }
       throw new UpstreamError(502, 'unavailable', 'The upstream service is unavailable');
     }
 
-    const data = await parseResponse(response);
+    if (service === 'auth') this.metrics?.setDependency('auth', true);
+    let data: unknown;
+    try {
+      data = await parseResponse(response);
+    } catch {
+      record('unavailable');
+      if (service === 'auth') this.metrics?.recordDependencyError('auth');
+      throw new UpstreamError(502, 'unavailable', 'The upstream service returned an unreadable response');
+    }
     if (!response.ok) {
+      record('rejected');
       if (purpose === 'login' && response.status === 401) {
         throw new UpstreamError(401, 'rejected', 'Invalid username or password');
       }
       throw new UpstreamError(response.status, 'rejected', 'The upstream service rejected the request');
     }
+    record('success');
     return data;
   }
 }

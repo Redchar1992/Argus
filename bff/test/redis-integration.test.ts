@@ -45,6 +45,8 @@ const config: AppConfig = {
   webauthnOrigin: ORIGIN,
   webauthnCeremonyTtlSeconds: 300,
   internalBffSecret: 'argus-dev-internal-bff-secret-change-me',
+  region: 'redis-test',
+  metricsEnabled: true,
   logger: false,
 };
 
@@ -91,6 +93,16 @@ redisDescribe('Redis-backed BFF integration', () => {
     const appA = await buildApp(config, await createRuntimeDependencies(config));
     const appB = await buildApp(config, await createRuntimeDependencies(config));
     apps.push(appA, appB);
+
+    const metrics = await appA.inject({ method: 'GET', url: '/metrics' });
+    expect(metrics.statusCode).toBe(200);
+    expect(metrics.body).toContain('argus_bff_dependency_up');
+    expect(metrics.body).toContain('dependency="redis"');
+    expect(metrics.body).toContain('region="redis-test"');
+    if (process.env.BFF_REDIS_TLS_CERT_FILE) {
+      expect(metrics.body).toContain('argus_bff_tls_certificate_expiry_timestamp_seconds');
+      expect(metrics.body).toContain('certificate="redis_client"');
+    }
 
     const bootstrap = await appA.inject({ method: 'GET', url: '/bff/auth/session' });
     const csrf = cookieValue(bootstrap.headers['set-cookie'], 'argus_csrf');

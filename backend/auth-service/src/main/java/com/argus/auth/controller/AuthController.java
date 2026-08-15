@@ -23,6 +23,7 @@ import com.argus.auth.dto.AuthDtos.PasskeyView;
 import com.argus.auth.dto.AuthDtos.IdentityKeyRotationResponse;
 import com.argus.auth.dto.AuthDtos.UserView;
 import com.argus.auth.security.JwtService;
+import com.argus.auth.observability.IdentityMetrics;
 import com.argus.auth.service.AuthService;
 import com.argus.auth.service.MfaService;
 import com.argus.auth.service.RecoveryService;
@@ -59,31 +60,37 @@ public class AuthController {
     private final RecoveryService recoveryService;
     private final PasskeyService passkeyService;
     private final InternalBffAuth internalBffAuth;
+    private final IdentityMetrics metrics;
 
     public AuthController(AuthService authService, JwtService jwtService, MfaService mfaService,
                           RecoveryService recoveryService, PasskeyService passkeyService,
-                          InternalBffAuth internalBffAuth) {
+                          InternalBffAuth internalBffAuth, IdentityMetrics metrics) {
         this.authService = authService;
         this.jwtService = jwtService;
         this.mfaService = mfaService;
         this.recoveryService = recoveryService;
         this.passkeyService = passkeyService;
         this.internalBffAuth = internalBffAuth;
+        this.metrics = metrics;
     }
 
     @PostMapping("/login")
     public AuthenticationResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request.username(), request.password());
+        return metrics.primaryAuthentication("password",
+                () -> authService.login(request.username(), request.password()));
     }
 
     @PostMapping("/oidc/login")
     public AuthenticationResponse oidcLogin(@Valid @RequestBody OidcLoginRequest request) {
-        return authService.oidcLogin(request.idToken(), request.nonce());
+        return metrics.primaryAuthentication("oidc",
+                () -> authService.oidcLogin(request.idToken(), request.nonce()));
     }
 
     @PostMapping("/mfa/verify")
     public TokenResponse verifyMfa(@Valid @RequestBody MfaVerifyRequest request) {
-        return mfaService.verifyChallenge(request.challengeToken(), request.method(), request.code());
+        String flow = request.method().name().equals("TOTP") ? "mfa_totp" : "mfa_recovery";
+        return metrics.terminalAuthentication(flow, "authenticated",
+                () -> mfaService.verifyChallenge(request.challengeToken(), request.method(), request.code()));
     }
 
     @GetMapping("/mfa")
@@ -121,7 +128,8 @@ public class AuthController {
 
     @PostMapping("/recovery/complete")
     public RecoveryCompleteResponse recoverAccount(@Valid @RequestBody RecoveryCompleteRequest request) {
-        return recoveryService.complete(request.username(), request.recoveryCode(), request.newPassword());
+        return metrics.terminalAuthentication("recovery", "recovered",
+                () -> recoveryService.complete(request.username(), request.recoveryCode(), request.newPassword()));
     }
 
     @GetMapping("/passkeys")
@@ -166,7 +174,8 @@ public class AuthController {
             @RequestHeader(value = "X-Argus-Bff-Secret", required = false) String internalSecret,
             @Valid @RequestBody PasskeyAuthenticationCompleteRequest request) {
         internalBffAuth.require(internalSecret);
-        return passkeyService.completeAuthentication(request);
+        return metrics.terminalAuthentication("passkey", "authenticated",
+                () -> passkeyService.completeAuthentication(request));
     }
 
     @PostMapping("/register")

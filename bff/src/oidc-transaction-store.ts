@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { OidcTransaction } from './oidc.js';
 import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope } from './encryption-keyring.js';
+import type { EncryptedStoreObserver } from './metrics.js';
 
 const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const VALUE_PATTERN = /^[A-Za-z0-9._~-]{32,256}$/;
@@ -65,6 +66,7 @@ export class RedisOidcTransactionStore implements OidcTransactionRepository {
     encryption: Buffer | EncryptionKeyRing,
     private readonly ttlSeconds: number,
     private readonly now: () => number = Date.now,
+    private readonly observer?: EncryptedStoreObserver,
   ) {
     this.encryption = keyRing(encryption);
   }
@@ -87,6 +89,7 @@ export class RedisOidcTransactionStore implements OidcTransactionRepository {
       if (!validTransaction(transaction) || transaction.expiresAt <= this.now()) return undefined;
       return transaction;
     } catch {
+      this.observer?.recordRejectedRecord('oidc');
       return undefined;
     }
   }

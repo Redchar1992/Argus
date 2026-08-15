@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { EncryptionKeyRing, keyRing, type KeyedAesGcmEnvelope } from './encryption-keyring.js';
+import type { EncryptedStoreObserver } from './metrics.js';
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{32,256}$/;
@@ -104,6 +105,7 @@ export class RedisWebAuthnCeremonyStore implements WebAuthnCeremonyRepository {
     encryption: Buffer | EncryptionKeyRing,
     private readonly maximumTtlSeconds: number,
     private readonly now: () => number = Date.now,
+    private readonly observer?: EncryptedStoreObserver,
   ) {
     this.cipher = new CeremonyCipher(encryption);
   }
@@ -128,6 +130,7 @@ export class RedisWebAuthnCeremonyStore implements WebAuthnCeremonyRepository {
       const ceremony = this.cipher.open(id, raw);
       return valid(ceremony) && ceremony.expiresAt > this.now() ? ceremony : undefined;
     } catch {
+      this.observer?.recordRejectedRecord('webauthn');
       return undefined;
     }
   }

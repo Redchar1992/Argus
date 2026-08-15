@@ -1,4 +1,4 @@
-# Argus local infrastructure: Postgres (SQL), Mongo (NoSQL trace store), Redis.
+# Argus local infrastructure: Postgres (SQL), Mongo (NoSQL trace store), Redis, and opt-in Prometheus.
 #
 # Quick start (databases only — services run from your IDE / java -jar):
 #   docker compose up -d postgres mongo redis
@@ -94,7 +94,30 @@ services:
       timeout: 5s
       retries: 10
 
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.13.1
+    container_name: argus-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/identity-alerts.yml:/etc/prometheus/identity-alerts.yml:ro
+      - argus-prometheus:/prometheus
+    healthcheck:
+      test: ["CMD", "promtool", "check", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   argus-pg:
   argus-mongo:
   argus-redis-secure:
+  argus-prometheus:

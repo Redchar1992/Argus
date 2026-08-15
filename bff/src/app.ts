@@ -10,6 +10,7 @@ import {
   type MfaChallengeRepository,
   type MfaMethod,
 } from './mfa-challenge-store.js';
+import { IdentityMetrics, type AuthFlow, type AuthOutcome } from './metrics.js';
 import type { OidcRelyingParty } from './oidc.js';
 import {
   MemoryOidcTransactionStore,
@@ -90,6 +91,8 @@ export interface AppDependencies {
   mfaChallenges?: MfaChallengeRepository;
   passkeys?: PasskeyCeremonies;
   webauthnCeremonies?: WebAuthnCeremonyRepository;
+  metrics?: IdentityMetrics;
+  readiness?: () => Promise<void>;
   close?: () => Promise<void>;
 }
 
@@ -103,11 +106,31 @@ function constantTimeEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function authenticationFlow(request: FastifyRequest, route: string): AuthFlow | undefined {
+  if (route === '/bff/auth/login') return 'password';
+  if (route === '/bff/auth/oidc/callback') return 'oidc';
+  if (route === '/bff/auth/recovery/complete') return 'recovery';
+  if (route === '/bff/auth/passkeys/authentication/verify') return 'passkey';
+  if (route === '/bff/auth/mfa/verify') {
+    const method = (request.body as { method?: unknown } | undefined)?.method;
+    return method === 'TOTP' ? 'mfa_totp' : method === 'RECOVERY_CODE' ? 'mfa_recovery' : 'mfa_unknown';
+  }
+  return undefined;
+}
+
+function authErrorOutcome(error: unknown): AuthOutcome {
+  if (error instanceof AppError || error instanceof UpstreamError) {
+    return error.status < 500 ? 'rejected' : 'error';
+  }
+  return 'error';
+}
+
 export async function buildApp(config: AppConfig, dependencies: AppDependencies = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: config.logger, bodyLimit: 32 * 1024 });
+  const metrics = dependencies.metrics ?? new IdentityMetrics(config.region);
   const sessions = dependencies.sessions ?? new SessionStore(config.sessionTtlSeconds);
   const upstream =
-    dependencies.upstream ?? (config.mockUpstream ? new MockUpstreamClient() : new HttpUpstreamClient(config));
+    dependencies.upstream ?? (config.mockUpstream ? new MockUpstreamClient() : new HttpUpstreamClient(config, metrics));
   const oidc = dependencies.oidc;
   const oidcTransactions = dependencies.oidcTransactions ?? new MemoryOidcTransactionStore();
   const mfaChallenges = dependencies.mfaChallenges ?? new MemoryMfaChallengeStore();
@@ -115,6 +138,14 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   const webauthnCeremonies = dependencies.webauthnCeremonies ?? new MemoryWebAuthnCeremonyStore();
   if (config.oidcEnabled && !oidc) throw new Error('OIDC is enabled but no relying party was configured');
   const requestSessions = new WeakMap<FastifyRequest, ServerSession>();
+  const requestStartedAt = new WeakMap<FastifyRequest, number>();
+  const recordedAuthAttempts = new WeakSet<FastifyRequest>();
+
+  function recordAuthentication(request: FastifyRequest, flow: AuthFlow, outcome: AuthOutcome): void {
+    if (recordedAuthAttempts.has(request)) return;
+    recordedAuthAttempts.add(request);
+    metrics.recordAuth(flow, outcome);
+  }
 
   await app.register(cookie);
   await app.register(helmet);
@@ -124,6 +155,23 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     nameSpace: 'argus:bff:login-rate:',
     // Authentication must fail closed when the shared limiter is unavailable.
     skipOnError: false,
+  });
+
+  app.addHook('onRequest', async (request) => {
+    requestStartedAt.set(request, performance.now());
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    const started = requestStartedAt.get(request);
+    const route = typeof request.routeOptions.url === 'string' && request.routeOptions.url.length <= 160
+      ? request.routeOptions.url : 'unmatched';
+    if (started !== undefined) {
+      metrics.observeHttp(request.method, route, reply.statusCode, (performance.now() - started) / 1_000);
+    }
+    if (!recordedAuthAttempts.has(request)) {
+      const flow = authenticationFlow(request, route);
+      if (flow) metrics.recordAuth(flow, reply.statusCode >= 500 ? 'error' : 'rejected');
+    }
   });
 
   if (dependencies.close) {
@@ -264,6 +312,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     const session = await currentSession(request);
     if (!session) {
       const hadCookie = Boolean(request.cookies[SESSION_COOKIE]);
+      metrics.recordSession(hadCookie ? 'expired' : 'missing');
       clearSessionCookie(reply);
       throw new AppError(
         401,
@@ -286,6 +335,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     } catch (error) {
       if (error instanceof UpstreamError && error.status === 401) {
         await sessions.delete(session.id);
+        metrics.recordSession('expired');
         clearSessionCookie(reply);
         throw new AppError(401, 'SESSION_EXPIRED', 'Your session expired. Sign in again.');
       }
@@ -328,6 +378,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       { username: result.username, role: result.role },
       result.expiresInSeconds,
     );
+    metrics.recordSession('created');
     setSessionCookie(reply, session);
     ensureCsrf(request, reply, true);
     return { state: 'authenticated', user: session.user, expiresAt: new Date(session.expiresAt).toISOString() };
@@ -339,6 +390,28 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     oidc: config.oidcEnabled ? 'enabled' : 'disabled',
     passkeys: config.passkeyEnabled ? 'enabled' : 'disabled',
   }));
+
+  app.get('/ready', async (_request, reply) => {
+    try {
+      await dependencies.readiness?.();
+      return { status: 'ready', region: config.region, sessionStore: config.sessionStore };
+    } catch {
+      return reply.code(503).send({ status: 'not_ready', region: config.region });
+    }
+  });
+
+  if (config.metricsEnabled) {
+    app.get('/metrics', async (request, reply) => {
+      if (config.metricsToken) {
+        const supplied = request.headers.authorization;
+        const expected = `Bearer ${config.metricsToken}`;
+        if (!supplied || !constantTimeEqual(supplied, expected)) {
+          return reply.code(401).header('www-authenticate', 'Bearer').send();
+        }
+      }
+      return reply.type(metrics.contentType).send(await metrics.render());
+    });
+  }
 
   if (config.oidcEnabled && oidc) {
     app.get('/bff/auth/oidc/start', async (_request, reply) => {
@@ -357,7 +430,10 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       const transactionId = request.cookies[OIDC_TRANSACTION_COOKIE];
       clearOidcTransactionCookie(reply);
       const transaction = await oidcTransactions.consume(transactionId);
-      if (!transaction) return reply.code(302).redirect(config.oidcErrorRedirect);
+      if (!transaction) {
+        recordAuthentication(request, 'oidc', 'rejected');
+        return reply.code(302).redirect(config.oidcErrorRedirect);
+      }
 
       try {
         const callbackUrl = new URL(request.url, config.oidcRedirectUri);
@@ -367,11 +443,14 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
           await sessions.delete(request.cookies[SESSION_COOKIE]);
           clearSessionCookie(reply);
           await beginMfaChallenge(request, reply, login);
+          recordAuthentication(request, 'oidc', 'mfa_required');
           return reply.code(302).redirect(config.mfaRequiredRedirect);
         }
         await establishSession(request, reply, login);
+        recordAuthentication(request, 'oidc', 'authenticated');
         return reply.code(302).redirect(config.oidcSuccessRedirect);
-      } catch {
+      } catch (error) {
+        recordAuthentication(request, 'oidc', authErrorOutcome(error));
         return reply.code(302).redirect(config.oidcErrorRedirect);
       }
     });
@@ -391,6 +470,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
         };
       }
       const hadCookie = Boolean(request.cookies[SESSION_COOKIE]);
+      metrics.recordSession(hadCookie ? 'expired' : 'missing');
       clearSessionCookie(reply);
       throw new AppError(
         401,
@@ -398,6 +478,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
         hadCookie ? 'Your session expired. Sign in again.' : 'Sign in to continue.',
       );
     }
+    metrics.recordSession('restored');
     return { state: 'authenticated', user: session.user, expiresAt: new Date(session.expiresAt).toISOString() };
   });
 
@@ -419,8 +500,13 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       clearSessionCookie(reply);
 
       const result = await upstream.login(username, password, request.id);
-      if (isMfaChallenge(result)) return beginMfaChallenge(request, reply, result);
-      return establishSession(request, reply, result);
+      if (isMfaChallenge(result)) {
+        recordAuthentication(request, 'password', 'mfa_required');
+        return beginMfaChallenge(request, reply, result);
+      }
+      const established = await establishSession(request, reply, result);
+      recordAuthentication(request, 'password', 'authenticated');
+      return established;
     },
   );
 
@@ -461,7 +547,9 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       try {
         const result = await upstream.verifyMfa(challenge.challengeToken, method, code, request.id);
         await mfaChallenges.delete(challengeId);
-        return establishSession(request, reply, result);
+        const established = await establishSession(request, reply, result);
+        recordAuthentication(request, method === 'TOTP' ? 'mfa_totp' : 'mfa_recovery', 'authenticated');
+        return established;
       } catch (error) {
         if (error instanceof UpstreamError && error.status === 401) {
           throw new AppError(401, 'INVALID_MFA_CODE', 'The verification code is invalid or expired');
@@ -519,10 +607,12 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       try {
         const result = await upstream.recoverAccount(username, recoveryCode, newPassword, request.id);
         await sessions.deleteForUser(username);
+        metrics.recordSession('user_invalidated');
         await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
         clearSessionCookie(reply);
         clearMfaChallengeCookie(reply);
         ensureCsrf(request, reply, true);
+        recordAuthentication(request, 'recovery', 'recovered');
         return result;
       } catch (error) {
         if (error instanceof UpstreamError && error.status === 401) {
@@ -669,7 +759,9 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
             verification,
             request.id,
           );
-          return establishSession(request, reply, result);
+          const established = await establishSession(request, reply, result);
+          recordAuthentication(request, 'passkey', 'authenticated');
+          return established;
         } catch (error) {
           if (error instanceof UpstreamError && error.status === 401) {
             throw new AppError(401, 'PASSKEY_AUTHENTICATION_FAILED', 'The passkey was not accepted');
@@ -682,6 +774,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
 
   app.post('/bff/auth/logout', { preHandler: verifyCsrf }, async (request, reply) => {
     await sessions.delete(request.cookies[SESSION_COOKIE]);
+    metrics.recordSession('deleted');
     await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
     clearSessionCookie(reply);
     clearMfaChallengeCookie(reply);
