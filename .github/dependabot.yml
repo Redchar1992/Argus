@@ -11,21 +11,21 @@ updates:
     groups:
       spring-release-train-patches:
         patterns:
-          - "org.springframework.boot:*"
-          - "org.springframework.cloud:*"
+          - "org.springframework.boot:spring-boot-starter-parent"
+          - "org.springframework.cloud:spring-cloud-dependencies"
         update-types: [patch]
       safe-non-major-updates:
         patterns: ["*"]
         exclude-patterns:
-          - "org.springframework.boot:*"
-          - "org.springframework.cloud:*"
+          - "org.springframework.boot:spring-boot-starter-parent"
+          - "org.springframework.cloud:spring-cloud-dependencies"
         update-types: [minor, patch]
     ignore:
       # Boot and Cloud release trains must be advanced together against the
       # official compatibility matrix. Dependabot may still propose patches.
-      - dependency-name: "org.springframework.boot:*"
+      - dependency-name: "org.springframework.boot:spring-boot-starter-parent"
         update-types: [version-update:semver-minor, version-update:semver-major]
-      - dependency-name: "org.springframework.cloud:*"
+      - dependency-name: "org.springframework.cloud:spring-cloud-dependencies"
         update-types: [version-update:semver-minor, version-update:semver-major]
       - dependency-name: "*"
         update-types: [version-update:semver-major]
