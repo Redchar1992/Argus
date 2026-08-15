@@ -4,16 +4,22 @@ import com.argus.auth.dto.AuthDtos.AssignRoleRequest;
 import com.argus.auth.dto.AuthDtos.AuthenticationResponse;
 import com.argus.auth.dto.AuthDtos.LoginRequest;
 import com.argus.auth.dto.AuthDtos.MfaStatusResponse;
+import com.argus.auth.dto.AuthDtos.MfaEnrollmentResponse;
 import com.argus.auth.dto.AuthDtos.MfaVerifyRequest;
 import com.argus.auth.dto.AuthDtos.OidcLoginRequest;
 import com.argus.auth.dto.AuthDtos.RegisterRequest;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
 import com.argus.auth.dto.AuthDtos.TotpCodeRequest;
 import com.argus.auth.dto.AuthDtos.TotpSetupResponse;
+import com.argus.auth.dto.AuthDtos.RecoveryCodesResponse;
+import com.argus.auth.dto.AuthDtos.RecoveryCompleteRequest;
+import com.argus.auth.dto.AuthDtos.RecoveryCompleteResponse;
+import com.argus.auth.dto.AuthDtos.RecoveryStatusResponse;
 import com.argus.auth.dto.AuthDtos.UserView;
 import com.argus.auth.security.JwtService;
 import com.argus.auth.service.AuthService;
 import com.argus.auth.service.MfaService;
+import com.argus.auth.service.RecoveryService;
 import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -39,11 +45,14 @@ public class AuthController {
     private final AuthService authService;
     private final JwtService jwtService;
     private final MfaService mfaService;
+    private final RecoveryService recoveryService;
 
-    public AuthController(AuthService authService, JwtService jwtService, MfaService mfaService) {
+    public AuthController(AuthService authService, JwtService jwtService, MfaService mfaService,
+                          RecoveryService recoveryService) {
         this.authService = authService;
         this.jwtService = jwtService;
         this.mfaService = mfaService;
+        this.recoveryService = recoveryService;
     }
 
     @PostMapping("/login")
@@ -72,8 +81,8 @@ public class AuthController {
     }
 
     @PostMapping("/mfa/totp/confirm")
-    public MfaStatusResponse confirmTotp(Authentication authentication,
-                                         @Valid @RequestBody TotpCodeRequest request) {
+    public MfaEnrollmentResponse confirmTotp(Authentication authentication,
+                                             @Valid @RequestBody TotpCodeRequest request) {
         return mfaService.confirmTotp(authentication.getName(), request.code());
     }
 
@@ -81,6 +90,22 @@ public class AuthController {
     public MfaStatusResponse disableTotp(Authentication authentication,
                                          @Valid @RequestBody TotpCodeRequest request) {
         return mfaService.disableTotp(authentication.getName(), request.code());
+    }
+
+    @GetMapping("/recovery")
+    public RecoveryStatusResponse recoveryStatus(Authentication authentication) {
+        return mfaService.recoveryStatus(authentication.getName());
+    }
+
+    @PostMapping("/recovery/codes/regenerate")
+    public RecoveryCodesResponse regenerateRecoveryCodes(Authentication authentication,
+                                                          @Valid @RequestBody TotpCodeRequest request) {
+        return mfaService.regenerateRecoveryCodes(authentication.getName(), request.code());
+    }
+
+    @PostMapping("/recovery/complete")
+    public RecoveryCompleteResponse recoverAccount(@Valid @RequestBody RecoveryCompleteRequest request) {
+        return recoveryService.complete(request.username(), request.recoveryCode(), request.newPassword());
     }
 
     @PostMapping("/register")

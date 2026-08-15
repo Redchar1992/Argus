@@ -35,6 +35,17 @@ export const DICT = {
   'auth.verify': { en: 'Verify', zh: '驗證' },
   'auth.verifying': { en: 'Verifying…', zh: '驗證中…' },
   'auth.useAnotherAccount': { en: 'Use another account', zh: '使用其他帳戶' },
+  'auth.recoverAccount': { en: 'Recover account', zh: '復原帳戶' },
+  'auth.recoveryTitle': { en: 'Recover your account', zh: '復原您的帳戶' },
+  'auth.recoveryIntro': {
+    en: 'Use one offline recovery code to set a new password.',
+    zh: '使用一組離線復原碼設定新密碼。',
+  },
+  'auth.newPassword': { en: 'New password', zh: '新密碼' },
+  'auth.resetPassword': { en: 'Reset password', zh: '重設密碼' },
+  'auth.recovering': { en: 'Resetting…', zh: '重設中…' },
+  'auth.backToSignIn': { en: 'Back to sign in', zh: '返回登入' },
+  'auth.recoveryFailed': { en: 'Account recovery failed.', zh: '帳戶復原失敗。' },
 
   // hero
   'hero.headline': {

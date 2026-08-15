@@ -128,6 +128,32 @@ describe('protected analyst console', () => {
     expect(String(verifyCall?.[1]?.body)).not.toContain('challengeToken');
   });
 
+  it('completes offline account recovery without putting the code in the URL', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(anonymousResponse())
+      .mockResolvedValueOnce(jsonResponse({
+        state: 'recovered',
+        message: 'Password reset. Sign in with your new password.',
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /recover account/i }));
+    await user.type(screen.getByLabelText(/username/i), 'analyst');
+    await user.type(screen.getByLabelText(/^recovery code$/i), 'ABCD-EFGH-JKLM-NPQR-STUV-WXYZ');
+    await user.type(screen.getByLabelText(/new password/i), 'replacement-password');
+    await user.click(screen.getByRole('button', { name: /reset password/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/password reset/i);
+    const recoveryCall = fetchMock.mock.calls[1];
+    expect(recoveryCall?.[0]).toBe('/bff/auth/recovery/complete');
+    expect(recoveryCall?.[1]?.method).toBe('POST');
+    expect(String(recoveryCall?.[0])).not.toContain('ABCD-EFGH');
+    expect(String(recoveryCall?.[1]?.body)).toContain('ABCD-EFGH');
+  });
+
   it('unmounts protected data at the server-declared session deadline', async () => {
     vi.stubGlobal(
       'fetch',

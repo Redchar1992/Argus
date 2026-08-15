@@ -84,6 +84,33 @@ public final class AuthDtos {
             Instant enrolledAt) {
     }
 
+    public record MfaEnrollmentResponse(
+            boolean enabled,
+            Instant enrolledAt,
+            List<String> recoveryCodes) {
+    }
+
+    public record RecoveryCompleteRequest(
+            @NotBlank @Size(max = 64) String username,
+            @NotBlank @Size(min = 24, max = 40) String recoveryCode,
+            @NotBlank @Size(min = 8, max = 128) String newPassword) {
+    }
+
+    public record RecoveryCompleteResponse(
+            String state,
+            String message) {
+    }
+
+    public record RecoveryCodesResponse(
+            List<String> recoveryCodes,
+            int remaining,
+            Instant generatedAt) {
+    }
+
+    public record RecoveryStatusResponse(
+            long remaining) {
+    }
+
     public record UserView(
             Long id,
             String username,

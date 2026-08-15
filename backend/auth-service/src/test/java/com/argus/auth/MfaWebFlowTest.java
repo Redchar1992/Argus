@@ -17,6 +17,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -89,6 +90,50 @@ class MfaWebFlowTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void recoveryCodesAreOneTimeAndCanResetAForgottenPassword() throws Exception {
+        Credentials credentials = registerAndToken("recovery-flow-user", "old-recovery-password");
+        MfaEnrollment enrollment = enroll(credentials, -1);
+        assertTrue(enrollment.recoveryCodes().size() == 10);
+        assertTrue(enrollment.recoveryCodes().stream().distinct().count() == 10);
+        assertTrue(enrollment.recoveryCodes().stream()
+                .allMatch(code -> code.matches("[A-Z2-9]{4}(?:-[A-Z2-9]{4}){5}")));
+
+        JsonNode firstChallenge = passwordLogin(credentials);
+        assertTrue(firstChallenge.path("methods").toString().contains("RECOVERY_CODE"));
+        verify(firstChallenge.path("challenge").asText(), enrollment.recoveryCodes().get(0), "RECOVERY_CODE");
+
+        String pendingChallenge = passwordLogin(credentials).path("challenge").asText();
+        mvc.perform(post("/api/auth/recovery/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "username", credentials.username(),
+                                "recoveryCode", enrollment.recoveryCodes().get(1),
+                                "newPassword", "new-recovery-password"))))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("username", credentials.username(), "password", credentials.password()))))
+                .andExpect(status().isUnauthorized());
+        JsonNode newChallenge = passwordLogin(new Credentials(
+                credentials.username(), "new-recovery-password", ""));
+        assertTrue(newChallenge.has("challenge"));
+
+        mvc.perform(post("/api/auth/mfa/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("challengeToken", pendingChallenge, "method", "RECOVERY_CODE",
+                                "code", enrollment.recoveryCodes().get(2)))))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/recovery/complete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "username", credentials.username(),
+                                "recoveryCode", enrollment.recoveryCodes().get(1),
+                                "newPassword", "another-password"))))
+                .andExpect(status().isUnauthorized());
+    }
+
     private MfaEnrollment enroll(Credentials credentials, long counterOffset) throws Exception {
         MvcResult setup = mvc.perform(post("/api/auth/mfa/totp/setup")
                         .header("Authorization", credentials.bearer()))
@@ -99,12 +144,17 @@ class MfaWebFlowTest {
         assertTrue(setupBody.path("provisioningUri").asText().startsWith("otpauth://totp/"));
 
         String confirmationCode = totp(secret, currentCounter() + counterOffset);
-        mvc.perform(post("/api/auth/mfa/totp/confirm")
+        MvcResult confirmation = mvc.perform(post("/api/auth/mfa/totp/confirm")
                         .header("Authorization", credentials.bearer())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("code", confirmationCode))))
-                .andExpect(status().isOk());
-        return new MfaEnrollment(secret);
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode confirmationBody = mapper.readTree(confirmation.getResponse().getContentAsString());
+        List<String> recoveryCodes = mapper.convertValue(
+                confirmationBody.path("recoveryCodes"),
+                mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+        return new MfaEnrollment(secret, recoveryCodes);
     }
 
     private JsonNode passwordLogin(Credentials credentials) throws Exception {
@@ -116,15 +166,21 @@ class MfaWebFlowTest {
         JsonNode body = mapper.readTree(result.getResponse().getContentAsString());
         if (body.has("challengeToken")) {
             assertFalse(body.has("token"));
-            return mapper.createObjectNode().put("challenge", body.path("challengeToken").asText());
+            return mapper.createObjectNode()
+                    .put("challenge", body.path("challengeToken").asText())
+                    .set("methods", body.path("methods"));
         }
         return mapper.createObjectNode().set("body", body);
     }
 
     private JsonNode verify(String challenge, String code) throws Exception {
+        return verify(challenge, code, "TOTP");
+    }
+
+    private JsonNode verify(String challenge, String code, String method) throws Exception {
         MvcResult result = mvc.perform(post("/api/auth/mfa/verify")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("challengeToken", challenge, "method", "TOTP", "code", code))))
+                        .content(json(Map.of("challengeToken", challenge, "method", method, "code", code))))
                 .andExpect(status().isOk())
                 .andReturn();
         return mapper.createObjectNode().set("body", mapper.readTree(result.getResponse().getContentAsString()));
@@ -191,6 +247,6 @@ class MfaWebFlowTest {
     private record Credentials(String username, String password, String bearer) {
     }
 
-    private record MfaEnrollment(String secret) {
+    private record MfaEnrollment(String secret, List<String> recoveryCodes) {
     }
 }

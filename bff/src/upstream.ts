@@ -31,6 +31,9 @@ export interface UpstreamClient {
   setupTotp(accessToken: string, requestId: string): Promise<unknown>;
   confirmTotp(accessToken: string, code: string, requestId: string): Promise<unknown>;
   disableTotp(accessToken: string, code: string, requestId: string): Promise<unknown>;
+  recoveryStatus(accessToken: string, requestId: string): Promise<unknown>;
+  regenerateRecoveryCodes(accessToken: string, totpCode: string, requestId: string): Promise<unknown>;
+  recoverAccount(username: string, recoveryCode: string, newPassword: string, requestId: string): Promise<unknown>;
   submitInvestigation(accessToken: string, body: unknown, requestId: string): Promise<unknown>;
   getInvestigation(accessToken: string, id: string, requestId: string): Promise<unknown>;
 }
@@ -113,6 +116,26 @@ export class HttpUpstreamClient implements UpstreamClient {
     return this.request(`${this.config.authBaseUrl}/api/auth/mfa/totp/disable`, {
       method: 'POST', headers: this.authHeaders(accessToken, requestId, true), body: JSON.stringify({ code }),
     }, 'api');
+  }
+
+  async recoveryStatus(accessToken: string, requestId: string): Promise<unknown> {
+    return this.request(`${this.config.authBaseUrl}/api/auth/recovery`, {
+      method: 'GET', headers: this.authHeaders(accessToken, requestId, false),
+    }, 'api');
+  }
+
+  async regenerateRecoveryCodes(accessToken: string, totpCode: string, requestId: string): Promise<unknown> {
+    return this.request(`${this.config.authBaseUrl}/api/auth/recovery/codes/regenerate`, {
+      method: 'POST', headers: this.authHeaders(accessToken, requestId, true), body: JSON.stringify({ code: totpCode }),
+    }, 'api');
+  }
+
+  async recoverAccount(username: string, recoveryCode: string, newPassword: string, requestId: string): Promise<unknown> {
+    return this.request(`${this.config.authBaseUrl}/api/auth/recovery/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-request-id': requestId },
+      body: JSON.stringify({ username, recoveryCode, newPassword }),
+    }, 'login');
   }
 
   private parseAuthenticationResult(data: unknown): AuthenticationResult {
@@ -268,6 +291,18 @@ export class MockUpstreamClient implements UpstreamClient {
 
   async disableTotp(): Promise<unknown> {
     return { enabled: false, enrolledAt: null };
+  }
+
+  async recoveryStatus(): Promise<unknown> {
+    return { remaining: 0 };
+  }
+
+  async regenerateRecoveryCodes(): Promise<unknown> {
+    return { recoveryCodes: [], remaining: 0, generatedAt: new Date(0).toISOString() };
+  }
+
+  async recoverAccount(): Promise<unknown> {
+    return { state: 'recovered', message: 'Password reset. Sign in with your new password.' };
   }
 
   async submitInvestigation(_accessToken: string, body: unknown): Promise<unknown> {

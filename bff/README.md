@@ -17,14 +17,14 @@ the service intentionally does not read a committed secret file.
 
 ```bash
 npm run build
-npm test                    # 28 deterministic tests; Redis integration skips without its URL
+npm test                    # 30 deterministic tests; Redis integration skips without its URL
 npm start                   # run compiled dist/server.js
 ```
 
 Run the real shared-store integration suite against an isolated Redis database:
 
 ```bash
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 29/29
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 32/32
 ```
 
 ## Browser contract
@@ -37,6 +37,9 @@ BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 29/29
 - `GET /bff/auth/mfa/challenge` + `POST /bff/auth/mfa/verify` — restore/complete a
   pre-authentication challenge while its backend token stays encrypted and server-side.
 - `/bff/auth/mfa/totp/*` — session-guarded TOTP setup, confirmation and disable proxy.
+- `POST /bff/auth/recovery/complete` — rate-limited offline-code password reset; the current
+  Session and pre-authentication challenge are cleared after success.
+- `/bff/auth/recovery*` — session-guarded remaining-code status and TOTP-gated regeneration.
 - `POST /bff/auth/logout` — delete the server session and clear/rotate cookies.
 - `POST /bff/api/investigations` and `GET /bff/api/investigations/:id` — guarded proxy;
   Bearer JWT is added only on the BFF-to-Java request.
@@ -55,6 +58,10 @@ requestId }` error shape. Login is rate-limited per client.
   `HttpOnly`, `SameSite=Lax` cookie binds the browser redirect to its server-side transaction.
 - MFA challenges use a separate `HttpOnly`, `SameSite=Strict` opaque cookie. The browser sees
   allowed methods and expiry, never the Java challenge token or an Argus JWT.
+- Recovery codes carry 120 bits of random material, are HMAC-hashed at rest, returned once,
+  consumed atomically, and work either as an MFA fallback or an offline password-reset proof.
+- Redis sessions maintain a hashed per-user index. Successful account recovery removes every
+  indexed browser session for that user across BFF replicas, not only the current cookie.
 
 Development defaults to an in-process `Map` and process-local limiter for a zero-infrastructure
 demo. `BFF_SESSION_STORE=redis` switches both the Session repository and login limiter to Redis:

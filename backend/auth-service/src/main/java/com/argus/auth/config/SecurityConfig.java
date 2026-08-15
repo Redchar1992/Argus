@@ -39,6 +39,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/oidc/login",
                                 "/api/auth/mfa/verify").permitAll()
+                        .requestMatchers("/api/auth/recovery/complete").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .anyRequest().authenticated())
                 // Missing/invalid credentials -> 401 (not 403). 403 is reserved for an

@@ -224,6 +224,9 @@ describe('identity BFF', () => {
       setupTotp: (...args) => mock.setupTotp(...args),
       confirmTotp: (...args) => mock.confirmTotp(...args),
       disableTotp: (...args) => mock.disableTotp(...args),
+      recoveryStatus: (...args) => mock.recoveryStatus(...args),
+      regenerateRecoveryCodes: (...args) => mock.regenerateRecoveryCodes(...args),
+      recoverAccount: (...args) => mock.recoverAccount(...args),
       submitInvestigation: (...args) => mock.submitInvestigation(...args),
       getInvestigation: async () => {
         throw new UpstreamError(401, 'rejected', 'JWT expired');
@@ -269,6 +272,9 @@ describe('identity BFF', () => {
       setupTotp: async () => undefined,
       confirmTotp: async () => undefined,
       disableTotp: async () => undefined,
+      recoveryStatus: async () => undefined,
+      regenerateRecoveryCodes: async () => undefined,
+      recoverAccount: async () => undefined,
       submitInvestigation: async () => undefined,
       getInvestigation: async () => undefined,
     };
@@ -442,5 +448,49 @@ describe('identity BFF', () => {
     });
     expect(replay.statusCode).toBe(401);
     expect(replay.json()).toMatchObject({ error: { code: 'MFA_CHALLENGE_EXPIRED' } });
+  });
+
+  it('normalizes account recovery and never echoes the offline code or new password', async () => {
+    class RecoveryUpstream extends MockUpstreamClient {
+      seen?: { username: string; code: string; password: string };
+
+      override async recoverAccount(username: string, code: string, password: string): Promise<unknown> {
+        this.seen = { username, code, password };
+        if (!code.startsWith('VALID')) throw new UpstreamError(401, 'rejected', 'Invalid recovery');
+        return { state: 'recovered', message: 'Password reset. Sign in with your new password.' };
+      }
+    }
+    const upstream = new RecoveryUpstream();
+    const sessions = new SessionStore(3_600);
+    await sessions.create('first-jwt', { username: 'analyst', role: 'ANALYST' }, 3_600);
+    await sessions.create('second-jwt', { username: 'analyst', role: 'ANALYST' }, 3_600);
+    await sessions.create('other-jwt', { username: 'other', role: 'ANALYST' }, 3_600);
+    const { app, csrf } = await appWithCsrf({ upstream, sessions });
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/recovery/complete',
+      headers: { ...mutationHeaders(csrf), 'content-type': 'application/json' },
+      payload: {
+        username: 'analyst',
+        recoveryCode: 'ABCD-EFGH-JKLM-NPQR-STUV-WXYZ',
+        newPassword: 'new-password-value',
+      },
+    });
+    expect(invalid.statusCode).toBe(401);
+    expect(invalid.json()).toMatchObject({ error: { code: 'INVALID_RECOVERY_CODE' } });
+
+    const validCode = 'VALID-EFGH-JKLM-NPQR-STUV-WXYZ';
+    const recovered = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/recovery/complete',
+      headers: { ...mutationHeaders(csrf), 'content-type': 'application/json' },
+      payload: { username: 'analyst', recoveryCode: validCode, newPassword: 'new-password-value' },
+    });
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.json()).toMatchObject({ state: 'recovered' });
+    expect(recovered.body).not.toContain(validCode);
+    expect(recovered.body).not.toContain('new-password-value');
+    expect(upstream.seen).toEqual({ username: 'analyst', code: validCode, password: 'new-password-value' });
+    expect(sessions.size).toBe(1);
   });
 });

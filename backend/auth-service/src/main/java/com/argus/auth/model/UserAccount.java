@@ -100,6 +100,10 @@ public class UserAccount {
         return passwordHash;
     }
 
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
     public String getOidcIssuer() {
         return oidcIssuer;
     }

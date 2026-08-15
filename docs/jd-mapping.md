@@ -32,10 +32,10 @@ intentionally strict: interview design knowledge is not labelled as an implement
 | **OAuth 2.0 / OIDC** | BFF Authorization Code + PKCE with discovery, state and nonce; encrypted one-time transaction store; Java re-verifies JWKS signature, issuer, audience, expiry and nonce and maps only by issuer + subject | **Built + negative tested** |
 | **WebAuthn / FIDO2 / Passkey** | Registration/authentication/recovery design in interview-prep docs | **Not implemented** |
 | **MFA / step-up** | Encrypted TOTP enrollment, confirmation and disable; password/OIDC primary auth yields an expiry-bounded, attempt-limited challenge; BFF keeps the challenge token server-side; frontend has explicit MFA states | **Built + replay/lockout tested** |
-| **Account recovery** | Offline recovery-code implementation remains the next stage; no fake email delivery | **Not implemented yet** |
+| **Account recovery** | Ten 120-bit offline codes returned once, HMAC-hashed at rest and atomically consumed; usable for MFA fallback or password reset; regeneration requires fresh TOTP | **Built + one-time/reuse tested** |
 | **Face/liveness KYC** | Argus has compliance workflows and human-review semantics, but no biometric SDK/model integration | **Not implemented** |
 
-No screen or API pretends that account recovery or Passkey already works. This avoids turning a
+No screen or API pretends that Passkey already works. This avoids turning a
 portfolio feature into a misleading security claim.
 
 ## Full-stack and product evidence

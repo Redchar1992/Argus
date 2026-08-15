@@ -1,5 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef, type ReactNode } from 'react';
-import { ApiError, getSession, login as loginRequest, logout as logoutRequest, verifyMfa } from '../api/bff';
+import {
+  ApiError,
+  getSession,
+  login as loginRequest,
+  logout as logoutRequest,
+  recoverAccount as recoverAccountRequest,
+  verifyMfa,
+} from '../api/bff';
 import { authReducer, initialAuthState, type AuthState, type MfaMethod } from './authMachine';
 
 interface AuthContextValue {
@@ -7,6 +14,7 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>;
   verifyMfa: (method: MfaMethod, code: string) => Promise<void>;
   cancelMfa: () => void;
+  recoverAccount: (username: string, recoveryCode: string, newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   retrySession: () => Promise<void>;
 }
@@ -116,6 +124,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const cancelMfa = useCallback(() => dispatch({ type: 'MFA_CANCELLED' }), []);
 
+  const recoverAccount = useCallback(async (username: string, recoveryCode: string, newPassword: string) => {
+    const result = await recoverAccountRequest(username.trim(), recoveryCode, newPassword);
+    dispatch({ type: 'NO_SESSION', message: result.message });
+  }, []);
+
   const logout = useCallback(async () => {
     dispatch({ type: 'LOGOUT_STARTED' });
     try {
@@ -128,7 +141,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  return <AuthContext.Provider value={{ state, login, verifyMfa: submitMfa, cancelMfa, logout, retrySession }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{
+    state,
+    login,
+    verifyMfa: submitMfa,
+    cancelMfa,
+    recoverAccount,
+    logout,
+    retrySession,
+  }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {

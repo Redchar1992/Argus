@@ -9,10 +9,18 @@ interface LoginPageProps {
   onLogin: (username: string, password: string) => Promise<void>;
   onVerifyMfa: (method: MfaMethod, code: string) => Promise<void>;
   onCancelMfa: () => void;
+  onRecoverAccount: (username: string, recoveryCode: string, newPassword: string) => Promise<void>;
   onRetrySession: () => Promise<void>;
 }
 
-export function LoginPage({ state, onLogin, onVerifyMfa, onCancelMfa, onRetrySession }: LoginPageProps) {
+export function LoginPage({
+  state,
+  onLogin,
+  onVerifyMfa,
+  onCancelMfa,
+  onRecoverAccount,
+  onRetrySession,
+}: LoginPageProps) {
   const { lang, setLang, t } = useI18n();
   const [username, setUsername] = useState(state.status === 'error' ? state.username ?? '' : '');
   const [password, setPassword] = useState('');
@@ -21,6 +29,11 @@ export function LoginPage({ state, onLogin, onVerifyMfa, onCancelMfa, onRetrySes
     : undefined;
   const [method, setMethod] = useState<MfaMethod>(challenge?.methods[0] ?? 'TOTP');
   const [verificationCode, setVerificationCode] = useState('');
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string>();
   const authenticating = state.status === 'authenticating';
   const verifying = state.status === 'verifying_mfa';
   const message = state.status === 'expired' || state.status === 'error' || state.status === 'anonymous'
@@ -40,6 +53,24 @@ export function LoginPage({ state, onLogin, onVerifyMfa, onCancelMfa, onRetrySes
     void onVerifyMfa(method, verificationCode);
   };
 
+  const submitRecovery = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!username.trim() || !recoveryCode.trim() || newPassword.length < 8) return;
+    setRecovering(true);
+    setRecoveryError(undefined);
+    try {
+      await onRecoverAccount(username, recoveryCode, newPassword);
+      setRecoveryMode(false);
+      setPassword('');
+      setRecoveryCode('');
+      setNewPassword('');
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : t('auth.recoveryFailed'));
+    } finally {
+      setRecovering(false);
+    }
+  };
+
   return (
     <main className="auth-shell">
       <section className="auth-card" aria-labelledby="login-title">
@@ -54,14 +85,59 @@ export function LoginPage({ state, onLogin, onVerifyMfa, onCancelMfa, onRetrySes
         </div>
 
         <div className="auth-lock" aria-hidden>◎</div>
-        <h1 id="login-title">{challenge ? t('auth.mfaTitle') : t('auth.title')}</h1>
+        <h1 id="login-title">
+          {challenge ? t('auth.mfaTitle') : recoveryMode ? t('auth.recoveryTitle') : t('auth.title')}
+        </h1>
         <p className="auth-intro">
-          {challenge ? `${t('auth.mfaIntro')} ${challenge.username}.` : t('auth.intro')}
+          {challenge
+            ? `${t('auth.mfaIntro')} ${challenge.username}.`
+            : recoveryMode ? t('auth.recoveryIntro') : t('auth.intro')}
         </p>
 
         {message && <div className={`alert ${state.status === 'anonymous' ? 'info' : 'error'}`} role="alert">{message}</div>}
+        {recoveryError && <div className="alert error" role="alert">{recoveryError}</div>}
 
-        {challenge ? (
+        {recoveryMode ? (
+          <form className="auth-form" onSubmit={(event) => void submitRecovery(event)}>
+            <label htmlFor="recovery-username">{t('auth.username')}</label>
+            <input
+              id="recovery-username"
+              className="input"
+              autoComplete="username"
+              value={username}
+              disabled={recovering}
+              onChange={(event) => setUsername(event.target.value)}
+            />
+            <label htmlFor="recovery-code">{t('auth.recoveryCode')}</label>
+            <input
+              id="recovery-code"
+              className="input"
+              autoComplete="off"
+              value={recoveryCode}
+              disabled={recovering}
+              onChange={(event) => setRecoveryCode(event.target.value.toUpperCase())}
+            />
+            <label htmlFor="new-password">{t('auth.newPassword')}</label>
+            <input
+              id="new-password"
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              disabled={recovering}
+              onChange={(event) => setNewPassword(event.target.value)}
+            />
+            <button className="btn auth-submit" type="submit"
+              disabled={recovering || !username.trim() || !recoveryCode.trim() || newPassword.length < 8}>
+              {recovering && <span className="spinner" />}
+              {recovering ? t('auth.recovering') : t('auth.resetPassword')}
+            </button>
+            <button className="link-button" type="button" disabled={recovering}
+              onClick={() => { setRecoveryMode(false); setRecoveryError(undefined); }}>
+              {t('auth.backToSignIn')}
+            </button>
+          </form>
+        ) : challenge ? (
           <form className="auth-form" onSubmit={submitMfa}>
             {challenge.methods.length > 1 && (
               <>
@@ -131,6 +207,10 @@ export function LoginPage({ state, onLogin, onVerifyMfa, onCancelMfa, onRetrySes
           <button className="btn auth-submit" type="submit" disabled={authenticating || !username.trim() || !password}>
             {authenticating && <span className="spinner" />}
             {authenticating ? t('auth.signingIn') : t('auth.signIn')}
+          </button>
+          <button className="link-button" type="button" disabled={authenticating}
+            onClick={() => setRecoveryMode(true)}>
+            {t('auth.recoverAccount')}
           </button>
         </form>
 

@@ -14,4 +14,6 @@ public interface AuthenticationChallengeRepository extends JpaRepository<Authent
     Optional<AuthenticationChallenge> findByTokenHash(String tokenHash);
 
     long deleteByExpiresAtBefore(Instant cutoff);
+
+    long deleteByUser_Id(Long userId);
 }

@@ -45,6 +45,12 @@ interface TotpCodeBody {
   code?: unknown;
 }
 
+interface RecoveryBody {
+  username?: unknown;
+  recoveryCode?: unknown;
+  newPassword?: unknown;
+}
+
 interface InvestigationParams {
   id: string;
 }
@@ -425,6 +431,52 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       const code = typeof request.body?.code === 'string' ? request.body.code.trim() : '';
       if (!/^\d{6}$/.test(code)) throw new AppError(400, 'BAD_REQUEST', 'Enter a six-digit code');
       return proxy(request, reply, (session) => upstream.confirmTotp(session.accessToken, code, request.id));
+    },
+  );
+
+  app.get('/bff/auth/recovery', { preHandler: requireSession }, async (request, reply) =>
+    proxy(request, reply, (session) => upstream.recoveryStatus(session.accessToken, request.id)));
+
+  app.post<{ Body: TotpCodeBody }>(
+    '/bff/auth/recovery/codes/regenerate',
+    { preHandler: [verifyCsrf, requireSession] },
+    async (request, reply) => {
+      const code = typeof request.body?.code === 'string' ? request.body.code.trim() : '';
+      if (!/^\d{6}$/.test(code)) throw new AppError(400, 'BAD_REQUEST', 'Enter a six-digit code');
+      return proxy(request, reply, (session) =>
+        upstream.regenerateRecoveryCodes(session.accessToken, code, request.id));
+    },
+  );
+
+  app.post<{ Body: RecoveryBody }>(
+    '/bff/auth/recovery/complete',
+    {
+      preHandler: verifyCsrf,
+      config: { rateLimit: { max: config.loginRateLimitMax, timeWindow: config.loginRateLimitWindowMs } },
+    },
+    async (request, reply) => {
+      const username = typeof request.body?.username === 'string' ? request.body.username.trim() : '';
+      const recoveryCode = typeof request.body?.recoveryCode === 'string'
+        ? request.body.recoveryCode.trim().toUpperCase() : '';
+      const newPassword = typeof request.body?.newPassword === 'string' ? request.body.newPassword : '';
+      if (!username || username.length > 64 || !/^[A-Z2-9-]{24,40}$/.test(recoveryCode)
+        || newPassword.length < 8 || newPassword.length > 128) {
+        throw new AppError(400, 'BAD_REQUEST', 'Enter a valid account, recovery code, and new password');
+      }
+      try {
+        const result = await upstream.recoverAccount(username, recoveryCode, newPassword, request.id);
+        await sessions.deleteForUser(username);
+        await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
+        clearSessionCookie(reply);
+        clearMfaChallengeCookie(reply);
+        ensureCsrf(request, reply, true);
+        return result;
+      } catch (error) {
+        if (error instanceof UpstreamError && error.status === 401) {
+          throw new AppError(401, 'INVALID_RECOVERY_CODE', 'The account or recovery code is invalid');
+        }
+        throw error;
+      }
     },
   );
 

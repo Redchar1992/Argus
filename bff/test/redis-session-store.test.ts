@@ -5,6 +5,7 @@ import { RedisSessionStore, type RedisSessionCommands } from '../src/redis-sessi
 class FakeRedis implements RedisSessionCommands {
   readonly values = new Map<string, string>();
   readonly ttls = new Map<string, number>();
+  readonly sets = new Map<string, Set<string>>();
 
   async get(key: string): Promise<string | null> {
     return this.values.get(key) ?? null;
@@ -18,7 +19,30 @@ class FakeRedis implements RedisSessionCommands {
 
   async del(key: string): Promise<number> {
     this.ttls.delete(key);
-    return this.values.delete(key) ? 1 : 0;
+    const removed = this.values.delete(key) || this.sets.delete(key);
+    return removed ? 1 : 0;
+  }
+
+  async sadd(key: string, member: string): Promise<number> {
+    const values = this.sets.get(key) ?? new Set<string>();
+    const size = values.size;
+    values.add(member);
+    this.sets.set(key, values);
+    return values.size > size ? 1 : 0;
+  }
+
+  async srem(key: string, member: string): Promise<number> {
+    return this.sets.get(key)?.delete(member) ? 1 : 0;
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    return [...(this.sets.get(key) ?? [])];
+  }
+
+  async expire(key: string, seconds: number): Promise<number> {
+    if (!this.sets.has(key) && !this.values.has(key)) return 0;
+    this.ttls.set(key, seconds);
+    return 1;
   }
 }
 
@@ -76,5 +100,18 @@ describe('RedisSessionStore', () => {
 
     await store.delete(session.id);
     await expect(store.get(session.id)).resolves.toBeUndefined();
+  });
+
+  it('revokes every indexed session for an account after recovery', async () => {
+    const redis = new FakeRedis();
+    const store = new RedisSessionStore(redis, KEY, 300);
+    const first = await store.create('first-token', USER, 300);
+    const second = await store.create('second-token', USER, 300);
+    const other = await store.create('other-token', { username: 'other', role: 'ANALYST' }, 300);
+
+    await store.deleteForUser(USER.username);
+    await expect(store.get(first.id)).resolves.toBeUndefined();
+    await expect(store.get(second.id)).resolves.toBeUndefined();
+    await expect(store.get(other.id)).resolves.toEqual(other);
   });
 });

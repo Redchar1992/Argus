@@ -33,6 +33,8 @@ argus:
     challenge-ttl-seconds: ${ARGUS_MFA_CHALLENGE_TTL_SECONDS:300}
     enrollment-ttl-seconds: ${ARGUS_MFA_ENROLLMENT_TTL_SECONDS:600}
     maximum-attempts: ${ARGUS_MFA_MAXIMUM_ATTEMPTS:5}
+  recovery:
+    pepper: ${ARGUS_RECOVERY_PEPPER:YXJndXMtcmVjb3ZlcnktZGV2LXBlcHBlci1rZXktdjE=}
 
 management:
   endpoints:

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { AuthUser, ServerSession, SessionRepository } from './session-store.js';
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -8,6 +8,10 @@ export interface RedisSessionCommands {
   get(key: string): Promise<string | null>;
   setex(key: string, seconds: number, value: string): Promise<unknown>;
   del(key: string): Promise<number>;
+  sadd(key: string, member: string): Promise<number>;
+  srem(key: string, member: string): Promise<number>;
+  smembers(key: string): Promise<string[]>;
+  expire(key: string, seconds: number): Promise<number>;
 }
 
 interface EncryptedToken {
@@ -90,6 +94,10 @@ export class RedisSessionStore implements SessionRepository {
       token: this.encrypt(accessToken, id),
     };
     await this.redis.setex(this.key(id), redisTtlSeconds, JSON.stringify(stored));
+    const indexKey = this.userIndexKey(user.username);
+    await this.redis.sadd(indexKey, id);
+    // The index must never expire before a longer-lived Session created earlier.
+    await this.redis.expire(indexKey, Math.max(1, Math.ceil(this.maximumTtlSeconds)));
     return session;
   }
 
@@ -102,6 +110,7 @@ export class RedisSessionStore implements SessionRepository {
       const stored: unknown = JSON.parse(raw);
       if (!validStoredSession(stored) || stored.expiresAt <= this.now()) {
         await this.redis.del(this.key(id));
+        if (validStoredSession(stored)) await this.redis.srem(this.userIndexKey(stored.user.username), id);
         return undefined;
       }
       return {
@@ -118,11 +127,33 @@ export class RedisSessionStore implements SessionRepository {
   }
 
   async delete(id: string | undefined): Promise<void> {
-    if (id && SESSION_ID_PATTERN.test(id)) await this.redis.del(this.key(id));
+    if (!id || !SESSION_ID_PATTERN.test(id)) return;
+    const raw = await this.redis.get(this.key(id));
+    await this.redis.del(this.key(id));
+    if (!raw) return;
+    try {
+      const stored: unknown = JSON.parse(raw);
+      if (validStoredSession(stored)) await this.redis.srem(this.userIndexKey(stored.user.username), id);
+    } catch {
+      // A corrupt record has already been deleted; its bounded index expires with the Session TTL.
+    }
+  }
+
+  async deleteForUser(username: string): Promise<void> {
+    if (!username || username.length > 64) return;
+    const indexKey = this.userIndexKey(username);
+    const ids = (await this.redis.smembers(indexKey)).filter((id) => SESSION_ID_PATTERN.test(id));
+    await Promise.all(ids.map((id) => this.redis.del(this.key(id))));
+    await this.redis.del(indexKey);
   }
 
   private key(id: string): string {
     return `${PREFIX}${id}`;
+  }
+
+  private userIndexKey(username: string): string {
+    const digest = createHash('sha256').update(username, 'utf8').digest('hex');
+    return `argus:bff:user-sessions:${digest}`;
   }
 
   private encrypt(accessToken: string, sessionId: string): EncryptedToken {

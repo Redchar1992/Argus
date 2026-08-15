@@ -23,6 +23,13 @@ const config: AppConfig = {
   redisUrl: REDIS_URL,
   sessionEncryptionKey: Buffer.alloc(32, 5),
   redisConnectTimeoutMs: 1_000,
+  oidcEnabled: false,
+  oidcScopes: 'openid profile email',
+  oidcSuccessRedirect: '/?auth=oidc_success',
+  oidcErrorRedirect: '/?auth=oidc_error',
+  oidcTransactionTtlSeconds: 300,
+  mfaChallengeTtlSeconds: 300,
+  mfaRequiredRedirect: '/?auth=mfa_required',
   logger: false,
 };
 
@@ -119,5 +126,30 @@ redisDescribe('Redis-backed BFF integration', () => {
       headers: { cookie },
     });
     expect(goneOnA.statusCode).toBe(401);
+  });
+
+  it('revokes every account session across replicas after recovery', async () => {
+    const runtimeA = await createRuntimeDependencies(config);
+    const runtimeB = await createRuntimeDependencies(config);
+    try {
+      const first = await runtimeA.sessions!.create(
+        'first-recovery-token', { username: 'recover-me', role: 'ANALYST' }, 3_600,
+      );
+      const second = await runtimeB.sessions!.create(
+        'second-recovery-token', { username: 'recover-me', role: 'ANALYST' }, 3_600,
+      );
+      const other = await runtimeA.sessions!.create(
+        'unrelated-token', { username: 'other-user', role: 'ANALYST' }, 3_600,
+      );
+
+      await expect(runtimeB.sessions!.get(first.id)).resolves.toEqual(first);
+      await runtimeA.sessions!.deleteForUser('recover-me');
+      await expect(runtimeA.sessions!.get(first.id)).resolves.toBeUndefined();
+      await expect(runtimeB.sessions!.get(second.id)).resolves.toBeUndefined();
+      await expect(runtimeB.sessions!.get(other.id)).resolves.toEqual(other);
+    } finally {
+      await runtimeA.close?.();
+      await runtimeB.close?.();
+    }
   });
 });

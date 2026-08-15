@@ -149,6 +149,20 @@ export async function verifyMfa(method: MfaMethod, code: string): Promise<AuthSe
   return result.session;
 }
 
+export async function recoverAccount(
+  username: string,
+  recoveryCode: string,
+  newPassword: string,
+): Promise<{ state: 'recovered'; message: string }> {
+  await ensureCsrfCookie();
+  return bffRequest('/bff/auth/recovery/complete', {
+    method: 'POST',
+    csrf: true,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, recoveryCode, newPassword }),
+  });
+}
+
 export async function logout(): Promise<void> {
   await ensureCsrfCookie();
   await bffRequest<void>('/bff/auth/logout', { method: 'POST', csrf: true });

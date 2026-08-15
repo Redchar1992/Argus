@@ -18,6 +18,7 @@ export interface SessionRepository {
   create(accessToken: string, user: AuthUser, upstreamTtlSeconds: number): Promise<ServerSession>;
   get(id: string | undefined): Promise<ServerSession | undefined>;
   delete(id: string | undefined): Promise<void>;
+  deleteForUser(username: string): Promise<void>;
 }
 
 export class SessionStore implements SessionRepository {
@@ -57,6 +58,12 @@ export class SessionStore implements SessionRepository {
 
   async delete(id: string | undefined): Promise<void> {
     if (id) this.sessions.delete(id);
+  }
+
+  async deleteForUser(username: string): Promise<void> {
+    for (const [id, session] of this.sessions) {
+      if (session.user.username === username) this.sessions.delete(id);
+    }
   }
 
   get size(): number {

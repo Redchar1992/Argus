@@ -1,7 +1,10 @@
 package com.argus.auth.service;
 
 import com.argus.auth.dto.AuthDtos.MfaChallengeResponse;
+import com.argus.auth.dto.AuthDtos.MfaEnrollmentResponse;
 import com.argus.auth.dto.AuthDtos.MfaStatusResponse;
+import com.argus.auth.dto.AuthDtos.RecoveryCodesResponse;
+import com.argus.auth.dto.AuthDtos.RecoveryStatusResponse;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
 import com.argus.auth.dto.AuthDtos.TotpSetupResponse;
 import com.argus.auth.model.AuthenticationChallenge;
@@ -24,6 +27,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalLong;
 
@@ -39,6 +43,7 @@ public class MfaService {
     private final IdentitySecretCipher cipher;
     private final TotpService totp;
     private final JwtService jwtService;
+    private final RecoveryService recoveryService;
     private final SecureRandom random = new SecureRandom();
     private final long challengeTtlSeconds;
     private final long enrollmentTtlSeconds;
@@ -49,6 +54,7 @@ public class MfaService {
                       IdentitySecretCipher cipher,
                       TotpService totp,
                       JwtService jwtService,
+                      RecoveryService recoveryService,
                       @Value("${argus.mfa.challenge-ttl-seconds:300}") long challengeTtlSeconds,
                       @Value("${argus.mfa.enrollment-ttl-seconds:600}") long enrollmentTtlSeconds,
                       @Value("${argus.mfa.maximum-attempts:5}") int maximumAttempts) {
@@ -57,6 +63,7 @@ public class MfaService {
         this.cipher = cipher;
         this.totp = totp;
         this.jwtService = jwtService;
+        this.recoveryService = recoveryService;
         this.challengeTtlSeconds = challengeTtlSeconds;
         this.enrollmentTtlSeconds = enrollmentTtlSeconds;
         this.maximumAttempts = maximumAttempts;
@@ -77,7 +84,7 @@ public class MfaService {
     }
 
     @Transactional
-    public MfaStatusResponse confirmTotp(String username, String code) {
+    public MfaEnrollmentResponse confirmTotp(String username, String code) {
         UserAccount user = requireUser(username);
         Instant now = Instant.now();
         if (user.getPendingTotpSecretEncrypted() == null || user.getPendingTotpExpiresAt() == null
@@ -89,8 +96,9 @@ public class MfaService {
         OptionalLong counter = totp.verify(secret, code, -1);
         if (counter.isEmpty()) throw new ResponseStatusException(UNAUTHORIZED, "Invalid verification code");
         user.confirmTotpEnrollment(counter.getAsLong(), now);
-        users.save(user);
-        return new MfaStatusResponse(true, user.getMfaEnrolledAt());
+        UserAccount saved = users.save(user);
+        RecoveryCodesResponse recovery = recoveryService.replaceCodes(saved);
+        return new MfaEnrollmentResponse(true, user.getMfaEnrolledAt(), recovery.recoveryCodes());
     }
 
     @Transactional
@@ -110,6 +118,21 @@ public class MfaService {
         return new MfaStatusResponse(user.isMfaEnabled(), user.getMfaEnrolledAt());
     }
 
+    @Transactional(readOnly = true)
+    public RecoveryStatusResponse recoveryStatus(String username) {
+        return recoveryService.status(requireUser(username));
+    }
+
+    @Transactional
+    public RecoveryCodesResponse regenerateRecoveryCodes(String username, String totpCode) {
+        UserAccount user = requireUser(username);
+        OptionalLong counter = verifyTotp(user, totpCode);
+        if (counter.isEmpty()) throw new ResponseStatusException(UNAUTHORIZED, "Invalid verification code");
+        user.recordTotpCounter(counter.getAsLong());
+        users.save(user);
+        return recoveryService.replaceCodes(user);
+    }
+
     @Transactional
     public MfaChallengeResponse createChallenge(UserAccount user) {
         Instant now = Instant.now();
@@ -119,7 +142,10 @@ public class MfaService {
         String token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
         challenges.save(new AuthenticationChallenge(hash(token), user,
                 now.plusSeconds(challengeTtlSeconds), now));
-        return new MfaChallengeResponse("mfa_required", token, List.of(MfaMethod.TOTP),
+        List<MfaMethod> methods = new ArrayList<>();
+        methods.add(MfaMethod.TOTP);
+        if (recoveryService.hasAvailableCode(user)) methods.add(MfaMethod.RECOVERY_CODE);
+        return new MfaChallengeResponse("mfa_required", token, List.copyOf(methods),
                 challengeTtlSeconds, user.getUsername());
     }
 
@@ -134,18 +160,22 @@ public class MfaService {
             challenge.consume(now);
             throw invalidChallenge();
         }
-        if (method != MfaMethod.TOTP) {
-            challenge.failedAttempt(maximumAttempts, now);
-            throw invalidChallenge();
-        }
-
         UserAccount user = challenge.getUser();
-        OptionalLong counter = verifyTotp(user, code);
-        if (counter.isEmpty()) {
+        OptionalLong counter = OptionalLong.empty();
+        boolean accepted;
+        if (method == MfaMethod.TOTP) {
+            counter = verifyTotp(user, code);
+            accepted = counter.isPresent();
+        } else if (method == MfaMethod.RECOVERY_CODE) {
+            accepted = user.isEnabled() && recoveryService.consume(user, code);
+        } else {
+            accepted = false;
+        }
+        if (!accepted) {
             challenge.failedAttempt(maximumAttempts, now);
             throw invalidChallenge();
         }
-        user.recordTotpCounter(counter.getAsLong());
+        if (counter.isPresent()) user.recordTotpCounter(counter.getAsLong());
         challenge.consume(now);
         users.save(user);
         String token = jwtService.issue(user);

@@ -51,6 +51,10 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
     get: (key) => redis.get(key),
     setex: (key, seconds, value) => redis.setex(key, seconds, value),
     del: (key) => redis.del(key),
+    sadd: (key, member) => redis.sadd(key, member),
+    srem: (key, member) => redis.srem(key, member),
+    smembers: (key) => redis.smembers(key),
+    expire: (key, seconds) => redis.expire(key, seconds),
   };
   const oidcCommands: RedisOidcCommands = {
     setex: (key, seconds, value) => redis.setex(key, seconds, value),

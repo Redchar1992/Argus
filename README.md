@@ -175,11 +175,11 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                 # 28 pass; real-Redis test skips
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 29/29 incl. two-instance Redis
+npm ci && npm run build && npm test                 # 30 pass; real-Redis test skips
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 32/32 incl. two-instance Redis
 
 cd ../frontend/analyst-console
-npm ci && npm run build && npm run test:unit        # 9 reducer/RTL lifecycle tests
+npm ci && npm run build && npm run test:unit        # 10 reducer/RTL lifecycle tests
 npx playwright install chromium                     # once per machine
 npm run test:e2e                                    # anonymous, login, HttpOnly cookie, logout
 
@@ -243,9 +243,9 @@ insecure cookies and the memory Session store.
   refuses it and requires the implemented Redis path, but a real deployment still needs a
   private authenticated `rediss://` endpoint, encryption-key rotation, eviction/availability
   metrics, backup policy and a tested regional outage strategy.
-- OIDC Authorization Code + PKCE and TOTP MFA are implemented, including encrypted server-side
-  pre-authentication state, replay counters, expiry and attempt lockout. Refresh-token rotation,
-  account recovery, WebAuthn and Passkeys are not implemented yet; no remaining item is simulated.
+- OIDC Authorization Code + PKCE, TOTP MFA and one-time offline recovery codes are implemented,
+  including encrypted server-side pre-authentication state, replay counters, attempt lockout,
+  MFA fallback and password reset. Refresh-token rotation, WebAuthn and Passkeys remain unbuilt.
 - HTTPS is expected to terminate at the deployment ingress; production mode refuses a
   non-`Secure` session cookie. Helmet protects the JSON BFF responses, while the SPA document's
   CSP/HSTS/asset-integrity policy must be configured by the CDN or web server that hosts it.
