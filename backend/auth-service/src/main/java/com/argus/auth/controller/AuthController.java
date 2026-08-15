@@ -15,11 +15,18 @@ import com.argus.auth.dto.AuthDtos.RecoveryCodesResponse;
 import com.argus.auth.dto.AuthDtos.RecoveryCompleteRequest;
 import com.argus.auth.dto.AuthDtos.RecoveryCompleteResponse;
 import com.argus.auth.dto.AuthDtos.RecoveryStatusResponse;
+import com.argus.auth.dto.AuthDtos.PasskeyAuthenticationCompleteRequest;
+import com.argus.auth.dto.AuthDtos.PasskeyMaterialResponse;
+import com.argus.auth.dto.AuthDtos.PasskeyRegistrationContextResponse;
+import com.argus.auth.dto.AuthDtos.PasskeyRegistrationRequest;
+import com.argus.auth.dto.AuthDtos.PasskeyView;
 import com.argus.auth.dto.AuthDtos.UserView;
 import com.argus.auth.security.JwtService;
 import com.argus.auth.service.AuthService;
 import com.argus.auth.service.MfaService;
 import com.argus.auth.service.RecoveryService;
+import com.argus.auth.service.PasskeyService;
+import com.argus.auth.security.InternalBffAuth;
 import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -27,6 +34,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -37,6 +45,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -46,13 +55,18 @@ public class AuthController {
     private final JwtService jwtService;
     private final MfaService mfaService;
     private final RecoveryService recoveryService;
+    private final PasskeyService passkeyService;
+    private final InternalBffAuth internalBffAuth;
 
     public AuthController(AuthService authService, JwtService jwtService, MfaService mfaService,
-                          RecoveryService recoveryService) {
+                          RecoveryService recoveryService, PasskeyService passkeyService,
+                          InternalBffAuth internalBffAuth) {
         this.authService = authService;
         this.jwtService = jwtService;
         this.mfaService = mfaService;
         this.recoveryService = recoveryService;
+        this.passkeyService = passkeyService;
+        this.internalBffAuth = internalBffAuth;
     }
 
     @PostMapping("/login")
@@ -106,6 +120,51 @@ public class AuthController {
     @PostMapping("/recovery/complete")
     public RecoveryCompleteResponse recoverAccount(@Valid @RequestBody RecoveryCompleteRequest request) {
         return recoveryService.complete(request.username(), request.recoveryCode(), request.newPassword());
+    }
+
+    @GetMapping("/passkeys")
+    public List<PasskeyView> passkeys(Authentication authentication) {
+        return passkeyService.list(authentication.getName());
+    }
+
+    @GetMapping("/passkeys/context")
+    public PasskeyRegistrationContextResponse passkeyRegistrationContext(
+            Authentication authentication,
+            @RequestHeader(value = "X-Argus-Bff-Secret", required = false) String internalSecret) {
+        internalBffAuth.require(internalSecret);
+        return passkeyService.registrationContext(authentication.getName());
+    }
+
+    @PostMapping("/passkeys")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PasskeyView registerPasskey(
+            Authentication authentication,
+            @RequestHeader(value = "X-Argus-Bff-Secret", required = false) String internalSecret,
+            @Valid @RequestBody PasskeyRegistrationRequest request) {
+        internalBffAuth.require(internalSecret);
+        return passkeyService.register(authentication.getName(), request);
+    }
+
+    @DeleteMapping("/passkeys/{credentialId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePasskey(Authentication authentication, @PathVariable String credentialId) {
+        passkeyService.delete(authentication.getName(), credentialId);
+    }
+
+    @GetMapping("/internal/passkeys/{credentialId}")
+    public PasskeyMaterialResponse passkeyMaterial(
+            @PathVariable String credentialId,
+            @RequestHeader(value = "X-Argus-Bff-Secret", required = false) String internalSecret) {
+        internalBffAuth.require(internalSecret);
+        return passkeyService.material(credentialId);
+    }
+
+    @PostMapping("/internal/passkeys/complete")
+    public TokenResponse completePasskeyAuthentication(
+            @RequestHeader(value = "X-Argus-Bff-Secret", required = false) String internalSecret,
+            @Valid @RequestBody PasskeyAuthenticationCompleteRequest request) {
+        internalBffAuth.require(internalSecret);
+        return passkeyService.completeAuthentication(request);
     }
 
     @PostMapping("/register")

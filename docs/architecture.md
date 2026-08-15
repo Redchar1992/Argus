@@ -15,16 +15,16 @@ flowchart LR
     Cases["case-service :8084"]
     Admin["Vue admin console :5174"]
     Gateway["Spring Cloud Gateway :8080"]
-    Redis["Redis 7 — shared Sessions + login limits"]
+    Redis["Redis 7 — Sessions + auth ceremonies + login limits"]
     IdP["OpenID Provider — discovery + JWKS"]
 
     Browser -->|"same-origin /bff; opaque cookies"| BFF
-    BFF -->|"password or verified provider token"| Auth
+    BFF -->|"password, verified provider token or Passkey result"| Auth
     Browser <-->|"Authorization Code + PKCE"| IdP
     BFF -->|"discovery, authorize, token exchange"| IdP
     Auth -->|"JWT — server-to-server only"| BFF
     BFF -->|"Bearer JWT + investigation API"| Agent
-    BFF -->|"AES-GCM Session records + rate keys"| Redis
+    BFF -->|"AES-GCM Session/ceremony records + rate keys"| Redis
     Agent -->|"tool calls"| Tools
     Agent -->|"case mirror"| Cases
     Admin --> Gateway
@@ -41,11 +41,11 @@ orchestrator directly.
 
 | Component | Port | Stack | Responsibility |
 |---|---:|---|---|
-| `frontend/analyst-console` | 5173 | React 18, TypeScript, Vite | Login UX, explicit auth state model, route guard, investigation timeline |
-| `bff` | 3001 | Node 20, Fastify | Server-side sessions, CSRF/origin checks, login throttling, error normalization, guarded API proxy |
-| `redis` | 6379 | Redis 7 | Optional development / required production shared BFF Sessions and distributed login limiter |
+| `frontend/analyst-console` | 5173 | React 18, TypeScript, Vite | Password/MFA/recovery/Passkey UX, explicit auth state model, route guard, investigation timeline |
+| `bff` | 3001 | Node 20, Fastify | Server-side sessions, OIDC/WebAuthn ceremonies, CSRF/origin checks, login throttling, error normalization, guarded API proxy |
+| `redis` | 6379 | Redis 7 | Optional development / required production shared BFF Sessions, one-time auth ceremonies and distributed login limiter |
 | `api-gateway` | 8080 | Spring Cloud Gateway | Routing/CORS for the existing service and admin-console paths |
-| `auth-service` | 8081 | Spring Boot, Security, JPA | Password/OIDC primary auth, encrypted TOTP MFA, JWT issue/parse, RBAC |
+| `auth-service` | 8081 | Spring Boot, Security, JPA | Password/OIDC/Passkey identity, encrypted TOTP MFA, recovery, JWT issue/parse, RBAC |
 | `agent-orchestrator-service` | 8082 | Spring Boot, WebFlux, optional Mongo | Agent loop and investigation trace store |
 | `screening-tools-service` | 8083 | Spring Boot, JPA | Sanctions/profile/graph/risk tools and catalog |
 | `case-service` | 8084 | Spring Boot, JPA | Cases, audit log, screening policy |
@@ -88,6 +88,9 @@ Cookie properties:
   BFF maximum.
 - `argus_mfa_tx`: opaque pre-authentication ID, `HttpOnly`, `SameSite=Strict`, `Path=/bff/auth`.
   The Java challenge token is encrypted in the server store and never exposed to JavaScript.
+- `argus_webauthn_tx`: opaque one-time ceremony ID, `HttpOnly`, `SameSite=Strict`,
+  `Path=/bff/auth/passkeys`. Its challenge and registration owner are AES-256-GCM encrypted,
+  expiry bounded and atomically consumed.
 
 Development defaults to an in-memory store. Production startup fails if
 `BFF_COOKIE_SECURE=false`, `BFF_MOCK_UPSTREAM=true`, the Session store is not Redis, or the
@@ -101,6 +104,46 @@ transaction is encrypted in Redis in production and consumed atomically with `GE
 BFF validates the callback and token response, then auth-service independently validates the
 ID token's JWKS signature, issuer, audience, expiry and nonce. Accounts are keyed by
 `(issuer, subject)` and are never silently linked by email.
+
+### Passkey / WebAuthn
+
+Passkeys use discoverable credentials for usernameless login and require authenticator user
+verification. Registration first requires an existing Argus session. The Node BFF uses
+SimpleWebAuthn to generate and verify the challenge, exact public origin, RP ID, attestation
+and assertion signature. Java stores the credential ID, COSE public key, device/backup flags
+and signature counter; a pessimistic database lock performs the final compare-and-update so
+two otherwise valid assertions cannot race.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Browser
+    participant BFF as Node WebAuthn RP
+    participant Auth as auth-service
+    participant Redis as Ceremony store
+    Browser->>BFF: POST registration/options<br/>Session + Origin + CSRF
+    BFF->>Auth: Fetch user handle + excluded credentials
+    BFF->>Redis: SETEX encrypted challenge/owner
+    BFF-->>Browser: PublicKeyCredentialCreationOptions + opaque cookie
+    Browser->>Browser: navigator.credentials.create<br/>user verification required
+    Browser->>BFF: POST registration/verify
+    BFF->>Redis: GETDEL ceremony
+    BFF->>BFF: Verify challenge, origin, RP ID, signature
+    BFF->>Auth: Persist credential material over workload-authenticated route
+    Note over Browser,Redis: Later passwordless sign-in
+    Browser->>BFF: POST authentication/options<br/>Origin + CSRF
+    BFF-->>Browser: Discoverable credential request
+    Browser->>Browser: navigator.credentials.get<br/>user verification required
+    Browser->>BFF: POST authentication/verify
+    BFF->>BFF: Verify one-time challenge + assertion
+    BFF->>Auth: Atomic expectedCounter → newCounter
+    Auth-->>BFF: JWT
+    BFF-->>Browser: Opaque HttpOnly Session; no JWT/key material
+```
+
+The internal Passkey material endpoints require a constant-time checked, production-rotated
+workload secret. This narrows exposure now; authenticated service TLS is the next defense-in-
+depth layer and is tracked separately rather than being implied by the shared secret.
 
 ## Protected investigation flow
 
@@ -144,6 +187,7 @@ stateDiagram-v2
     checking --> expired: stale cookie
     checking --> error: identity service unavailable
     anonymous --> authenticating: submit credentials
+    anonymous --> authenticating_passkey: start WebAuthn
     expired --> authenticating: submit credentials
     error --> authenticating: retry login
     authenticating --> authenticated: no second factor
@@ -152,6 +196,8 @@ stateDiagram-v2
     verifying_mfa --> authenticated: code accepted
     verifying_mfa --> mfa_required: invalid code
     authenticating --> error: login fails
+    authenticating_passkey --> authenticated: assertion accepted
+    authenticating_passkey --> error: assertion fails/cancelled
     authenticated --> expired: BFF or upstream returns 401
     authenticated --> signingOut: request logout
     signingOut --> anonymous: session deleted
@@ -183,6 +229,8 @@ data at that deadline even when the user makes no further API request.
 | MFA replay/brute force | Last accepted TOTP counter blocks replay; challenges expire, are pessimistically locked and close after five failed attempts |
 | Recovery-code theft/reuse | 120-bit codes are returned once, stored as peppered HMACs, row-locked and marked used atomically; regeneration replaces every old code |
 | Post-recovery session theft | Successful reset deletes pending Java challenges and every BFF Session through a hashed Redis per-user index |
+| Passkey phishing/replay | Exact origin + RP ID, required user verification, encrypted one-time challenge, signature verification and atomic authenticator-counter update |
+| Passkey material exposure | Public keys/counters stay on BFF↔Java routes guarded by a workload secret; browser APIs expose only standard WebAuthn options and credential responses |
 
 React's normal text rendering provides output escaping for investigation data. No code uses
 `dangerouslySetInnerHTML`. XSS is not "solved" by cookies: a same-origin script could still
@@ -206,8 +254,8 @@ These are limitations, not hidden features:
 1. The Redis implementation is real and two-instance tested, but the Compose service is a
    passwordless development fixture. Production still needs private authenticated TLS Redis,
    encryption-key rotation, eviction/availability metrics and a regional outage policy.
-2. Password/OIDC login, TOTP MFA and offline-code account recovery are real. Refresh-token
-   rotation, WebAuthn and Passkeys are not implemented yet and must not be presented as shipped code.
+2. Password/OIDC login, TOTP MFA, offline-code recovery and Passkeys are real. Refresh-token
+   rotation and provider-specific account-linking policy are not implemented yet.
 3. HTTPS/TLS termination and the SPA document CSP belong to deployment infrastructure, which
    is outside this repository. The BFF itself fails closed on insecure production cookies.
 4. Redis mode makes the application limiter distributed, but an edge/WAF limiter is still
@@ -219,12 +267,13 @@ These are limitations, not hidden features:
 
 ## Test evidence
 
-- `bff/test`: 32 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
+- `bff/test`: 38 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
   the suite checks encrypted-at-rest Session records, tamper/copy rejection, Redis TTL,
   one-time encrypted OIDC transactions, replay rejection, two-instance Session restore/logout,
-  encrypted MFA pre-authentication state, distributed login limits and production fail-fast config.
-- `frontend/analyst-console/src`: ten reducer/React Testing Library tests covering password +
-  MFA login, offline recovery, failure/success, guard, automatic deadline expiry and logout.
-- `frontend/analyst-console/e2e`: real Chromium anonymous/login/logout journeys using the BFF
-  test upstream; asserts the browser session cookie is `HttpOnly` and no JWT/Bearer value is
-  placed in Web Storage.
+  encrypted MFA/WebAuthn pre-authentication state, cross-replica one-time consumption,
+  distributed login limits and production fail-fast config.
+- `frontend/analyst-console/src`: 13 reducer/React Testing Library tests covering password,
+  MFA, offline recovery, Passkey login/registration, guard, deadline expiry and logout.
+- `frontend/analyst-console/e2e`: four real Chromium journeys using the BFF test upstream,
+  including registration and passwordless sign-in with a CDP virtual authenticator; asserts
+  the browser session cookie is `HttpOnly` and no JWT/Bearer value is placed in Web Storage.

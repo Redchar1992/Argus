@@ -46,6 +46,24 @@ export const DICT = {
   'auth.recovering': { en: 'Resetting…', zh: '重設中…' },
   'auth.backToSignIn': { en: 'Back to sign in', zh: '返回登入' },
   'auth.recoveryFailed': { en: 'Account recovery failed.', zh: '帳戶復原失敗。' },
+  'auth.or': { en: 'or', zh: '或' },
+  'auth.passkeySignIn': { en: 'Sign in with a passkey', zh: '使用 Passkey 登入' },
+  'auth.passkeySigningIn': { en: 'Waiting for passkey…', zh: '等待 Passkey…' },
+  'passkeys.manage': { en: 'Manage passkeys', zh: '管理 Passkey' },
+  'passkeys.close': { en: 'Close security settings', zh: '關閉安全設定' },
+  'passkeys.title': { en: 'Passkey security', zh: 'Passkey 安全設定' },
+  'passkeys.intro': {
+    en: 'Register a phishing-resistant passkey for passwordless sign-in with user verification.',
+    zh: '註冊具抗釣魚能力的 Passkey，透過使用者驗證免密碼登入。',
+  },
+  'passkeys.label': { en: 'Passkey label', zh: 'Passkey 名稱' },
+  'passkeys.placeholder': { en: 'For example, Work MacBook', zh: '例如：工作用 MacBook' },
+  'passkeys.add': { en: 'Add passkey', zh: '新增 Passkey' },
+  'passkeys.remove': { en: 'Remove', zh: '移除' },
+  'passkeys.empty': { en: 'No passkeys registered yet.', zh: '尚未註冊 Passkey。' },
+  'passkeys.synced': { en: 'Synced passkey', zh: '已同步 Passkey' },
+  'passkeys.deviceBound': { en: 'Device-bound passkey', zh: '裝置綁定 Passkey' },
+  'passkeys.failed': { en: 'The passkey operation failed.', zh: 'Passkey 操作失敗。' },
 
   // hero
   'hero.headline': {

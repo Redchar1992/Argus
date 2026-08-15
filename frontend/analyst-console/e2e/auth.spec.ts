@@ -41,3 +41,33 @@ test('logout destroys the session and returns to the login page', async ({ page,
   const cookies = await context.cookies();
   expect(cookies.find((cookie) => cookie.name === 'argus_session')).toBeUndefined();
 });
+
+test('registers a discoverable passkey and uses it for passwordless sign-in', async ({ page, context }) => {
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      ctap2Version: 'ctap2_1',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+
+  await signIn(page);
+  await page.getByRole('button', { name: 'Manage passkeys' }).click();
+  await page.getByLabel('Passkey label').fill('Playwright authenticator');
+  await page.getByRole('button', { name: 'Add passkey' }).click();
+  await expect(page.getByText('Playwright authenticator', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await expect(page.getByText('Run an investigation')).toBeVisible();
+
+  const cookies = await context.cookies();
+  expect(cookies.find((cookie) => cookie.name === 'argus_session')?.httpOnly).toBe(true);
+  await cdp.send('WebAuthn.disable');
+});

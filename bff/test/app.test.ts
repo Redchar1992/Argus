@@ -4,6 +4,12 @@ import { buildApp } from '../src/app.js';
 import type { AppConfig } from '../src/config.js';
 import { UpstreamError } from '../src/errors.js';
 import type { OidcRelyingParty } from '../src/oidc.js';
+import type {
+  PasskeyCeremonies,
+  PasskeyMaterial,
+  VerifiedPasskeyAuthentication,
+  VerifiedPasskeyRegistration,
+} from '../src/passkeys.js';
 import { SessionStore } from '../src/session-store.js';
 import { MockUpstreamClient, type UpstreamClient } from '../src/upstream.js';
 import type { AuthenticationResult, LoginResult } from '../src/upstream.js';
@@ -30,6 +36,12 @@ const config: AppConfig = {
   oidcTransactionTtlSeconds: 300,
   mfaChallengeTtlSeconds: 300,
   mfaRequiredRedirect: '/?auth=mfa_required',
+  passkeyEnabled: true,
+  webauthnRpId: 'localhost',
+  webauthnRpName: 'Argus',
+  webauthnOrigin: ORIGIN,
+  webauthnCeremonyTtlSeconds: 300,
+  internalBffSecret: 'argus-dev-internal-bff-secret-change-me',
   logger: false,
 };
 
@@ -64,6 +76,110 @@ function mutationHeaders(csrf: string, cookie = `argus_csrf=${csrf}`): Record<st
     'x-csrf-token': csrf,
     cookie,
   };
+}
+
+class FakePasskeyCeremonies implements PasskeyCeremonies {
+  readonly registrationChallenge = 'r'.repeat(43);
+  readonly authenticationChallenge = 'a'.repeat(43);
+
+  async registrationOptions() {
+    return {
+      challenge: this.registrationChallenge,
+      rp: { id: 'localhost', name: 'Argus' },
+      user: { id: 'dXNlcg', name: 'analyst', displayName: 'analyst' },
+      pubKeyCredParams: [{ alg: -7, type: 'public-key' as const }],
+    };
+  }
+
+  async verifyRegistration(response: unknown, expectedChallenge: string): Promise<VerifiedPasskeyRegistration> {
+    if (expectedChallenge !== this.registrationChallenge || (response as { id?: string })?.id !== 'credential_1234567890') {
+      throw new Error('invalid registration');
+    }
+    return {
+      credentialId: 'credential_1234567890',
+      publicKey: Buffer.alloc(77, 3).toString('base64url'),
+      counter: 0,
+      transports: ['internal'],
+      deviceType: 'multiDevice',
+      backedUp: true,
+      aaguid: '00000000-0000-0000-0000-000000000000',
+    };
+  }
+
+  async authenticationOptions() {
+    return { challenge: this.authenticationChallenge, rpId: 'localhost', userVerification: 'required' as const };
+  }
+
+  credentialId(response: unknown): string {
+    const id = (response as { id?: unknown })?.id;
+    if (typeof id !== 'string') throw new Error('invalid assertion');
+    return id;
+  }
+
+  async verifyAuthentication(
+    _response: unknown,
+    expectedChallenge: string,
+    material: PasskeyMaterial,
+  ): Promise<VerifiedPasskeyAuthentication> {
+    if (expectedChallenge !== this.authenticationChallenge || material.credentialId !== 'credential_1234567890') {
+      throw new Error('invalid assertion');
+    }
+    return { newCounter: material.counter + 1, deviceType: 'multiDevice', backedUp: true };
+  }
+}
+
+class PasskeyUpstream extends MockUpstreamClient {
+  material: PasskeyMaterial | undefined;
+
+  override async passkeyRegistrationContext() {
+    return { userId: 7, username: 'analyst', credentials: this.material ? [this.material] : [] };
+  }
+
+  override async registerPasskey(
+    _accessToken: string,
+    material: VerifiedPasskeyRegistration & { label?: string },
+  ) {
+    this.material = { ...material, username: 'analyst' };
+    return {
+      credentialId: material.credentialId,
+      label: material.label ?? 'Passkey',
+      transports: material.transports,
+      deviceType: material.deviceType,
+      backedUp: material.backedUp,
+      createdAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    };
+  }
+
+  override async listPasskeys() {
+    return this.material ? [{
+      credentialId: this.material.credentialId,
+      label: 'Work Mac',
+      transports: this.material.transports,
+      deviceType: this.material.deviceType,
+      backedUp: this.material.backedUp,
+      createdAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    }] : [];
+  }
+
+  override async passkeyMaterial(credentialId: string) {
+    if (!this.material || this.material.credentialId !== credentialId) {
+      throw new UpstreamError(401, 'rejected', 'Invalid passkey');
+    }
+    return this.material;
+  }
+
+  override async completePasskeyAuthentication(
+    credentialId: string,
+    expectedCounter: number,
+    verification: VerifiedPasskeyAuthentication,
+  ): Promise<LoginResult> {
+    const material = await this.passkeyMaterial(credentialId);
+    if (material.counter !== expectedCounter) throw new UpstreamError(401, 'rejected', 'Replay');
+    this.material = { ...material, counter: verification.newCounter };
+    return { token: 'server-only-passkey-jwt', expiresInSeconds: 3_600, username: 'analyst', role: 'ANALYST' };
+  }
 }
 
 describe('identity BFF', () => {
@@ -103,6 +219,68 @@ describe('identity BFF', () => {
     });
     expect(session.statusCode).toBe(200);
     expect(session.json()).toMatchObject({ user: { username: 'analyst' } });
+  });
+
+  it('registers and authenticates a passkey without exposing credential material or JWTs', async () => {
+    const upstream = new PasskeyUpstream();
+    const passkeys = new FakePasskeyCeremonies();
+    const { app, csrf } = await appWithCsrf({ upstream, passkeys });
+    const passwordLogin = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/login',
+      headers: { ...mutationHeaders(csrf), 'content-type': 'application/json' },
+      payload: { username: 'analyst', password: 'analyst12345' },
+    });
+    const sessionId = cookieValue(passwordLogin.headers['set-cookie'], 'argus_session');
+    const rotatedCsrf = cookieValue(passwordLogin.headers['set-cookie'], 'argus_csrf');
+    const authenticatedCookie = `argus_session=${sessionId}; argus_csrf=${rotatedCsrf}`;
+
+    const options = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/passkeys/registration/options',
+      headers: mutationHeaders(rotatedCsrf, authenticatedCookie),
+    });
+    expect(options.statusCode).toBe(200);
+    expect(options.json()).toMatchObject({ options: { challenge: passkeys.registrationChallenge } });
+    const ceremonyId = cookieValue(options.headers['set-cookie'], 'argus_webauthn_tx');
+    const ceremonyCookie = `${authenticatedCookie}; argus_webauthn_tx=${ceremonyId}`;
+
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/passkeys/registration/verify',
+      headers: { ...mutationHeaders(rotatedCsrf, ceremonyCookie), 'content-type': 'application/json' },
+      payload: { response: { id: 'credential_1234567890' }, label: 'Work Mac' },
+    });
+    expect(registered.statusCode).toBe(200);
+    expect(registered.json()).toMatchObject({ credentialId: 'credential_1234567890', label: 'Work Mac' });
+    expect(JSON.stringify(registered.json())).not.toContain('publicKey');
+
+    const authenticationOptions = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/passkeys/authentication/options',
+      headers: mutationHeaders(rotatedCsrf),
+    });
+    const authenticationCeremony = cookieValue(authenticationOptions.headers['set-cookie'], 'argus_webauthn_tx');
+    const assertionCookie = `argus_csrf=${rotatedCsrf}; argus_webauthn_tx=${authenticationCeremony}`;
+    const authenticated = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/passkeys/authentication/verify',
+      headers: { ...mutationHeaders(rotatedCsrf, assertionCookie), 'content-type': 'application/json' },
+      payload: { response: { id: 'credential_1234567890' } },
+    });
+    expect(authenticated.statusCode).toBe(200);
+    expect(authenticated.json()).toMatchObject({ state: 'authenticated', user: { username: 'analyst' } });
+    expect(JSON.stringify(authenticated.json())).not.toContain('server-only-passkey-jwt');
+    expect(upstream.material?.counter).toBe(1);
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/passkeys/authentication/verify',
+      headers: { ...mutationHeaders(rotatedCsrf, assertionCookie), 'content-type': 'application/json' },
+      payload: { response: { id: 'credential_1234567890' } },
+    });
+    expect(replay.statusCode).toBe(401);
+    expect(replay.json()).toMatchObject({ error: { code: 'PASSKEY_CEREMONY_EXPIRED' } });
   });
 
   it('rejects invalid credentials with a stable error code', async () => {
@@ -227,6 +405,12 @@ describe('identity BFF', () => {
       recoveryStatus: (...args) => mock.recoveryStatus(...args),
       regenerateRecoveryCodes: (...args) => mock.regenerateRecoveryCodes(...args),
       recoverAccount: (...args) => mock.recoverAccount(...args),
+      passkeyRegistrationContext: (...args) => mock.passkeyRegistrationContext(...args),
+      registerPasskey: (...args) => mock.registerPasskey(...args),
+      listPasskeys: (...args) => mock.listPasskeys(...args),
+      deletePasskey: (...args) => mock.deletePasskey(...args),
+      passkeyMaterial: (...args) => mock.passkeyMaterial(...args),
+      completePasskeyAuthentication: (...args) => mock.completePasskeyAuthentication(...args),
       submitInvestigation: (...args) => mock.submitInvestigation(...args),
       getInvestigation: async () => {
         throw new UpstreamError(401, 'rejected', 'JWT expired');
@@ -275,6 +459,20 @@ describe('identity BFF', () => {
       recoveryStatus: async () => undefined,
       regenerateRecoveryCodes: async () => undefined,
       recoverAccount: async () => undefined,
+      passkeyRegistrationContext: async () => ({ userId: 1, username: 'analyst', credentials: [] }),
+      registerPasskey: async () => ({
+        credentialId: 'credential_1234567890',
+        label: 'Passkey',
+        transports: ['internal'],
+        deviceType: 'singleDevice',
+        backedUp: false,
+        createdAt: new Date(0).toISOString(),
+        lastUsedAt: null,
+      }),
+      listPasskeys: async () => [],
+      deletePasskey: async () => undefined,
+      passkeyMaterial: async () => { throw new UpstreamError(504, 'timeout', 'internal socket detail'); },
+      completePasskeyAuthentication: async () => { throw new UpstreamError(504, 'timeout', 'internal socket detail'); },
       submitInvestigation: async () => undefined,
       getInvestigation: async () => undefined,
     };

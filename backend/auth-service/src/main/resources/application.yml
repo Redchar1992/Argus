@@ -35,6 +35,8 @@ argus:
     maximum-attempts: ${ARGUS_MFA_MAXIMUM_ATTEMPTS:5}
   recovery:
     pepper: ${ARGUS_RECOVERY_PEPPER:YXJndXMtcmVjb3ZlcnktZGV2LXBlcHBlci1rZXktdjE=}
+  internal:
+    bff-secret: ${ARGUS_INTERNAL_BFF_SECRET:argus-dev-internal-bff-secret-change-me}
 
 management:
   endpoints:

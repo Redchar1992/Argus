@@ -76,7 +76,7 @@ export async function bffRequest<T>(path: string, options: RequestOptions = {}):
   return body as T;
 }
 
-async function ensureCsrfCookie(): Promise<void> {
+export async function ensureCsrfCookie(): Promise<void> {
   if (readCookie('argus_csrf')) return;
   try {
     await bffRequest<AuthSession>('/bff/auth/session');

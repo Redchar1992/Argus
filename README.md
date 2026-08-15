@@ -12,7 +12,8 @@
 > come from admin-editable policy — not from the model.
 
 Portfolio project — **React 18 + TypeScript · Node/Fastify BFF · Java 17/Spring Cloud · Vue**.
-The analyst console now has real password and OIDC Authorization Code + PKCE identity flows: the browser receives only an
+The analyst console now has real password, OIDC Authorization Code + PKCE, TOTP/recovery and
+phishing-resistant Passkey identity flows: the browser receives only an
 opaque `HttpOnly` session cookie while the upstream JWT stays server-side in the BFF. The
 README is deliberately
 **honest**: it claims only what is built and runs. [`docs/jd-mapping.md`](docs/jd-mapping.md)
@@ -65,7 +66,7 @@ Browser: analyst-console (React 18 + TypeScript, :5173)
         ▼
 identity-bff (Node 20 + Fastify, :3001)
         │ server-side session → attaches Bearer JWT (never returned to browser)
-        ├── POST /api/auth/login ───────────────▶ auth-service (:8081)
+        ├── password/OIDC/WebAuthn ─────────────▶ auth-service (:8081)
         └── /api/investigations/* ─────────────▶ agent-orchestrator (:8082)
                                                       │
                                                       ├── tools ──▶ screening-tools (:8083)
@@ -87,7 +88,7 @@ Full detail: [`docs/architecture.md`](docs/architecture.md).
 ```bash
 cd backend
 mvn -q -DskipTests package      # build all 5 modules
-mvn -q test                     # 32 tests (auth/RBAC, tools, agent loop, security)
+mvn -q test                     # 47 tests (identity/RBAC, tools, agent loop, security)
 ```
 
 Run the three Java services needed for the authenticated analyst demo (they default to in-memory stores —
@@ -175,20 +176,20 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                 # 30 pass; real-Redis test skips
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 32/32 incl. two-instance Redis
+npm ci && npm run build && npm test                 # 35 pass; 3 real-Redis tests skip
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 38/38 incl. two-instance Redis
 
 cd ../frontend/analyst-console
-npm ci && npm run build && npm run test:unit        # 10 reducer/RTL lifecycle tests
+npm ci && npm run build && npm run test:unit        # 13 reducer/RTL lifecycle tests
 npx playwright install chromium                     # once per machine
-npm run test:e2e                                    # anonymous, login, HttpOnly cookie, logout
+npm run test:e2e                                    # 4 journeys incl. a virtual WebAuthn authenticator
 
 cd ../admin-console
 npm ci && npm audit && npm run build                # 0 vulnerabilities; Vue/Vite build
 ```
 
 CI uses `npm ci`, runs the BFF suite against a Redis 7 service, runs both frontend test
-layers, and installs Chromium for the three Playwright journeys. Playwright starts the BFF
+layers, and installs Chromium for four Playwright journeys. Playwright starts the BFF
 with its explicit test-only deterministic upstream; production startup refuses mock mode,
 insecure cookies and the memory Session store.
 
@@ -223,12 +224,18 @@ insecure cookies and the memory Session store.
   before Redis storage, bound to the opaque Session ID as authenticated data and lifetime-capped.
   Redis outage fails startup/login closed. The real two-instance integration test runs in CI.
 - **Explicit frontend state model:** a TypeScript discriminated union/reducer models
-  `checking → anonymous → authenticating → authenticated → signingOut/expired/error`.
+  `checking → anonymous → authenticating/authenticating_passkey → authenticated → signingOut/expired/error`.
   The route guard never renders investigation data for an anonymous/expired state, and a
   client-side deadline unmounts protected data at the server-declared Session expiry.
+- **Passkey/WebAuthn:** authenticated users can register, list and remove discoverable
+  credentials; passwordless login requires user verification. The Node BFF verifies origin,
+  RP ID, challenge and signature, Java persists the COSE public key and atomically advances
+  authenticator counters, and the browser receives neither key material nor the issued JWT.
+  Encrypted, one-time ceremonies work across Redis-backed BFF replicas.
 - **Identity test pyramid:** Fastify injection tests cover cookies, CSRF, expiry, upstream
-  timeout/401 and rate limiting; Vitest/RTL covers reducer/login/guard/logout; Playwright
-  drives the three browser journeys and asserts the session cookie is `HttpOnly`.
+  timeout/401, rate limiting and Passkey replay; Vitest/RTL covers reducer/login/guard/logout
+  and WebAuthn UX; Playwright uses a Chromium virtual authenticator and asserts the session
+  cookie is `HttpOnly`.
 - **Deterministic compliance logic around a probabilistic agent** (fail-closed decisioning):
   a wallet is only CLEARED when the required tools (`sanctions_screen` + `risk_rules`) produced
   valid evidence; missing/failed evidence escalates to REVIEW (never a silent CLEAR). The
@@ -243,9 +250,10 @@ insecure cookies and the memory Session store.
   refuses it and requires the implemented Redis path, but a real deployment still needs a
   private authenticated `rediss://` endpoint, encryption-key rotation, eviction/availability
   metrics, backup policy and a tested regional outage strategy.
-- OIDC Authorization Code + PKCE, TOTP MFA and one-time offline recovery codes are implemented,
+- OIDC Authorization Code + PKCE, TOTP MFA, one-time offline recovery codes and Passkeys are implemented,
   including encrypted server-side pre-authentication state, replay counters, attempt lockout,
-  MFA fallback and password reset. Refresh-token rotation, WebAuthn and Passkeys remain unbuilt.
+  MFA fallback, password reset and discoverable passwordless credentials. Refresh-token
+  rotation and provider-specific account linking remain unbuilt.
 - HTTPS is expected to terminate at the deployment ingress; production mode refuses a
   non-`Secure` session cookie. Helmet protects the JSON BFF responses, while the SPA document's
   CSP/HSTS/asset-integrity policy must be configured by the CDN or web server that hosts it.

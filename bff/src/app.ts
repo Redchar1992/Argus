@@ -15,6 +15,13 @@ import {
   MemoryOidcTransactionStore,
   type OidcTransactionRepository,
 } from './oidc-transaction-store.js';
+import {
+  SimpleWebAuthnPasskeys,
+  type PasskeyCeremonies,
+  type PasskeyMaterial,
+  type VerifiedPasskeyAuthentication,
+  type VerifiedPasskeyRegistration,
+} from './passkeys.js';
 import { SessionStore, type ServerSession, type SessionRepository } from './session-store.js';
 import {
   HttpUpstreamClient,
@@ -24,12 +31,18 @@ import {
   type LoginResult,
   type UpstreamClient,
 } from './upstream.js';
+import {
+  MemoryWebAuthnCeremonyStore,
+  type WebAuthnCeremonyRepository,
+} from './webauthn-ceremony-store.js';
 
 const SESSION_COOKIE = 'argus_session';
 const CSRF_COOKIE = 'argus_csrf';
 const OIDC_TRANSACTION_COOKIE = 'argus_oidc_tx';
 const MFA_CHALLENGE_COOKIE = 'argus_mfa_tx';
+const WEBAUTHN_CEREMONY_COOKIE = 'argus_webauthn_tx';
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
+const CREDENTIAL_ID_PATTERN = /^[A-Za-z0-9_-]{16,2048}$/;
 
 interface LoginBody {
   username?: unknown;
@@ -55,6 +68,19 @@ interface InvestigationParams {
   id: string;
 }
 
+interface PasskeyRegistrationVerifyBody {
+  response?: unknown;
+  label?: unknown;
+}
+
+interface PasskeyAuthenticationVerifyBody {
+  response?: unknown;
+}
+
+interface PasskeyParams {
+  credentialId: string;
+}
+
 export interface AppDependencies {
   upstream?: UpstreamClient;
   sessions?: SessionRepository;
@@ -62,6 +88,8 @@ export interface AppDependencies {
   oidc?: OidcRelyingParty;
   oidcTransactions?: OidcTransactionRepository;
   mfaChallenges?: MfaChallengeRepository;
+  passkeys?: PasskeyCeremonies;
+  webauthnCeremonies?: WebAuthnCeremonyRepository;
   close?: () => Promise<void>;
 }
 
@@ -83,6 +111,8 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   const oidc = dependencies.oidc;
   const oidcTransactions = dependencies.oidcTransactions ?? new MemoryOidcTransactionStore();
   const mfaChallenges = dependencies.mfaChallenges ?? new MemoryMfaChallengeStore();
+  const passkeys = dependencies.passkeys ?? new SimpleWebAuthnPasskeys(config);
+  const webauthnCeremonies = dependencies.webauthnCeremonies ?? new MemoryWebAuthnCeremonyStore();
   if (config.oidcEnabled && !oidc) throw new Error('OIDC is enabled but no relying party was configured');
   const requestSessions = new WeakMap<FastifyRequest, ServerSession>();
 
@@ -180,6 +210,25 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       secure: config.cookieSecure,
       sameSite: 'strict',
       path: '/bff/auth',
+    });
+  }
+
+  function setWebAuthnCeremonyCookie(reply: FastifyReply, id: string): void {
+    reply.setCookie(WEBAUTHN_CEREMONY_COOKIE, id, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'strict',
+      path: '/bff/auth/passkeys',
+      maxAge: config.webauthnCeremonyTtlSeconds,
+    });
+  }
+
+  function clearWebAuthnCeremonyCookie(reply: FastifyReply): void {
+    reply.clearCookie(WEBAUTHN_CEREMONY_COOKIE, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'strict',
+      path: '/bff/auth/passkeys',
     });
   }
 
@@ -285,6 +334,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     status: 'ok',
     sessionStore: config.sessionStore,
     oidc: config.oidcEnabled ? 'enabled' : 'disabled',
+    passkeys: config.passkeyEnabled ? 'enabled' : 'disabled',
   }));
 
   if (config.oidcEnabled && oidc) {
@@ -489,6 +539,143 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       return proxy(request, reply, (session) => upstream.disableTotp(session.accessToken, code, request.id));
     },
   );
+
+  if (config.passkeyEnabled) {
+    app.get('/bff/auth/passkeys', { preHandler: requireSession }, async (request, reply) =>
+      proxy(request, reply, (session) => upstream.listPasskeys(session.accessToken, request.id)));
+
+    app.post(
+      '/bff/auth/passkeys/registration/options',
+      { preHandler: [verifyCsrf, requireSession] },
+      async (request, reply) => {
+        const session = requestSessions.get(request);
+        if (!session) throw new AppError(500, 'INTERNAL_ERROR', 'Session guard was not applied');
+        await webauthnCeremonies.consume(request.cookies[WEBAUTHN_CEREMONY_COOKIE]);
+        clearWebAuthnCeremonyCookie(reply);
+        const context = await proxy(request, reply, (current) =>
+          upstream.passkeyRegistrationContext(current.accessToken, request.id));
+        const options = await passkeys.registrationOptions(context);
+        const id = await webauthnCeremonies.create({
+          kind: 'registration',
+          challenge: options.challenge,
+          username: session.user.username,
+          expiresAt: Date.now() + config.webauthnCeremonyTtlSeconds * 1_000,
+        });
+        setWebAuthnCeremonyCookie(reply, id);
+        return { options };
+      },
+    );
+
+    app.post<{ Body: PasskeyRegistrationVerifyBody }>(
+      '/bff/auth/passkeys/registration/verify',
+      { preHandler: [verifyCsrf, requireSession] },
+      async (request, reply) => {
+        const ceremony = await webauthnCeremonies.consume(request.cookies[WEBAUTHN_CEREMONY_COOKIE]);
+        clearWebAuthnCeremonyCookie(reply);
+        const session = requestSessions.get(request);
+        if (!session) throw new AppError(500, 'INTERNAL_ERROR', 'Session guard was not applied');
+        if (!ceremony || ceremony.kind !== 'registration' || ceremony.username !== session.user.username) {
+          throw new AppError(401, 'PASSKEY_CEREMONY_EXPIRED', 'The passkey ceremony expired. Try again.');
+        }
+        const label = typeof request.body?.label === 'string' ? request.body.label.trim() : '';
+        if (label.length > 80) throw new AppError(400, 'BAD_REQUEST', 'Passkey label is too long');
+        let material: VerifiedPasskeyRegistration;
+        try {
+          material = await passkeys.verifyRegistration(request.body?.response, ceremony.challenge);
+        } catch {
+          throw new AppError(400, 'PASSKEY_REGISTRATION_FAILED', 'The passkey could not be verified');
+        }
+        return proxy(request, reply, (current) => upstream.registerPasskey(
+          current.accessToken,
+          { ...material, ...(label ? { label } : {}) },
+          request.id,
+        ));
+      },
+    );
+
+    app.delete<{ Params: PasskeyParams }>(
+      '/bff/auth/passkeys/:credentialId',
+      { preHandler: [verifyCsrf, requireSession] },
+      async (request, reply) => {
+        if (!CREDENTIAL_ID_PATTERN.test(request.params.credentialId)) {
+          throw new AppError(400, 'BAD_REQUEST', 'The passkey identifier is invalid');
+        }
+        await proxy(request, reply, (session) =>
+          upstream.deletePasskey(session.accessToken, request.params.credentialId, request.id));
+        return reply.code(204).send();
+      },
+    );
+
+    app.post(
+      '/bff/auth/passkeys/authentication/options',
+      {
+        preHandler: verifyCsrf,
+        config: { rateLimit: { max: config.loginRateLimitMax, timeWindow: config.loginRateLimitWindowMs } },
+      },
+      async (request, reply) => {
+        await webauthnCeremonies.consume(request.cookies[WEBAUTHN_CEREMONY_COOKIE]);
+        clearWebAuthnCeremonyCookie(reply);
+        const options = await passkeys.authenticationOptions();
+        const id = await webauthnCeremonies.create({
+          kind: 'authentication',
+          challenge: options.challenge,
+          expiresAt: Date.now() + config.webauthnCeremonyTtlSeconds * 1_000,
+        });
+        setWebAuthnCeremonyCookie(reply, id);
+        return { options };
+      },
+    );
+
+    app.post<{ Body: PasskeyAuthenticationVerifyBody }>(
+      '/bff/auth/passkeys/authentication/verify',
+      {
+        preHandler: verifyCsrf,
+        config: { rateLimit: { max: config.loginRateLimitMax, timeWindow: config.loginRateLimitWindowMs } },
+      },
+      async (request, reply) => {
+        const ceremony = await webauthnCeremonies.consume(request.cookies[WEBAUTHN_CEREMONY_COOKIE]);
+        clearWebAuthnCeremonyCookie(reply);
+        if (!ceremony || ceremony.kind !== 'authentication') {
+          throw new AppError(401, 'PASSKEY_CEREMONY_EXPIRED', 'The passkey ceremony expired. Try again.');
+        }
+        let credentialId: string;
+        try {
+          credentialId = passkeys.credentialId(request.body?.response);
+        } catch {
+          throw new AppError(401, 'PASSKEY_AUTHENTICATION_FAILED', 'The passkey was not accepted');
+        }
+        let material: PasskeyMaterial;
+        try {
+          material = await upstream.passkeyMaterial(credentialId, request.id);
+        } catch (error) {
+          if (error instanceof UpstreamError && (error.status === 401 || error.status === 404)) {
+            throw new AppError(401, 'PASSKEY_AUTHENTICATION_FAILED', 'The passkey was not accepted');
+          }
+          throw error;
+        }
+        let verification: VerifiedPasskeyAuthentication;
+        try {
+          verification = await passkeys.verifyAuthentication(request.body?.response, ceremony.challenge, material);
+        } catch {
+          throw new AppError(401, 'PASSKEY_AUTHENTICATION_FAILED', 'The passkey was not accepted');
+        }
+        try {
+          const result = await upstream.completePasskeyAuthentication(
+            credentialId,
+            material.counter,
+            verification,
+            request.id,
+          );
+          return establishSession(request, reply, result);
+        } catch (error) {
+          if (error instanceof UpstreamError && error.status === 401) {
+            throw new AppError(401, 'PASSKEY_AUTHENTICATION_FAILED', 'The passkey was not accepted');
+          }
+          throw error;
+        }
+      },
+    );
+  }
 
   app.post('/bff/auth/logout', { preHandler: verifyCsrf }, async (request, reply) => {
     await sessions.delete(request.cookies[SESSION_COOKIE]);

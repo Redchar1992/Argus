@@ -7,6 +7,7 @@ import { Hero, HowItWorks } from '../components/Hero';
 import { Hint } from '../components/Hint';
 import { useI18n } from '../i18n';
 import type { AuthUser } from '../auth/authMachine';
+import { PasskeySettings } from '../components/PasskeySettings';
 
 const REPO = 'https://github.com/Redchar1992/argus';
 
@@ -101,6 +102,8 @@ export function InvestigatePage({ user, signingOut, onLogout }: InvestigatePageP
           </button>
         </div>
       </header>
+
+      <PasskeySettings />
 
       <Hero />
       <HowItWorks />

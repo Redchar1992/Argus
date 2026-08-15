@@ -13,6 +13,10 @@ import {
   type RedisOidcCommands,
 } from './oidc-transaction-store.js';
 import { RedisSessionStore, type RedisSessionCommands } from './redis-session-store.js';
+import {
+  RedisWebAuthnCeremonyStore,
+  type RedisWebAuthnCommands,
+} from './webauthn-ceremony-store.js';
 
 export async function createRuntimeDependencies(config: AppConfig): Promise<AppDependencies> {
   const oidc = config.oidcEnabled ? await OpenIdClientRelyingParty.discover(config) : undefined;
@@ -65,6 +69,10 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
     setex: (key, seconds, value) => redis.setex(key, seconds, value),
     del: (key) => redis.del(key),
   };
+  const webauthnCommands: RedisWebAuthnCommands = {
+    setex: (key, seconds, value) => redis.setex(key, seconds, value),
+    getdel: (key) => redis.getdel(key),
+  };
 
   return {
     sessions: new RedisSessionStore(
@@ -77,6 +85,11 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
       mfaCommands,
       config.sessionEncryptionKey,
       config.mfaChallengeTtlSeconds,
+    ),
+    webauthnCeremonies: new RedisWebAuthnCeremonyStore(
+      webauthnCommands,
+      config.sessionEncryptionKey,
+      config.webauthnCeremonyTtlSeconds,
     ),
     ...(oidc
       ? {

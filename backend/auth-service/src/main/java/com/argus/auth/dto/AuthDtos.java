@@ -111,6 +111,51 @@ public final class AuthDtos {
             long remaining) {
     }
 
+    public record PasskeyMaterialResponse(
+            String credentialId,
+            String publicKey,
+            long counter,
+            List<String> transports,
+            String username,
+            String deviceType,
+            boolean backedUp) {
+    }
+
+    public record PasskeyRegistrationContextResponse(
+            Long userId,
+            String username,
+            List<PasskeyMaterialResponse> credentials) {
+    }
+
+    public record PasskeyRegistrationRequest(
+            @NotBlank @Size(max = 2048) String credentialId,
+            @NotBlank @Size(max = 4096) String publicKey,
+            @NotNull Long counter,
+            List<@Size(max = 32) String> transports,
+            @NotBlank @Size(max = 32) String deviceType,
+            boolean backedUp,
+            @Size(max = 36) String aaguid,
+            @Size(max = 80) String label) {
+    }
+
+    public record PasskeyView(
+            String credentialId,
+            String label,
+            List<String> transports,
+            String deviceType,
+            boolean backedUp,
+            Instant createdAt,
+            Instant lastUsedAt) {
+    }
+
+    public record PasskeyAuthenticationCompleteRequest(
+            @NotBlank @Size(max = 2048) String credentialId,
+            @NotNull Long expectedCounter,
+            @NotNull Long newCounter,
+            @NotBlank @Size(max = 32) String deviceType,
+            boolean backedUp) {
+    }
+
     public record UserView(
             Long id,
             String username,

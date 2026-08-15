@@ -4,7 +4,7 @@ import { InvestigatePage } from './pages/InvestigatePage';
 import { LoginPage } from './pages/LoginPage';
 
 function AuthenticatedApp() {
-  const { state, login, verifyMfa, cancelMfa, recoverAccount, logout, retrySession } = useAuth();
+  const { state, login, loginWithPasskey, verifyMfa, cancelMfa, recoverAccount, logout, retrySession } = useAuth();
 
   if (state.status === 'checking') {
     return (
@@ -27,6 +27,7 @@ function AuthenticatedApp() {
   return <LoginPage
     state={state}
     onLogin={login}
+    onLoginWithPasskey={loginWithPasskey}
     onVerifyMfa={verifyMfa}
     onCancelMfa={cancelMfa}
     onRecoverAccount={recoverAccount}

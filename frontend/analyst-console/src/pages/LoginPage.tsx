@@ -5,8 +5,10 @@ import { useI18n } from '../i18n';
 interface LoginPageProps {
   state: Extract<AuthState, {
     status: 'anonymous' | 'authenticating' | 'expired' | 'error' | 'mfa_required' | 'verifying_mfa'
+      | 'authenticating_passkey'
   }>;
   onLogin: (username: string, password: string) => Promise<void>;
+  onLoginWithPasskey: () => Promise<void>;
   onVerifyMfa: (method: MfaMethod, code: string) => Promise<void>;
   onCancelMfa: () => void;
   onRecoverAccount: (username: string, recoveryCode: string, newPassword: string) => Promise<void>;
@@ -16,6 +18,7 @@ interface LoginPageProps {
 export function LoginPage({
   state,
   onLogin,
+  onLoginWithPasskey,
   onVerifyMfa,
   onCancelMfa,
   onRecoverAccount,
@@ -34,7 +37,9 @@ export function LoginPage({
   const [newPassword, setNewPassword] = useState('');
   const [recovering, setRecovering] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string>();
-  const authenticating = state.status === 'authenticating';
+  const authenticatingPassword = state.status === 'authenticating';
+  const authenticatingPasskey = state.status === 'authenticating_passkey';
+  const authenticating = authenticatingPassword || authenticatingPasskey;
   const verifying = state.status === 'verifying_mfa';
   const message = state.status === 'expired' || state.status === 'error' || state.status === 'anonymous'
     ? state.message
@@ -205,8 +210,14 @@ export function LoginPage({
           />
 
           <button className="btn auth-submit" type="submit" disabled={authenticating || !username.trim() || !password}>
-            {authenticating && <span className="spinner" />}
-            {authenticating ? t('auth.signingIn') : t('auth.signIn')}
+            {authenticatingPassword && <span className="spinner" />}
+            {authenticatingPassword ? t('auth.signingIn') : t('auth.signIn')}
+          </button>
+          <div className="auth-divider"><span>{t('auth.or')}</span></div>
+          <button className="secondary-btn passkey-login" type="button" disabled={authenticating}
+            onClick={() => void onLoginWithPasskey()}>
+            {authenticatingPasskey && <span className="spinner" />}
+            {authenticatingPasskey ? t('auth.passkeySigningIn') : t('auth.passkeySignIn')}
           </button>
           <button className="link-button" type="button" disabled={authenticating}
             onClick={() => setRecoveryMode(true)}>

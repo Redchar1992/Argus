@@ -25,6 +25,12 @@ export interface AppConfig {
   oidcTransactionTtlSeconds: number;
   mfaChallengeTtlSeconds: number;
   mfaRequiredRedirect: string;
+  passkeyEnabled: boolean;
+  webauthnRpId: string;
+  webauthnRpName: string;
+  webauthnOrigin: string;
+  webauthnCeremonyTtlSeconds: number;
+  internalBffSecret: string;
   logger: boolean;
 }
 
@@ -94,6 +100,29 @@ function localRedirect(value: string | undefined, fallback: string, name: string
   return redirect;
 }
 
+function origin(value: string | undefined, fallback: string, name: string): string {
+  const candidate = value ?? fallback;
+  const parsed = new URL(candidate);
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== candidate.replace(/\/$/, '')) {
+    throw new Error(`${name} must be an http or https origin without a path`);
+  }
+  return parsed.origin;
+}
+
+function rpId(value: string | undefined): string {
+  const candidate = value?.trim() || 'localhost';
+  if (
+    candidate.length > 253 ||
+    candidate.includes('://') ||
+    candidate.includes('/') ||
+    candidate.includes(':') ||
+    !/^(localhost|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*)$/i.test(candidate)
+  ) {
+    throw new Error('BFF_WEBAUTHN_RP_ID must be a hostname without a scheme, port, or path');
+  }
+  return candidate.toLowerCase();
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const production = env.NODE_ENV === 'production';
   const mockUpstream = booleanValue(env.BFF_MOCK_UPSTREAM, false);
@@ -106,6 +135,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const oidcClientId = env.BFF_OIDC_CLIENT_ID?.trim() || undefined;
   const oidcClientSecret = env.BFF_OIDC_CLIENT_SECRET?.trim() || undefined;
   const oidcRedirectUri = absoluteUrl(env.BFF_OIDC_REDIRECT_URI?.trim(), 'BFF_OIDC_REDIRECT_URI');
+  const passkeyEnabled = booleanValue(env.BFF_PASSKEY_ENABLED, true);
+  const webauthnRpId = rpId(env.BFF_WEBAUTHN_RP_ID);
+  const webauthnRpName = env.BFF_WEBAUTHN_RP_NAME?.trim() || 'Argus';
+  const webauthnOrigin = origin(env.BFF_WEBAUTHN_ORIGIN, 'http://localhost:5173', 'BFF_WEBAUTHN_ORIGIN');
+  const internalBffSecret = env.ARGUS_INTERNAL_BFF_SECRET?.trim()
+    || 'argus-dev-internal-bff-secret-change-me';
   if (production && mockUpstream) {
     throw new Error('BFF_MOCK_UPSTREAM cannot be enabled in production');
   }
@@ -129,6 +164,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     const redirect = new URL(oidcRedirectUri!);
     if (issuer.protocol !== 'https:' || redirect.protocol !== 'https:') {
       throw new Error('OIDC issuer and redirect URI must use https in production');
+    }
+  }
+  if (passkeyEnabled && (webauthnRpName.length > 80 || internalBffSecret.length < 32)) {
+    throw new Error('BFF_WEBAUTHN_RP_NAME must be at most 80 characters and ARGUS_INTERNAL_BFF_SECRET at least 32');
+  }
+  const webauthnHost = new URL(webauthnOrigin).hostname.toLowerCase();
+  if (passkeyEnabled && webauthnHost !== webauthnRpId && !webauthnHost.endsWith(`.${webauthnRpId}`)) {
+    throw new Error('BFF_WEBAUTHN_RP_ID must equal or be a domain suffix of the WebAuthn origin hostname');
+  }
+  if (production && passkeyEnabled) {
+    if (new URL(webauthnOrigin).protocol !== 'https:') {
+      throw new Error('BFF_WEBAUTHN_ORIGIN must use https in production');
+    }
+    if (internalBffSecret === 'argus-dev-internal-bff-secret-change-me') {
+      throw new Error('ARGUS_INTERNAL_BFF_SECRET must be changed in production');
     }
   }
   const oidcScopes = (env.BFF_OIDC_SCOPES ?? 'openid profile email').trim();
@@ -175,6 +225,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       '/?auth=mfa_required',
       'BFF_MFA_REQUIRED_REDIRECT',
     ),
+    passkeyEnabled,
+    webauthnRpId,
+    webauthnRpName,
+    webauthnOrigin,
+    webauthnCeremonyTtlSeconds: positiveInteger(
+      env.BFF_WEBAUTHN_CEREMONY_TTL_SECONDS,
+      300,
+      'BFF_WEBAUTHN_CEREMONY_TTL_SECONDS',
+    ),
+    internalBffSecret,
     logger: booleanValue(env.BFF_LOGGER, production),
   };
 }

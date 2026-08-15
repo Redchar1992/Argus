@@ -27,6 +27,7 @@ export type AuthState =
   | { status: 'checking' }
   | { status: 'anonymous'; message?: string }
   | { status: 'authenticating'; username: string }
+  | { status: 'authenticating_passkey' }
   | { status: 'mfa_required'; challenge: MfaChallenge; message?: string }
   | { status: 'verifying_mfa'; challenge: MfaChallenge }
   | { status: 'authenticated'; session: AuthSession }
@@ -39,12 +40,14 @@ export type AuthEvent =
   | { type: 'SESSION_FOUND'; session: AuthSession }
   | { type: 'NO_SESSION'; message?: string }
   | { type: 'LOGIN_STARTED'; username: string }
+  | { type: 'PASSKEY_LOGIN_STARTED' }
   | { type: 'LOGIN_SUCCEEDED'; session: AuthSession }
   | { type: 'MFA_REQUIRED'; challenge: MfaChallenge }
   | { type: 'MFA_VERIFY_STARTED' }
   | { type: 'MFA_FAILED'; message: string }
   | { type: 'MFA_CANCELLED' }
   | { type: 'LOGIN_FAILED'; message: string; username: string }
+  | { type: 'PASSKEY_LOGIN_FAILED'; message: string }
   | { type: 'SESSION_EXPIRED'; message: string }
   | { type: 'LOGOUT_STARTED' }
   | { type: 'LOGOUT_FINISHED' }
@@ -63,6 +66,8 @@ export function authReducer(state: AuthState, event: AuthEvent): AuthState {
       return { status: 'anonymous', ...(event.message ? { message: event.message } : {}) };
     case 'LOGIN_STARTED':
       return { status: 'authenticating', username: event.username };
+    case 'PASSKEY_LOGIN_STARTED':
+      return { status: 'authenticating_passkey' };
     case 'MFA_REQUIRED':
       return { status: 'mfa_required', challenge: event.challenge };
     case 'MFA_VERIFY_STARTED':
@@ -75,6 +80,8 @@ export function authReducer(state: AuthState, event: AuthEvent): AuthState {
       return { status: 'anonymous' };
     case 'LOGIN_FAILED':
       return { status: 'error', message: event.message, username: event.username };
+    case 'PASSKEY_LOGIN_FAILED':
+      return { status: 'error', message: event.message };
     case 'SESSION_EXPIRED':
       return { status: 'expired', message: event.message };
     case 'LOGOUT_STARTED':

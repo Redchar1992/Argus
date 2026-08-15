@@ -30,6 +30,12 @@ const config: AppConfig = {
   oidcTransactionTtlSeconds: 300,
   mfaChallengeTtlSeconds: 300,
   mfaRequiredRedirect: '/?auth=mfa_required',
+  passkeyEnabled: true,
+  webauthnRpId: 'localhost',
+  webauthnRpName: 'Argus',
+  webauthnOrigin: ORIGIN,
+  webauthnCeremonyTtlSeconds: 300,
+  internalBffSecret: 'argus-dev-internal-bff-secret-change-me',
   logger: false,
 };
 
@@ -147,6 +153,27 @@ redisDescribe('Redis-backed BFF integration', () => {
       await expect(runtimeA.sessions!.get(first.id)).resolves.toBeUndefined();
       await expect(runtimeB.sessions!.get(second.id)).resolves.toBeUndefined();
       await expect(runtimeB.sessions!.get(other.id)).resolves.toEqual(other);
+    } finally {
+      await runtimeA.close?.();
+      await runtimeB.close?.();
+    }
+  });
+
+  it('shares encrypted one-time WebAuthn ceremonies across replicas', async () => {
+    const runtimeA = await createRuntimeDependencies(config);
+    const runtimeB = await createRuntimeDependencies(config);
+    try {
+      const ceremony = {
+        kind: 'authentication' as const,
+        challenge: 'z'.repeat(43),
+        expiresAt: Date.now() + 60_000,
+      };
+      const id = await runtimeA.webauthnCeremonies!.create(ceremony);
+      const stored = await admin.get(`argus:bff:webauthn:${id}`);
+      expect(stored).toBeTruthy();
+      expect(stored).not.toContain(ceremony.challenge);
+      await expect(runtimeB.webauthnCeremonies!.consume(id)).resolves.toEqual(ceremony);
+      await expect(runtimeA.webauthnCeremonies!.consume(id)).resolves.toBeUndefined();
     } finally {
       await runtimeA.close?.();
       await runtimeB.close?.();

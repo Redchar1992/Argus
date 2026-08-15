@@ -2,6 +2,25 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
+
+vi.mock('@simplewebauthn/browser', () => ({
+  browserSupportsWebAuthn: () => true,
+  startAuthentication: vi.fn(async () => ({
+    id: 'credential_1234567890',
+    rawId: 'credential_1234567890',
+    type: 'public-key',
+    clientExtensionResults: {},
+    response: { clientDataJSON: 'client', authenticatorData: 'auth', signature: 'sig' },
+  })),
+  startRegistration: vi.fn(async () => ({
+    id: 'credential_1234567890',
+    rawId: 'credential_1234567890',
+    type: 'public-key',
+    clientExtensionResults: {},
+    response: { clientDataJSON: 'client', attestationObject: 'attestation', transports: ['internal'] },
+  })),
+}));
 
 const CSRF = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN_12';
 
@@ -25,6 +44,7 @@ function authenticatedResponse(expiresAt = '2026-08-15T12:00:00.000Z'): Response
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   localStorage.clear();
   document.cookie = `argus_csrf=${CSRF}; path=/`;
 });
@@ -75,6 +95,65 @@ describe('protected analyst console', () => {
     await user.click(screen.getByRole('button', { name: /sign out/i }));
     expect(await screen.findByRole('heading', { name: /sign in to argus/i })).toBeInTheDocument();
     expect(screen.queryByText(/run an investigation/i)).not.toBeInTheDocument();
+  });
+
+  it('uses the browser WebAuthn ceremony for passwordless passkey sign-in', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(anonymousResponse())
+      .mockResolvedValueOnce(jsonResponse({ options: { challenge: 'challenge', rpId: 'localhost' } }))
+      .mockResolvedValueOnce(authenticatedResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /sign in with a passkey/i }));
+
+    expect(await screen.findByText(/run an investigation/i)).toBeInTheDocument();
+    expect(startAuthentication).toHaveBeenCalledWith({
+      optionsJSON: { challenge: 'challenge', rpId: 'localhost' },
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/bff/auth/passkeys/authentication/options');
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('/bff/auth/passkeys/authentication/verify');
+    expect(String(fetchMock.mock.calls[2]?.[1]?.body)).toContain('credential_1234567890');
+    expect(String(fetchMock.mock.calls[2]?.[1]?.body)).not.toContain('password');
+  });
+
+  it('registers and lists a passkey from protected security settings', async () => {
+    const passkey = {
+      credentialId: 'credential_1234567890',
+      label: 'Work MacBook',
+      transports: ['internal'],
+      deviceType: 'multiDevice',
+      backedUp: true,
+      createdAt: '2026-08-15T00:00:00.000Z',
+      lastUsedAt: null,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(authenticatedResponse())
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ options: {
+        challenge: 'challenge',
+        rp: { id: 'localhost', name: 'Argus' },
+        user: { id: 'user', name: 'analyst', displayName: 'analyst' },
+        pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
+      } }))
+      .mockResolvedValueOnce(jsonResponse(passkey))
+      .mockResolvedValueOnce(jsonResponse([passkey]));
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /manage passkeys/i }));
+    await screen.findByText(/no passkeys registered/i);
+    await user.type(screen.getByLabelText(/passkey label/i), 'Work MacBook');
+    await user.click(screen.getByRole('button', { name: /add passkey/i }));
+
+    expect(await screen.findByText('Work MacBook')).toBeInTheDocument();
+    expect(startRegistration).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[3]?.[0]).toBe('/bff/auth/passkeys/registration/verify');
+    expect(String(fetchMock.mock.calls[3]?.[1]?.body)).toContain('Work MacBook');
   });
 
   it('shows a normalized login failure and leaves the protected page guarded', async () => {

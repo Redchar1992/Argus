@@ -3,6 +3,13 @@ import type { AppConfig } from './config.js';
 import { UpstreamError } from './errors.js';
 import type { AuthUser, Role } from './session-store.js';
 import type { MfaMethod } from './mfa-challenge-store.js';
+import type {
+  PasskeyMaterial,
+  PasskeyRegistrationContext,
+  PasskeyView,
+  VerifiedPasskeyAuthentication,
+  VerifiedPasskeyRegistration,
+} from './passkeys.js';
 
 export interface LoginResult extends AuthUser {
   token: string;
@@ -34,6 +41,21 @@ export interface UpstreamClient {
   recoveryStatus(accessToken: string, requestId: string): Promise<unknown>;
   regenerateRecoveryCodes(accessToken: string, totpCode: string, requestId: string): Promise<unknown>;
   recoverAccount(username: string, recoveryCode: string, newPassword: string, requestId: string): Promise<unknown>;
+  passkeyRegistrationContext(accessToken: string, requestId: string): Promise<PasskeyRegistrationContext>;
+  registerPasskey(
+    accessToken: string,
+    material: VerifiedPasskeyRegistration & { label?: string },
+    requestId: string,
+  ): Promise<PasskeyView>;
+  listPasskeys(accessToken: string, requestId: string): Promise<PasskeyView[]>;
+  deletePasskey(accessToken: string, credentialId: string, requestId: string): Promise<void>;
+  passkeyMaterial(credentialId: string, requestId: string): Promise<PasskeyMaterial>;
+  completePasskeyAuthentication(
+    credentialId: string,
+    expectedCounter: number,
+    verification: VerifiedPasskeyAuthentication,
+    requestId: string,
+  ): Promise<LoginResult>;
   submitInvestigation(accessToken: string, body: unknown, requestId: string): Promise<unknown>;
   getInvestigation(accessToken: string, id: string, requestId: string): Promise<unknown>;
 }
@@ -138,6 +160,75 @@ export class HttpUpstreamClient implements UpstreamClient {
     }, 'login');
   }
 
+  async passkeyRegistrationContext(accessToken: string, requestId: string): Promise<PasskeyRegistrationContext> {
+    const data = await this.request(`${this.config.authBaseUrl}/api/auth/passkeys/context`, {
+      method: 'GET', headers: this.internalAuthHeaders(accessToken, requestId, false),
+    }, 'api');
+    return this.parsePasskeyRegistrationContext(data);
+  }
+
+  async registerPasskey(
+    accessToken: string,
+    material: VerifiedPasskeyRegistration & { label?: string },
+    requestId: string,
+  ): Promise<PasskeyView> {
+    const data = await this.request(`${this.config.authBaseUrl}/api/auth/passkeys`, {
+      method: 'POST',
+      headers: this.internalAuthHeaders(accessToken, requestId, true),
+      body: JSON.stringify(material),
+    }, 'api');
+    return this.parsePasskeyView(data);
+  }
+
+  async listPasskeys(accessToken: string, requestId: string): Promise<PasskeyView[]> {
+    const data = await this.request(`${this.config.authBaseUrl}/api/auth/passkeys`, {
+      method: 'GET', headers: this.authHeaders(accessToken, requestId, false),
+    }, 'api');
+    if (!Array.isArray(data)) {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned invalid passkey inventory');
+    }
+    return data.map((item) => this.parsePasskeyView(item));
+  }
+
+  async deletePasskey(accessToken: string, credentialId: string, requestId: string): Promise<void> {
+    await this.request(`${this.config.authBaseUrl}/api/auth/passkeys/${encodeURIComponent(credentialId)}`, {
+      method: 'DELETE', headers: this.authHeaders(accessToken, requestId, false),
+    }, 'api');
+  }
+
+  async passkeyMaterial(credentialId: string, requestId: string): Promise<PasskeyMaterial> {
+    const data = await this.request(
+      `${this.config.authBaseUrl}/api/auth/internal/passkeys/${encodeURIComponent(credentialId)}`,
+      { method: 'GET', headers: this.internalHeaders(requestId, false) },
+      'login',
+    );
+    return this.parsePasskeyMaterial(data);
+  }
+
+  async completePasskeyAuthentication(
+    credentialId: string,
+    expectedCounter: number,
+    verification: VerifiedPasskeyAuthentication,
+    requestId: string,
+  ): Promise<LoginResult> {
+    const data = await this.request(`${this.config.authBaseUrl}/api/auth/internal/passkeys/complete`, {
+      method: 'POST',
+      headers: this.internalHeaders(requestId, true),
+      body: JSON.stringify({
+        credentialId,
+        expectedCounter,
+        newCounter: verification.newCounter,
+        deviceType: verification.deviceType,
+        backedUp: verification.backedUp,
+      }),
+    }, 'login');
+    const result = this.parseAuthenticationResult(data);
+    if (isMfaChallenge(result)) {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned a nested MFA challenge');
+    }
+    return result;
+  }
+
   private parseAuthenticationResult(data: unknown): AuthenticationResult {
     if (!data || typeof data !== 'object') {
       throw new UpstreamError(502, 'unavailable', 'Authentication service returned an invalid response');
@@ -186,6 +277,71 @@ export class HttpUpstreamClient implements UpstreamClient {
     };
   }
 
+  private parsePasskeyRegistrationContext(data: unknown): PasskeyRegistrationContext {
+    if (!data || typeof data !== 'object') {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned invalid passkey context');
+    }
+    const value = data as Record<string, unknown>;
+    if (!Number.isSafeInteger(value.userId) || Number(value.userId) <= 0
+      || typeof value.username !== 'string' || !Array.isArray(value.credentials)) {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned invalid passkey context');
+    }
+    return {
+      userId: Number(value.userId),
+      username: value.username,
+      credentials: value.credentials.map((credential) => this.parsePasskeyMaterial(credential)),
+    };
+  }
+
+  private parsePasskeyMaterial(data: unknown): PasskeyMaterial {
+    if (!data || typeof data !== 'object') {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned invalid passkey material');
+    }
+    const value = data as Record<string, unknown>;
+    const transports = value.transports;
+    if (typeof value.credentialId !== 'string' || typeof value.publicKey !== 'string'
+      || !Number.isSafeInteger(value.counter) || Number(value.counter) < 0
+      || !Array.isArray(transports) || !transports.every((transport) => typeof transport === 'string')
+      || typeof value.username !== 'string'
+      || (value.deviceType !== 'singleDevice' && value.deviceType !== 'multiDevice')
+      || typeof value.backedUp !== 'boolean') {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned invalid passkey material');
+    }
+    return {
+      credentialId: value.credentialId,
+      publicKey: value.publicKey,
+      counter: Number(value.counter),
+      transports,
+      username: value.username,
+      deviceType: value.deviceType,
+      backedUp: value.backedUp,
+    };
+  }
+
+  private parsePasskeyView(data: unknown): PasskeyView {
+    if (!data || typeof data !== 'object') {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned invalid passkey inventory');
+    }
+    const value = data as Record<string, unknown>;
+    const transports = value.transports;
+    if (typeof value.credentialId !== 'string' || typeof value.label !== 'string'
+      || !Array.isArray(transports) || !transports.every((transport) => typeof transport === 'string')
+      || (value.deviceType !== 'singleDevice' && value.deviceType !== 'multiDevice')
+      || typeof value.backedUp !== 'boolean' || typeof value.createdAt !== 'string'
+      || (value.lastUsedAt !== null && typeof value.lastUsedAt !== 'string')) {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned invalid passkey inventory');
+    }
+    return {
+      credentialId: value.credentialId,
+      label: value.label,
+      transports,
+      deviceType: value.deviceType,
+      backedUp: value.backedUp,
+      createdAt: value.createdAt,
+      lastUsedAt: value.lastUsedAt,
+    };
+  }
+
   async submitInvestigation(accessToken: string, body: unknown, requestId: string): Promise<unknown> {
     return this.request(
       `${this.config.investigationBaseUrl}/api/investigations`,
@@ -213,6 +369,19 @@ export class HttpUpstreamClient implements UpstreamClient {
       ...(json ? { 'content-type': 'application/json' } : {}),
       'x-request-id': requestId,
     };
+  }
+
+  private internalHeaders(requestId: string, json: boolean): Record<string, string> {
+    return {
+      accept: 'application/json',
+      ...(json ? { 'content-type': 'application/json' } : {}),
+      'x-request-id': requestId,
+      'x-argus-bff-secret': this.config.internalBffSecret,
+    };
+  }
+
+  private internalAuthHeaders(accessToken: string, requestId: string, json: boolean): Record<string, string> {
+    return { ...this.authHeaders(accessToken, requestId, json), 'x-argus-bff-secret': this.config.internalBffSecret };
   }
 
   private async request(url: string, init: RequestInit, purpose: 'login' | 'api'): Promise<unknown> {
@@ -243,8 +412,10 @@ export class HttpUpstreamClient implements UpstreamClient {
 /** Deterministic upstream used only by Playwright/local UI demonstrations. */
 export class MockUpstreamClient implements UpstreamClient {
   private readonly investigations = new Map<string, Record<string, unknown>>();
+  private readonly passkeys = new Map<string, PasskeyMaterial>();
+  private readonly passkeyLabels = new Map<string, string>();
 
-  async login(username: string, password: string): Promise<LoginResult> {
+  async login(username: string, password: string, _requestId?: string): Promise<AuthenticationResult> {
     const credentials: Record<string, { password: string; role: Role }> = {
       analyst: { password: 'analyst12345', role: 'ANALYST' },
       admin: { password: 'admin12345', role: 'ADMIN' },
@@ -261,7 +432,7 @@ export class MockUpstreamClient implements UpstreamClient {
     };
   }
 
-  async oidcLogin(idToken: string, nonce: string): Promise<LoginResult> {
+  async oidcLogin(idToken: string, nonce: string, _requestId?: string): Promise<AuthenticationResult> {
     if (idToken !== 'mock-oidc-id-token' || !nonce) {
       throw new UpstreamError(401, 'rejected', 'Invalid OIDC identity');
     }
@@ -273,39 +444,114 @@ export class MockUpstreamClient implements UpstreamClient {
     };
   }
 
-  async verifyMfa(): Promise<LoginResult> {
+  async verifyMfa(
+    _challengeToken: string,
+    _method: MfaMethod,
+    _code: string,
+    _requestId?: string,
+  ): Promise<LoginResult> {
     throw new UpstreamError(401, 'rejected', 'No mock MFA challenge');
   }
 
-  async mfaStatus(): Promise<unknown> {
+  async mfaStatus(_accessToken: string, _requestId?: string): Promise<unknown> {
     return { enabled: false, enrolledAt: null };
   }
 
-  async setupTotp(): Promise<unknown> {
+  async setupTotp(_accessToken: string, _requestId?: string): Promise<unknown> {
     return { secret: 'MOCKONLY', provisioningUri: 'otpauth://totp/mock', expiresAt: new Date(0).toISOString() };
   }
 
-  async confirmTotp(): Promise<unknown> {
+  async confirmTotp(_accessToken: string, _code: string, _requestId?: string): Promise<unknown> {
     return { enabled: true, enrolledAt: new Date(0).toISOString() };
   }
 
-  async disableTotp(): Promise<unknown> {
+  async disableTotp(_accessToken: string, _code: string, _requestId?: string): Promise<unknown> {
     return { enabled: false, enrolledAt: null };
   }
 
-  async recoveryStatus(): Promise<unknown> {
+  async recoveryStatus(_accessToken: string, _requestId?: string): Promise<unknown> {
     return { remaining: 0 };
   }
 
-  async regenerateRecoveryCodes(): Promise<unknown> {
+  async regenerateRecoveryCodes(_accessToken: string, _totpCode: string, _requestId?: string): Promise<unknown> {
     return { recoveryCodes: [], remaining: 0, generatedAt: new Date(0).toISOString() };
   }
 
-  async recoverAccount(): Promise<unknown> {
+  async recoverAccount(
+    _username: string,
+    _recoveryCode: string,
+    _newPassword: string,
+    _requestId?: string,
+  ): Promise<unknown> {
     return { state: 'recovered', message: 'Password reset. Sign in with your new password.' };
   }
 
-  async submitInvestigation(_accessToken: string, body: unknown): Promise<unknown> {
+  async passkeyRegistrationContext(_accessToken: string, _requestId?: string): Promise<PasskeyRegistrationContext> {
+    return { userId: 1, username: 'analyst', credentials: [...this.passkeys.values()] };
+  }
+
+  async registerPasskey(
+    _accessToken: string,
+    material: VerifiedPasskeyRegistration & { label?: string },
+    _requestId?: string,
+  ): Promise<PasskeyView> {
+    this.passkeys.set(material.credentialId, {
+      ...material,
+      username: 'analyst',
+    });
+    this.passkeyLabels.set(material.credentialId, material.label ?? 'Passkey');
+    return {
+      credentialId: material.credentialId,
+      label: material.label ?? 'Passkey',
+      transports: material.transports,
+      deviceType: material.deviceType,
+      backedUp: material.backedUp,
+      createdAt: new Date().toISOString(),
+      lastUsedAt: null,
+    };
+  }
+
+  async listPasskeys(_accessToken: string, _requestId?: string): Promise<PasskeyView[]> {
+    return [...this.passkeys.values()].map((value) => ({
+      credentialId: value.credentialId,
+      transports: value.transports,
+      deviceType: value.deviceType,
+      backedUp: value.backedUp,
+      label: this.passkeyLabels.get(value.credentialId) ?? 'Passkey',
+      createdAt: new Date(0).toISOString(),
+      lastUsedAt: null,
+    }));
+  }
+
+  async deletePasskey(_accessToken: string, credentialId: string, _requestId?: string): Promise<void> {
+    if (!this.passkeys.delete(credentialId)) throw new UpstreamError(404, 'rejected', 'Passkey not found');
+    this.passkeyLabels.delete(credentialId);
+  }
+
+  async passkeyMaterial(credentialId: string, _requestId?: string): Promise<PasskeyMaterial> {
+    const material = this.passkeys.get(credentialId);
+    if (!material) throw new UpstreamError(401, 'rejected', 'Invalid passkey');
+    return material;
+  }
+
+  async completePasskeyAuthentication(
+    credentialId: string,
+    expectedCounter: number,
+    verification: VerifiedPasskeyAuthentication,
+    _requestId?: string,
+  ): Promise<LoginResult> {
+    const material = await this.passkeyMaterial(credentialId);
+    if (material.counter !== expectedCounter) throw new UpstreamError(401, 'rejected', 'Invalid passkey');
+    this.passkeys.set(credentialId, { ...material, counter: verification.newCounter });
+    return {
+      token: `mock-only-${randomUUID()}`,
+      expiresInSeconds: 3_600,
+      username: material.username,
+      role: 'ANALYST',
+    };
+  }
+
+  async submitInvestigation(_accessToken: string, body: unknown, _requestId?: string): Promise<unknown> {
     const address =
       body && typeof body === 'object' && typeof (body as Record<string, unknown>).address === 'string'
         ? ((body as Record<string, unknown>).address as string)
@@ -344,7 +590,7 @@ export class MockUpstreamClient implements UpstreamClient {
     return { investigationId: id, status: 'COMPLETED' };
   }
 
-  async getInvestigation(_accessToken: string, id: string): Promise<unknown> {
+  async getInvestigation(_accessToken: string, id: string, _requestId?: string): Promise<unknown> {
     const investigation = this.investigations.get(id);
     if (!investigation) throw new UpstreamError(404, 'rejected', 'Investigation not found');
     return investigation;

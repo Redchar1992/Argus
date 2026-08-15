@@ -8,10 +8,12 @@ import {
   verifyMfa,
 } from '../api/bff';
 import { authReducer, initialAuthState, type AuthState, type MfaMethod } from './authMachine';
+import { authenticateWithPasskey } from '../api/passkeys';
 
 interface AuthContextValue {
   state: AuthState;
   login: (username: string, password: string) => Promise<void>;
+  loginWithPasskey: () => Promise<void>;
   verifyMfa: (method: MfaMethod, code: string) => Promise<void>;
   cancelMfa: () => void;
   recoverAccount: (username: string, recoveryCode: string, newPassword: string) => Promise<void>;
@@ -112,6 +114,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const loginWithPasskey = useCallback(async () => {
+    dispatch({ type: 'PASSKEY_LOGIN_STARTED' });
+    try {
+      const session = await authenticateWithPasskey();
+      dispatch({ type: 'LOGIN_SUCCEEDED', session });
+    } catch (error) {
+      dispatch({ type: 'PASSKEY_LOGIN_FAILED', message: friendlyMessage(error) });
+    }
+  }, []);
+
   const submitMfa = useCallback(async (method: MfaMethod, code: string) => {
     dispatch({ type: 'MFA_VERIFY_STARTED' });
     try {
@@ -144,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={{
     state,
     login,
+    loginWithPasskey,
     verifyMfa: submitMfa,
     cancelMfa,
     recoverAccount,

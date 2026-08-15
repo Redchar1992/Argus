@@ -47,10 +47,36 @@ describe('production configuration safeguards', () => {
       NODE_ENV: 'production',
       BFF_REDIS_URL: 'rediss://redis.internal:6379',
       BFF_SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      BFF_WEBAUTHN_RP_ID: 'argus.example',
+      BFF_WEBAUTHN_ORIGIN: 'https://argus.example',
+      ARGUS_INTERNAL_BFF_SECRET: 'production-bff-workload-secret-1234567890',
     });
     expect(config.sessionStore).toBe('redis');
     expect(config.cookieSecure).toBe(true);
     expect(config.sessionEncryptionKey).toHaveLength(32);
+    expect(config.webauthnOrigin).toBe('https://argus.example');
+  });
+
+  it('requires an exact HTTPS WebAuthn origin and a rotated workload secret in production', () => {
+    const production = {
+      NODE_ENV: 'production',
+      BFF_REDIS_URL: 'rediss://redis.internal:6379',
+      BFF_SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+      BFF_WEBAUTHN_RP_ID: 'argus.example',
+    };
+    expect(() => loadConfig({ ...production, BFF_WEBAUTHN_ORIGIN: 'http://argus.example' })).toThrow(
+      'BFF_WEBAUTHN_ORIGIN must use https in production',
+    );
+    expect(() => loadConfig({ ...production, BFF_WEBAUTHN_ORIGIN: 'https://argus.example' })).toThrow(
+      'ARGUS_INTERNAL_BFF_SECRET must be changed in production',
+    );
+    expect(() => loadConfig({ BFF_WEBAUTHN_RP_ID: 'https://argus.example/path' })).toThrow(
+      'BFF_WEBAUTHN_RP_ID must be a hostname',
+    );
+    expect(() => loadConfig({
+      BFF_WEBAUTHN_RP_ID: 'other.example',
+      BFF_WEBAUTHN_ORIGIN: 'https://login.argus.example',
+    })).toThrow('BFF_WEBAUTHN_RP_ID must equal or be a domain suffix');
   });
 
   it('requires complete OIDC settings and HTTPS in production', () => {

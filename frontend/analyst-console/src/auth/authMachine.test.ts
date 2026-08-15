@@ -61,4 +61,15 @@ describe('authReducer', () => {
       status: 'mfa_required', challenge, message: 'Invalid code',
     });
   });
+
+  it('models passkey authentication separately from password submission', () => {
+    const authenticating = authReducer(initialAuthState, { type: 'PASSKEY_LOGIN_STARTED' });
+    expect(authenticating).toEqual({ status: 'authenticating_passkey' });
+    expect(authReducer(authenticating, { type: 'LOGIN_SUCCEEDED', session })).toEqual({
+      status: 'authenticated', session,
+    });
+    expect(authReducer(authenticating, { type: 'PASSKEY_LOGIN_FAILED', message: 'Passkey cancelled' })).toEqual({
+      status: 'error', message: 'Passkey cancelled',
+    });
+  });
 });
