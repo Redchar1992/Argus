@@ -50,8 +50,8 @@ orchestrator directly.
 | `screening-tools-service` | 8083 | Spring Boot, JPA | Sanctions/profile/graph/risk tools and catalog |
 | `case-service` | 8084 | Spring Boot, JPA | Cases, audit log, screening policy |
 
-The Java backend remains one Maven reactor on Java 17, Spring Boot 3.2 and Spring Cloud
-2023.0.x. Every business service validates the JWT and applies its own role authorization.
+The Java backend remains one Maven reactor on Java 17, Spring Boot 3.5 and Spring Cloud
+2025.0.x. Every business service validates the JWT and applies its own role authorization.
 
 ## Authentication and session flow
 

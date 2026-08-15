@@ -162,7 +162,7 @@ querying the repository directly.
 3. `CompositeScreeningProvider` + fail-closed merge + config wiring.
 4. `TrmProvider` (cleanest public API) → `ChainalysisProvider` → `EllipticProvider`, each with a
    recorded-fixture test.
-5. Extend `risk_rules` to consume categories; update `docs/jd-mapping.md` +
+5. Extend `risk_rules` to consume categories; update `docs/capability-mapping.md` +
    README ("real vs scaffolded": OFAC moves from gap → real).
 
 ## What this demonstrates (for a compliance-eng JD)

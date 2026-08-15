@@ -1,7 +1,7 @@
-# JD Mapping — Binance Full Stack Engineer (Frontend Oriented), Identity & Security
+# Capability Mapping — Frontend-Oriented Full Stack Identity & Security
 
-This document maps the target role to **reviewable evidence in this repository**. Status is
-intentionally strict: interview design knowledge is not labelled as an implemented feature.
+This document maps common identity-product capabilities to **reviewable evidence in this repository**.
+Status is intentionally strict: design knowledge is not labelled as an implemented feature.
 
 ## Identity/frontend requirements
 
@@ -47,7 +47,7 @@ policy remain deployment/product decisions rather than implied features.
 
 | Capability | Concrete evidence | Status |
 |---|---|---|
-| **Java / Spring microservices** | Five-module Maven reactor: gateway, auth, agent orchestrator, screening tools and case service; Java 17, Spring Boot 3.2, Spring Cloud | **Built + tested** |
+| **Java / Spring microservices** | Five-module Maven reactor: gateway, auth, agent orchestrator, screening tools and case service; Java 17, Spring Boot 3.5, Spring Cloud 2025.0 | **Built + 53 tests** |
 | **REST API design** | Typed DTOs/controllers across `/api/auth`, `/api/investigations`, `/api/tools`, `/api/cases`, `/api/policies`, `/api/audit`; BFF exposes a browser-specific contract | **Built** |
 | **SQL + NoSQL judgement** | JPA/H2/Postgres for relational identity/policy/case data; Mongo implementation for variable investigation traces; zero-infra memory defaults | **Built** |
 | **AI/agent workflows** | Real bounded plan → act → observe loop; local tool-selecting provider plus Anthropic tool-use provider; every step persisted for audit | **Built; Anthropic requires a key** |
@@ -67,9 +67,11 @@ policy remain deployment/product decisions rather than implied features.
 6. Disposable local-PKI drill with two BFF regions and a TLS Redis primary/replica, including
    state-store loss, manual promotion, Session RPO and post-failover logout checks.
 7. Dependabot security alerts/updates plus weekly grouped maintenance for every npm lockfile,
-   Maven and Actions; the recorded 2026-08-15 baseline has zero open alerts.
+   Maven and Actions. Spring release-train patches are grouped, while minor train changes stay
+   manual so Boot/Cloud compatibility is verified together; the recorded 2026-08-15 baseline
+   has zero open alerts.
 
-## Most important interview walkthrough
+## Most important review walkthrough
 
 A concise code tour should follow this order:
 

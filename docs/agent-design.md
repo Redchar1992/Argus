@@ -75,7 +75,7 @@ Because step 3 branches on prior observations, two wallets take genuinely differ
 (verified in `AgentLoopTest` and by live curl — see README table).
 
 **Why have it?** So the whole system is demonstrable with zero external dependencies and
-deterministically — ideal for an interview walkthrough or CI — while still exercising a
+deterministically — ideal for a live review or CI — while still exercising a
 real multi-step, observation-driven decision process.
 
 ## Provider B — `AnthropicLlmProvider` (real LLM tool-use)

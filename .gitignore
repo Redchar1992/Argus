@@ -29,12 +29,6 @@ test-results/
 frontend/*/vite.config.js
 frontend/*/vite.config.d.ts
 
-# Local job-search materials; keep resumes and interview strategy out of the
-# public project history while still allowing the application pack to live
-# beside the working tree.
-/application/binance-identity-security/
-/docs/interview-prep/
-
 # Locally generated development PKI; never commit private keys/cert bundles.
 /infra/tls/generated/
 /infra/drills/results/

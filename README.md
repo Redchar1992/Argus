@@ -11,13 +11,13 @@
 > *plans* the investigation, but a wallet is never silently CLEARed and the BLOCK/REVIEW bands
 > come from admin-editable policy — not from the model.
 
-Portfolio project — **React 18 + TypeScript · Node/Fastify BFF · Java 17/Spring Cloud · Vue**.
+Technical exploration — **React 18 + TypeScript · Node/Fastify BFF · Java 17/Spring Cloud · Vue**.
 The analyst console now has real password, OIDC Authorization Code + PKCE, TOTP/recovery and
 phishing-resistant Passkey identity flows: the browser receives only an
 opaque `HttpOnly` session cookie while the upstream JWT stays server-side in the BFF. The
 README is deliberately
-**honest**: it claims only what is built and runs. [`docs/jd-mapping.md`](docs/jd-mapping.md)
-maps each JD requirement to code; a pluggable third-party-screening design (real OFAC SDN +
+**honest**: it claims only what is built and runs. [`docs/capability-mapping.md`](docs/capability-mapping.md)
+maps each product capability to code; a pluggable third-party-screening design (real OFAC SDN +
 Chainalysis/TRM/Elliptic adapters) is in [`docs/wallet-screening-providers.md`](docs/wallet-screening-providers.md);
 and the "What's real vs scaffolded" section below draws the line precisely.
 
@@ -83,12 +83,12 @@ Full detail: [`docs/architecture.md`](docs/architecture.md).
 
 ## Run it
 
-### Backend (Java 17, Spring Boot 3.2)
+### Backend (Java 17, Spring Boot 3.5 / Spring Cloud 2025.0)
 
 ```bash
 cd backend
 mvn -q -DskipTests package      # build all 5 modules
-mvn -q test                     # 52 tests (identity/RBAC, tools, agent loop, security)
+mvn -q test                     # 53 tests (gateway, identity/RBAC, tools, agent loop, security)
 ```
 
 Run the three Java services needed for the authenticated analyst demo (they default to in-memory stores —
