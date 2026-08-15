@@ -15,7 +15,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@fastify/cookie": "10.0.1",
+    "@fastify/cookie": "11.1.2",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "10.3.0",
     "@simplewebauthn/server": "^13.3.2",
