@@ -66,6 +66,8 @@ policy remain deployment/product decisions rather than implied features.
 5. Vue admin-console `npm ci`, dependency audit and build.
 6. Disposable local-PKI drill with two BFF regions and a TLS Redis primary/replica, including
    state-store loss, manual promotion, Session RPO and post-failover logout checks.
+7. Dependabot security alerts/updates plus weekly grouped maintenance for every npm lockfile,
+   Maven and Actions; the recorded 2026-08-15 baseline has zero open alerts.
 
 ## Most important interview walkthrough
 
