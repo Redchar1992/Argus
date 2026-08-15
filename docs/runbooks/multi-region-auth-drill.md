@@ -38,6 +38,10 @@ The runner:
    global revocation on the promoted store; and
 8. removes the two dedicated drill containers in an exit trap, even after failure.
 
+The runner passes the caller's numeric UID/GID to both Redis containers. That lets native Linux CI
+read bind-mounted mode-`0600` private keys without weakening their permissions; Redis writes its
+disposable AOF under the container-local `/tmp` directory.
+
 Raw timestamped results are written mode `0600` under `infra/drills/results/` and are gitignored.
 The reviewed, secrets-free evidence from 2026-08-15 is committed at
 [`../evidence/multi-region-auth-drill-2026-08-15.json`](../evidence/multi-region-auth-drill-2026-08-15.json).

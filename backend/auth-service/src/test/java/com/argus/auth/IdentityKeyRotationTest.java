@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(properties = {
+        "spring.datasource.url=jdbc:h2:mem:identitykeyrotationdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
         "argus.identity.primary-key-id=new-v2",
         "argus.identity.keys=old-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=,"
                 + "new-v2:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="

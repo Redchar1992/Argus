@@ -98,7 +98,9 @@ services:
     profiles: ["drill"]
     image: redis:7-alpine
     container_name: argus-redis-drill-primary
-    user: "0:0"
+    # Match the caller so mode-0600 bind-mounted development keys remain private and readable
+    # on native Linux as well as Docker Desktop.
+    user: "${ARGUS_DRILL_CONTAINER_UID:-1000}:${ARGUS_DRILL_CONTAINER_GID:-1000}"
     environment:
       ARGUS_DRILL_REDIS_PASSWORD: ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
     command:
@@ -117,6 +119,8 @@ services:
       - "yes"
       - --requirepass
       - ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+      - --dir
+      - /tmp
       - --appendonly
       - "yes"
       - --appendfsync
@@ -125,8 +129,6 @@ services:
       - "6391:6379"
     volumes:
       - ./infra/tls/generated:/tls:ro
-    tmpfs:
-      - /data
     healthcheck:
       test:
         - CMD-SHELL
@@ -142,7 +144,7 @@ services:
     profiles: ["drill"]
     image: redis:7-alpine
     container_name: argus-redis-drill-replica
-    user: "0:0"
+    user: "${ARGUS_DRILL_CONTAINER_UID:-1000}:${ARGUS_DRILL_CONTAINER_GID:-1000}"
     depends_on:
       redis-drill-primary:
         condition: service_healthy
@@ -171,6 +173,8 @@ services:
       - ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
       - --requirepass
       - ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+      - --dir
+      - /tmp
       - --appendonly
       - "yes"
       - --appendfsync
@@ -179,8 +183,6 @@ services:
       - "6392:6379"
     volumes:
       - ./infra/tls/generated:/tls:ro
-    tmpfs:
-      - /data
     healthcheck:
       test:
         - CMD-SHELL
