@@ -73,7 +73,9 @@ public class JwtService {
                 .claim("uid", user.getId())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(expirySeconds)))
-                .signWith(key)
+                // Do not let the library upgrade the algorithm based on key length:
+                // every resource server has an explicit HS256 verification contract.
+                .signWith(key, Jwts.SIG.HS256)
                 .compact();
     }
 

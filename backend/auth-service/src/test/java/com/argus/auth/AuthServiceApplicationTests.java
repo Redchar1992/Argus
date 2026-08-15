@@ -11,6 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,6 +31,9 @@ class AuthServiceApplicationTests {
         assertNotNull(token.token());
         assertEquals(Role.ADMIN, token.role());
         assertTrue(token.expiresInSeconds() > 0);
+        String header = new String(Base64.getUrlDecoder().decode(token.token().split("\\.")[0]),
+                StandardCharsets.UTF_8);
+        assertTrue(header.contains("\"alg\":\"HS256\""));
     }
 
     @Test
