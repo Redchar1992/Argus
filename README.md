@@ -210,7 +210,9 @@ with its explicit test-only deterministic upstream; production startup refuses m
 insecure cookies and the memory Session store. A separate CI job runs the authenticated-TLS
 regional failover drill against disposable Redis primary/replica containers. Repository
 Dependabot alerts/security updates are enabled, and weekly grouped update PRs cover all three
-npm lockfiles, the Maven reactor and GitHub Actions. CI blocks moderate-or-higher npm findings;
+npm lockfiles, the Maven reactor and GitHub Actions. Routine npm/Maven PRs are limited to
+compatible non-major updates; major framework/runtime migrations stay explicit engineering work.
+CI blocks moderate-or-higher npm findings;
 the 2026-08-15 audit baseline is zero findings in each npm workspace and zero open repository
 Dependabot alerts across the 489-package dependency graph.
 
