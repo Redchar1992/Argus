@@ -10,6 +10,14 @@ export interface AuthSession {
   expiresAt: string;
 }
 
+export type MfaMethod = 'TOTP' | 'RECOVERY_CODE';
+
+export interface MfaChallenge {
+  username: string;
+  methods: MfaMethod[];
+  expiresAt: string;
+}
+
 /**
  * Authentication is a discriminated union, not a collection of booleans. That
  * makes impossible states (for example "authenticated and expired")
@@ -19,6 +27,8 @@ export type AuthState =
   | { status: 'checking' }
   | { status: 'anonymous'; message?: string }
   | { status: 'authenticating'; username: string }
+  | { status: 'mfa_required'; challenge: MfaChallenge; message?: string }
+  | { status: 'verifying_mfa'; challenge: MfaChallenge }
   | { status: 'authenticated'; session: AuthSession }
   | { status: 'signingOut'; session: AuthSession }
   | { status: 'expired'; message: string }
@@ -30,6 +40,10 @@ export type AuthEvent =
   | { type: 'NO_SESSION'; message?: string }
   | { type: 'LOGIN_STARTED'; username: string }
   | { type: 'LOGIN_SUCCEEDED'; session: AuthSession }
+  | { type: 'MFA_REQUIRED'; challenge: MfaChallenge }
+  | { type: 'MFA_VERIFY_STARTED' }
+  | { type: 'MFA_FAILED'; message: string }
+  | { type: 'MFA_CANCELLED' }
   | { type: 'LOGIN_FAILED'; message: string; username: string }
   | { type: 'SESSION_EXPIRED'; message: string }
   | { type: 'LOGOUT_STARTED' }
@@ -49,6 +63,16 @@ export function authReducer(state: AuthState, event: AuthEvent): AuthState {
       return { status: 'anonymous', ...(event.message ? { message: event.message } : {}) };
     case 'LOGIN_STARTED':
       return { status: 'authenticating', username: event.username };
+    case 'MFA_REQUIRED':
+      return { status: 'mfa_required', challenge: event.challenge };
+    case 'MFA_VERIFY_STARTED':
+      return state.status === 'mfa_required' ? { status: 'verifying_mfa', challenge: state.challenge } : state;
+    case 'MFA_FAILED':
+      return state.status === 'verifying_mfa'
+        ? { status: 'mfa_required', challenge: state.challenge, message: event.message }
+        : state;
+    case 'MFA_CANCELLED':
+      return { status: 'anonymous' };
     case 'LOGIN_FAILED':
       return { status: 'error', message: event.message, username: event.username };
     case 'SESSION_EXPIRED':

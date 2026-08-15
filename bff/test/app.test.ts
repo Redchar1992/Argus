@@ -6,6 +6,7 @@ import { UpstreamError } from '../src/errors.js';
 import type { OidcRelyingParty } from '../src/oidc.js';
 import { SessionStore } from '../src/session-store.js';
 import { MockUpstreamClient, type UpstreamClient } from '../src/upstream.js';
+import type { AuthenticationResult, LoginResult } from '../src/upstream.js';
 
 const ORIGIN = 'http://localhost:5173';
 const config: AppConfig = {
@@ -27,6 +28,8 @@ const config: AppConfig = {
   oidcSuccessRedirect: '/?auth=oidc_success',
   oidcErrorRedirect: '/?auth=oidc_error',
   oidcTransactionTtlSeconds: 300,
+  mfaChallengeTtlSeconds: 300,
+  mfaRequiredRedirect: '/?auth=mfa_required',
   logger: false,
 };
 
@@ -216,6 +219,11 @@ describe('identity BFF', () => {
     const expiredUpstream: UpstreamClient = {
       login: (...args) => mock.login(...args),
       oidcLogin: (...args) => mock.oidcLogin(...args),
+      verifyMfa: (...args) => mock.verifyMfa(...args),
+      mfaStatus: (...args) => mock.mfaStatus(...args),
+      setupTotp: (...args) => mock.setupTotp(...args),
+      confirmTotp: (...args) => mock.confirmTotp(...args),
+      disableTotp: (...args) => mock.disableTotp(...args),
       submitInvestigation: (...args) => mock.submitInvestigation(...args),
       getInvestigation: async () => {
         throw new UpstreamError(401, 'rejected', 'JWT expired');
@@ -254,6 +262,13 @@ describe('identity BFF', () => {
       oidcLogin: async () => {
         throw new UpstreamError(504, 'timeout', 'internal socket detail');
       },
+      verifyMfa: async () => {
+        throw new UpstreamError(504, 'timeout', 'internal socket detail');
+      },
+      mfaStatus: async () => undefined,
+      setupTotp: async () => undefined,
+      confirmTotp: async () => undefined,
+      disableTotp: async () => undefined,
       submitInvestigation: async () => undefined,
       getInvestigation: async () => undefined,
     };
@@ -352,5 +367,80 @@ describe('identity BFF', () => {
     });
     expect(replay.statusCode).toBe(302);
     expect(replay.headers.location).toBe('/?auth=oidc_error');
+  });
+
+  it('keeps the MFA challenge server-side, allows retry, then rotates into a full session', async () => {
+    class MfaUpstream extends MockUpstreamClient {
+      override async login(): Promise<AuthenticationResult> {
+        return {
+          state: 'mfa_required',
+          challengeToken: 'C'.repeat(43),
+          methods: ['TOTP'],
+          expiresInSeconds: 300,
+          username: 'mfa.analyst',
+        };
+      }
+
+      override async verifyMfa(_challenge: string, _method: 'TOTP' | 'RECOVERY_CODE', code: string): Promise<LoginResult> {
+        if (code !== '123456') throw new UpstreamError(401, 'rejected', 'Invalid MFA code');
+        return {
+          token: 'server-only-mfa-jwt',
+          expiresInSeconds: 3_600,
+          username: 'mfa.analyst',
+          role: 'ANALYST',
+        };
+      }
+    }
+
+    const { app, csrf } = await appWithCsrf({ upstream: new MfaUpstream() });
+    const login = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/login',
+      headers: { ...mutationHeaders(csrf), 'content-type': 'application/json' },
+      payload: { username: 'mfa.analyst', password: 'password' },
+    });
+    expect(login.statusCode).toBe(200);
+    expect(login.json()).toMatchObject({ state: 'mfa_required', methods: ['TOTP'], username: 'mfa.analyst' });
+    expect(login.body).not.toContain('challengeToken');
+    expect(login.body).not.toContain('CCCC');
+    const mfaId = cookieValue(login.headers['set-cookie'], 'argus_mfa_tx');
+    const serialized = Array.isArray(login.headers['set-cookie'])
+      ? login.headers['set-cookie'].join('\n') : login.headers['set-cookie'] ?? '';
+    expect(serialized).toMatch(/argus_mfa_tx=.*HttpOnly/i);
+    expect(serialized).toMatch(/argus_mfa_tx=.*SameSite=Strict/i);
+
+    const wrong = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/mfa/verify',
+      headers: {
+        ...mutationHeaders(csrf, `argus_mfa_tx=${mfaId}; argus_csrf=${csrf}`),
+        'content-type': 'application/json',
+      },
+      payload: { method: 'TOTP', code: '000000' },
+    });
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.json()).toMatchObject({ error: { code: 'INVALID_MFA_CODE' } });
+
+    const verified = await app.inject({
+      method: 'POST',
+      url: '/bff/auth/mfa/verify',
+      headers: {
+        ...mutationHeaders(csrf, `argus_mfa_tx=${mfaId}; argus_csrf=${csrf}`),
+        'content-type': 'application/json',
+      },
+      payload: { method: 'TOTP', code: '123456' },
+    });
+    expect(verified.statusCode).toBe(200);
+    expect(verified.json()).toMatchObject({ state: 'authenticated', user: { username: 'mfa.analyst' } });
+    expect(verified.body).not.toContain('server-only-mfa-jwt');
+    expect(cookieValue(verified.headers['set-cookie'], 'argus_session')).toHaveLength(43);
+
+    const replay = await app.inject({
+      method: 'GET',
+      url: '/bff/auth/mfa/challenge',
+      headers: { cookie: `argus_mfa_tx=${mfaId}` },
+    });
+    expect(replay.statusCode).toBe(401);
+    expect(replay.json()).toMatchObject({ error: { code: 'MFA_CHALLENGE_EXPIRED' } });
   });
 });

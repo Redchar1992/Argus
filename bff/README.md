@@ -17,14 +17,14 @@ the service intentionally does not read a committed secret file.
 
 ```bash
 npm run build
-npm test                    # 25 deterministic tests; Redis integration skips without its URL
+npm test                    # 28 deterministic tests; Redis integration skips without its URL
 npm start                   # run compiled dist/server.js
 ```
 
 Run the real shared-store integration suite against an isolated Redis database:
 
 ```bash
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 26/26
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 29/29
 ```
 
 ## Browser contract
@@ -34,6 +34,9 @@ BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test   # 26/26
 - `GET /bff/auth/oidc/start` — generate state, nonce and PKCE, then redirect to the provider.
 - `GET /bff/auth/oidc/callback` — atomically consume the transaction, validate the provider
   response and create a normal Argus session without exposing either token to JavaScript.
+- `GET /bff/auth/mfa/challenge` + `POST /bff/auth/mfa/verify` — restore/complete a
+  pre-authentication challenge while its backend token stays encrypted and server-side.
+- `/bff/auth/mfa/totp/*` — session-guarded TOTP setup, confirmation and disable proxy.
 - `POST /bff/auth/logout` — delete the server session and clear/rotate cookies.
 - `POST /bff/api/investigations` and `GET /bff/api/investigations/:id` — guarded proxy;
   Bearer JWT is added only on the BFF-to-Java request.
@@ -50,6 +53,8 @@ requestId }` error shape. Login is rate-limited per client.
 - `NODE_ENV=production` refuses insecure cookies and the deterministic mock upstream.
 - OIDC transactions are one-time, expiry-bounded and encrypted in Redis; the callback-only
   `HttpOnly`, `SameSite=Lax` cookie binds the browser redirect to its server-side transaction.
+- MFA challenges use a separate `HttpOnly`, `SameSite=Strict` opaque cookie. The browser sees
+  allowed methods and expiry, never the Java challenge token or an Argus JWT.
 
 Development defaults to an in-process `Map` and process-local limiter for a zero-infrastructure
 demo. `BFF_SESSION_STORE=redis` switches both the Session repository and login limiter to Redis:

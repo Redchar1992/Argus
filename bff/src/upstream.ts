@@ -2,15 +2,35 @@ import { randomUUID } from 'node:crypto';
 import type { AppConfig } from './config.js';
 import { UpstreamError } from './errors.js';
 import type { AuthUser, Role } from './session-store.js';
+import type { MfaMethod } from './mfa-challenge-store.js';
 
 export interface LoginResult extends AuthUser {
   token: string;
   expiresInSeconds: number;
 }
 
+export interface MfaChallengeResult {
+  state: 'mfa_required';
+  challengeToken: string;
+  methods: MfaMethod[];
+  expiresInSeconds: number;
+  username: string;
+}
+
+export type AuthenticationResult = LoginResult | MfaChallengeResult;
+
+export function isMfaChallenge(result: AuthenticationResult): result is MfaChallengeResult {
+  return 'state' in result && result.state === 'mfa_required';
+}
+
 export interface UpstreamClient {
-  login(username: string, password: string, requestId: string): Promise<LoginResult>;
-  oidcLogin(idToken: string, nonce: string, requestId: string): Promise<LoginResult>;
+  login(username: string, password: string, requestId: string): Promise<AuthenticationResult>;
+  oidcLogin(idToken: string, nonce: string, requestId: string): Promise<AuthenticationResult>;
+  verifyMfa(challengeToken: string, method: MfaMethod, code: string, requestId: string): Promise<LoginResult>;
+  mfaStatus(accessToken: string, requestId: string): Promise<unknown>;
+  setupTotp(accessToken: string, requestId: string): Promise<unknown>;
+  confirmTotp(accessToken: string, code: string, requestId: string): Promise<unknown>;
+  disableTotp(accessToken: string, code: string, requestId: string): Promise<unknown>;
   submitInvestigation(accessToken: string, body: unknown, requestId: string): Promise<unknown>;
   getInvestigation(accessToken: string, id: string, requestId: string): Promise<unknown>;
 }
@@ -28,7 +48,7 @@ async function parseResponse(response: Response): Promise<unknown> {
 export class HttpUpstreamClient implements UpstreamClient {
   constructor(private readonly config: AppConfig) {}
 
-  async login(username: string, password: string, requestId: string): Promise<LoginResult> {
+  async login(username: string, password: string, requestId: string): Promise<AuthenticationResult> {
     const data = await this.request(
       `${this.config.authBaseUrl}/api/auth/login`,
       {
@@ -38,10 +58,10 @@ export class HttpUpstreamClient implements UpstreamClient {
       },
       'login',
     );
-    return this.parseLoginResult(data);
+    return this.parseAuthenticationResult(data);
   }
 
-  async oidcLogin(idToken: string, nonce: string, requestId: string): Promise<LoginResult> {
+  async oidcLogin(idToken: string, nonce: string, requestId: string): Promise<AuthenticationResult> {
     const data = await this.request(
       `${this.config.authBaseUrl}/api/auth/oidc/login`,
       {
@@ -51,14 +71,79 @@ export class HttpUpstreamClient implements UpstreamClient {
       },
       'login',
     );
-    return this.parseLoginResult(data);
+    return this.parseAuthenticationResult(data);
   }
 
-  private parseLoginResult(data: unknown): LoginResult {
+  async verifyMfa(challengeToken: string, method: MfaMethod, code: string, requestId: string): Promise<LoginResult> {
+    const data = await this.request(
+      `${this.config.authBaseUrl}/api/auth/mfa/verify`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-request-id': requestId },
+        body: JSON.stringify({ challengeToken, method, code }),
+      },
+      'login',
+    );
+    const result = this.parseAuthenticationResult(data);
+    if (isMfaChallenge(result)) {
+      throw new UpstreamError(502, 'unavailable', 'Authentication service returned a nested MFA challenge');
+    }
+    return result;
+  }
+
+  async mfaStatus(accessToken: string, requestId: string): Promise<unknown> {
+    return this.request(`${this.config.authBaseUrl}/api/auth/mfa`, {
+      method: 'GET', headers: this.authHeaders(accessToken, requestId, false),
+    }, 'api');
+  }
+
+  async setupTotp(accessToken: string, requestId: string): Promise<unknown> {
+    return this.request(`${this.config.authBaseUrl}/api/auth/mfa/totp/setup`, {
+      method: 'POST', headers: this.authHeaders(accessToken, requestId, true), body: '{}',
+    }, 'api');
+  }
+
+  async confirmTotp(accessToken: string, code: string, requestId: string): Promise<unknown> {
+    return this.request(`${this.config.authBaseUrl}/api/auth/mfa/totp/confirm`, {
+      method: 'POST', headers: this.authHeaders(accessToken, requestId, true), body: JSON.stringify({ code }),
+    }, 'api');
+  }
+
+  async disableTotp(accessToken: string, code: string, requestId: string): Promise<unknown> {
+    return this.request(`${this.config.authBaseUrl}/api/auth/mfa/totp/disable`, {
+      method: 'POST', headers: this.authHeaders(accessToken, requestId, true), body: JSON.stringify({ code }),
+    }, 'api');
+  }
+
+  private parseAuthenticationResult(data: unknown): AuthenticationResult {
     if (!data || typeof data !== 'object') {
       throw new UpstreamError(502, 'unavailable', 'Authentication service returned an invalid response');
     }
     const candidate = data as Record<string, unknown>;
+    if (candidate.state === 'mfa_required') {
+      const methods = candidate.methods;
+      if (
+        typeof candidate.challengeToken !== 'string' ||
+        candidate.challengeToken.length < 32 ||
+        candidate.challengeToken.length > 256 ||
+        !Array.isArray(methods) ||
+        methods.length === 0 ||
+        !methods.every((method) => method === 'TOTP' || method === 'RECOVERY_CODE') ||
+        typeof candidate.expiresInSeconds !== 'number' ||
+        !Number.isFinite(candidate.expiresInSeconds) ||
+        candidate.expiresInSeconds <= 0 ||
+        typeof candidate.username !== 'string'
+      ) {
+        throw new UpstreamError(502, 'unavailable', 'Authentication service returned an invalid MFA challenge');
+      }
+      return {
+        state: 'mfa_required',
+        challengeToken: candidate.challengeToken,
+        methods: methods as MfaMethod[],
+        expiresInSeconds: candidate.expiresInSeconds,
+        username: candidate.username,
+      };
+    }
     const role = candidate.role;
     if (
       typeof candidate.token !== 'string' ||
@@ -163,6 +248,26 @@ export class MockUpstreamClient implements UpstreamClient {
       username: 'oidc.analyst',
       role: 'ANALYST',
     };
+  }
+
+  async verifyMfa(): Promise<LoginResult> {
+    throw new UpstreamError(401, 'rejected', 'No mock MFA challenge');
+  }
+
+  async mfaStatus(): Promise<unknown> {
+    return { enabled: false, enrolledAt: null };
+  }
+
+  async setupTotp(): Promise<unknown> {
+    return { secret: 'MOCKONLY', provisioningUri: 'otpauth://totp/mock', expiresAt: new Date(0).toISOString() };
+  }
+
+  async confirmTotp(): Promise<unknown> {
+    return { enabled: true, enrolledAt: new Date(0).toISOString() };
+  }
+
+  async disableTotp(): Promise<unknown> {
+    return { enabled: false, enrolledAt: null };
   }
 
   async submitInvestigation(_accessToken: string, body: unknown): Promise<unknown> {

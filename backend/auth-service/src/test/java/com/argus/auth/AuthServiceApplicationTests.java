@@ -1,6 +1,7 @@
 package com.argus.auth;
 
 import com.argus.auth.dto.AuthDtos.RegisterRequest;
+import com.argus.auth.dto.AuthDtos.AuthenticationResponse;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
 import com.argus.auth.dto.AuthDtos.UserView;
 import com.argus.auth.model.Role;
@@ -23,7 +24,7 @@ class AuthServiceApplicationTests {
 
     @Test
     void seededAdminCanLoginAndGetsAdminRole() {
-        TokenResponse token = authService.login("admin", "admin12345");
+        TokenResponse token = token(authService.login("admin", "admin12345"));
         assertNotNull(token.token());
         assertEquals(Role.ADMIN, token.role());
         assertTrue(token.expiresInSeconds() > 0);
@@ -38,7 +39,7 @@ class AuthServiceApplicationTests {
     @Test
     void registerThenLoginRoundTrips() {
         authService.register(new RegisterRequest("reviewer1", "reviewer-pass"));
-        TokenResponse token = authService.login("reviewer1", "reviewer-pass");
+        TokenResponse token = token(authService.login("reviewer1", "reviewer-pass"));
         assertEquals("reviewer1", token.username());
         assertEquals(Role.ANALYST, token.role());
     }
@@ -53,7 +54,7 @@ class AuthServiceApplicationTests {
         UserView created = authService.register(new RegisterRequest("escalator", "hunter2hunter2"));
         assertEquals(Role.ANALYST, created.role());
 
-        TokenResponse token = authService.login("escalator", "hunter2hunter2");
+        TokenResponse token = token(authService.login("escalator", "hunter2hunter2"));
         assertEquals(Role.ANALYST, token.role());
     }
 
@@ -63,5 +64,9 @@ class AuthServiceApplicationTests {
         authService.register(new RegisterRequest("promoteme", "promoteme-pass"));
         UserView promoted = authService.assignRole("promoteme", Role.ADMIN);
         assertEquals(Role.ADMIN, promoted.role());
+    }
+
+    private static TokenResponse token(AuthenticationResponse response) {
+        return (TokenResponse) response;
     }
 }

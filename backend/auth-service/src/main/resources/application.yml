@@ -25,6 +25,14 @@ argus:
     enabled: ${ARGUS_OIDC_ENABLED:false}
     issuer: ${ARGUS_OIDC_ISSUER:}
     audience: ${ARGUS_OIDC_AUDIENCE:}
+  identity:
+    # Comma-separated kid:base64 AES-256 keys. Keep retired keys during rotation.
+    primary-key-id: ${ARGUS_IDENTITY_PRIMARY_KEY_ID:dev-v1}
+    keys: ${ARGUS_IDENTITY_KEYS:dev-v1:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+  mfa:
+    challenge-ttl-seconds: ${ARGUS_MFA_CHALLENGE_TTL_SECONDS:300}
+    enrollment-ttl-seconds: ${ARGUS_MFA_ENROLLMENT_TTL_SECONDS:600}
+    maximum-attempts: ${ARGUS_MFA_MAXIMUM_ATTEMPTS:5}
 
 management:
   endpoints:

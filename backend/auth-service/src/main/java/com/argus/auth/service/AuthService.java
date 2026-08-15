@@ -1,6 +1,7 @@
 package com.argus.auth.service;
 
 import com.argus.auth.dto.AuthDtos.RegisterRequest;
+import com.argus.auth.dto.AuthDtos.AuthenticationResponse;
 import com.argus.auth.dto.AuthDtos.TokenResponse;
 import com.argus.auth.dto.AuthDtos.UserView;
 import com.argus.auth.model.Role;
@@ -29,15 +30,18 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final OidcTokenVerifier oidcTokenVerifier;
+    private final MfaService mfaService;
 
     public AuthService(UserAccountRepository repository,
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
-                       OidcTokenVerifier oidcTokenVerifier) {
+                       OidcTokenVerifier oidcTokenVerifier,
+                       MfaService mfaService) {
         this.repository = repository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.oidcTokenVerifier = oidcTokenVerifier;
+        this.mfaService = mfaService;
     }
 
     /**
@@ -65,21 +69,21 @@ public class AuthService {
         return toView(repository.save(user));
     }
 
-    public TokenResponse login(String username, String rawPassword) {
+    public AuthenticationResponse login(String username, String rawPassword) {
         UserAccount user = repository.findByUsername(username)
                 .orElseThrow(() -> new ResponseStatusException(UNAUTHORIZED, "Invalid credentials"));
         if (!user.isEnabled() || user.getPasswordHash() == null
                 || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
             throw new ResponseStatusException(UNAUTHORIZED, "Invalid credentials");
         }
-        return issue(user);
+        return completePrimaryAuthentication(user);
     }
 
     /**
      * Verifies the provider token independently from the BFF and maps solely by
      * (issuer, subject). Email is profile data, never an account-linking key.
      */
-    public TokenResponse oidcLogin(String idToken, String expectedNonce) {
+    public AuthenticationResponse oidcLogin(String idToken, String expectedNonce) {
         OidcTokenVerifier.OidcIdentity identity = oidcTokenVerifier.verify(idToken, expectedNonce);
         UserAccount user = repository
                 .findByOidcIssuerAndOidcSubject(identity.issuer(), identity.subject())
@@ -87,7 +91,7 @@ public class AuthService {
         if (!user.isEnabled()) {
             throw new ResponseStatusException(UNAUTHORIZED, "Account disabled");
         }
-        return issue(user);
+        return completePrimaryAuthentication(user);
     }
 
     private UserAccount provisionOidcUser(OidcTokenVerifier.OidcIdentity identity) {
@@ -111,7 +115,8 @@ public class AuthService {
         }
     }
 
-    private TokenResponse issue(UserAccount user) {
+    private AuthenticationResponse completePrimaryAuthentication(UserAccount user) {
+        if (user.isMfaEnabled()) return mfaService.createChallenge(user);
         String token = jwtService.issue(user);
         return new TokenResponse(token, "Bearer", jwtService.getExpirySeconds(),
                 user.getUsername(), user.getRole());

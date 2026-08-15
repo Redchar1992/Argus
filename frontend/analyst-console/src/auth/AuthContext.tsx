@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef, type ReactNode } from 'react';
-import { ApiError, getSession, login as loginRequest, logout as logoutRequest } from '../api/bff';
-import { authReducer, initialAuthState, type AuthState } from './authMachine';
+import { ApiError, getSession, login as loginRequest, logout as logoutRequest, verifyMfa } from '../api/bff';
+import { authReducer, initialAuthState, type AuthState, type MfaMethod } from './authMachine';
 
 interface AuthContextValue {
   state: AuthState;
   login: (username: string, password: string) => Promise<void>;
+  verifyMfa: (method: MfaMethod, code: string) => Promise<void>;
+  cancelMfa: () => void;
   logout: () => Promise<void>;
   retrySession: () => Promise<void>;
 }
@@ -25,8 +27,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const retrySession = useCallback(async () => {
     dispatch({ type: 'CHECK_SESSION' });
     try {
-      const session = await getSession();
-      dispatch({ type: 'SESSION_FOUND', session });
+      const result = await getSession();
+      if (result.state === 'mfa_required') dispatch({ type: 'MFA_REQUIRED', challenge: result.challenge });
+      else dispatch({ type: 'SESSION_FOUND', session: result.session });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         if (error.code === 'SESSION_EXPIRED') {
@@ -78,16 +81,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [state]);
 
+  useEffect(() => {
+    if (state.status !== 'mfa_required') return;
+    const remaining = Date.parse(state.challenge.expiresAt) - Date.now();
+    if (!Number.isFinite(remaining) || remaining <= 0) {
+      dispatch({ type: 'MFA_CANCELLED' });
+      return;
+    }
+    const timer = window.setTimeout(() => dispatch({ type: 'MFA_CANCELLED' }), remaining);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+
   const login = useCallback(async (username: string, password: string) => {
     const normalizedUsername = username.trim();
     dispatch({ type: 'LOGIN_STARTED', username: normalizedUsername });
     try {
-      const session = await loginRequest(normalizedUsername, password);
-      dispatch({ type: 'LOGIN_SUCCEEDED', session });
+      const result = await loginRequest(normalizedUsername, password);
+      if (result.state === 'mfa_required') dispatch({ type: 'MFA_REQUIRED', challenge: result.challenge });
+      else dispatch({ type: 'LOGIN_SUCCEEDED', session: result.session });
     } catch (error) {
       dispatch({ type: 'LOGIN_FAILED', message: friendlyMessage(error), username: normalizedUsername });
     }
   }, []);
+
+  const submitMfa = useCallback(async (method: MfaMethod, code: string) => {
+    dispatch({ type: 'MFA_VERIFY_STARTED' });
+    try {
+      const session = await verifyMfa(method, code);
+      dispatch({ type: 'LOGIN_SUCCEEDED', session });
+    } catch (error) {
+      dispatch({ type: 'MFA_FAILED', message: friendlyMessage(error) });
+    }
+  }, []);
+
+  const cancelMfa = useCallback(() => dispatch({ type: 'MFA_CANCELLED' }), []);
 
   const logout = useCallback(async () => {
     dispatch({ type: 'LOGOUT_STARTED' });
@@ -101,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  return <AuthContext.Provider value={{ state, login, logout, retrySession }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ state, login, verifyMfa: submitMfa, cancelMfa, logout, retrySession }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {

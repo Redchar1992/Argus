@@ -26,6 +26,15 @@ export const DICT = {
     zh: '瀏覽器只接收 HttpOnly 工作階段 Cookie;上游 JWT 保留在 Node BFF 內。',
   },
   'auth.currentSession': { en: 'Current session', zh: '目前工作階段' },
+  'auth.mfaTitle': { en: 'Verify your identity', zh: '驗證您的身分' },
+  'auth.mfaIntro': { en: 'Enter a second factor for', zh: '請輸入第二驗證因素:' },
+  'auth.mfaMethod': { en: 'Verification method', zh: '驗證方式' },
+  'auth.totp': { en: 'Authenticator app', zh: '驗證器應用程式' },
+  'auth.totpCode': { en: '6-digit authenticator code', zh: '6 位數驗證碼' },
+  'auth.recoveryCode': { en: 'Recovery code', zh: '復原碼' },
+  'auth.verify': { en: 'Verify', zh: '驗證' },
+  'auth.verifying': { en: 'Verifying…', zh: '驗證中…' },
+  'auth.useAnotherAccount': { en: 'Use another account', zh: '使用其他帳戶' },
 
   // hero
   'hero.headline': {

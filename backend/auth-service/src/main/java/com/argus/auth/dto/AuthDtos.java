@@ -1,9 +1,13 @@
 package com.argus.auth.dto;
 
+import com.argus.auth.model.MfaMethod;
 import com.argus.auth.model.Role;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+
+import java.time.Instant;
+import java.util.List;
 
 /**
  * Request/response records for the auth endpoints.
@@ -40,12 +44,44 @@ public final class AuthDtos {
             @NotNull Role role) {
     }
 
+    public sealed interface AuthenticationResponse permits TokenResponse, MfaChallengeResponse {
+    }
+
     public record TokenResponse(
             String token,
             String tokenType,
             long expiresInSeconds,
             String username,
-            Role role) {
+            Role role) implements AuthenticationResponse {
+    }
+
+    public record MfaChallengeResponse(
+            String state,
+            String challengeToken,
+            List<MfaMethod> methods,
+            long expiresInSeconds,
+            String username) implements AuthenticationResponse {
+    }
+
+    public record MfaVerifyRequest(
+            @NotBlank @Size(max = 256) String challengeToken,
+            @NotNull MfaMethod method,
+            @NotBlank @Size(min = 6, max = 32) String code) {
+    }
+
+    public record TotpCodeRequest(
+            @NotBlank @Size(min = 6, max = 6) String code) {
+    }
+
+    public record TotpSetupResponse(
+            String secret,
+            String provisioningUri,
+            Instant expiresAt) {
+    }
+
+    public record MfaStatusResponse(
+            boolean enabled,
+            Instant enrolledAt) {
     }
 
     public record UserView(

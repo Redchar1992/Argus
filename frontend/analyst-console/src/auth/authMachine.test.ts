@@ -43,4 +43,22 @@ describe('authReducer', () => {
     const anonymous = { status: 'anonymous' } as const;
     expect(authReducer(anonymous, { type: 'LOGOUT_STARTED' })).toBe(anonymous);
   });
+
+  it('keeps the second factor as an explicit pre-authenticated state', () => {
+    const challenge = {
+      username: 'analyst',
+      methods: ['TOTP'] as const,
+      expiresAt: '2026-08-15T11:00:00.000Z',
+    };
+    const required = authReducer({ status: 'authenticating', username: 'analyst' }, {
+      type: 'MFA_REQUIRED',
+      challenge: { ...challenge, methods: [...challenge.methods] },
+    });
+    expect(required).toEqual({ status: 'mfa_required', challenge });
+    const verifying = authReducer(required, { type: 'MFA_VERIFY_STARTED' });
+    expect(verifying).toEqual({ status: 'verifying_mfa', challenge });
+    expect(authReducer(verifying, { type: 'MFA_FAILED', message: 'Invalid code' })).toEqual({
+      status: 'mfa_required', challenge, message: 'Invalid code',
+    });
+  });
 });

@@ -39,6 +39,22 @@ public class UserAccount {
     @Column(length = 320)
     private String email;
 
+    /** AES-GCM key-ring envelope; the plaintext TOTP seed is never persisted. */
+    @Column(name = "totp_secret_encrypted", length = 1024)
+    private String totpSecretEncrypted;
+
+    @Column(name = "pending_totp_secret_encrypted", length = 1024)
+    private String pendingTotpSecretEncrypted;
+
+    @Column(name = "pending_totp_expires_at")
+    private Instant pendingTotpExpiresAt;
+
+    @Column(name = "totp_last_counter")
+    private Long totpLastCounter;
+
+    @Column(name = "mfa_enrolled_at")
+    private Instant mfaEnrolledAt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
@@ -94,6 +110,60 @@ public class UserAccount {
 
     public String getEmail() {
         return email;
+    }
+
+    public boolean isMfaEnabled() {
+        return totpSecretEncrypted != null;
+    }
+
+    public String getTotpSecretEncrypted() {
+        return totpSecretEncrypted;
+    }
+
+    public String getPendingTotpSecretEncrypted() {
+        return pendingTotpSecretEncrypted;
+    }
+
+    public Instant getPendingTotpExpiresAt() {
+        return pendingTotpExpiresAt;
+    }
+
+    public Long getTotpLastCounter() {
+        return totpLastCounter;
+    }
+
+    public Instant getMfaEnrolledAt() {
+        return mfaEnrolledAt;
+    }
+
+    public void beginTotpEnrollment(String encryptedSecret, Instant expiresAt) {
+        this.pendingTotpSecretEncrypted = encryptedSecret;
+        this.pendingTotpExpiresAt = expiresAt;
+    }
+
+    public void confirmTotpEnrollment(long acceptedCounter, Instant enrolledAt) {
+        this.totpSecretEncrypted = pendingTotpSecretEncrypted;
+        this.pendingTotpSecretEncrypted = null;
+        this.pendingTotpExpiresAt = null;
+        this.totpLastCounter = acceptedCounter;
+        this.mfaEnrolledAt = enrolledAt;
+    }
+
+    public void recordTotpCounter(long acceptedCounter) {
+        this.totpLastCounter = acceptedCounter;
+    }
+
+    public void clearPendingTotpEnrollment() {
+        this.pendingTotpSecretEncrypted = null;
+        this.pendingTotpExpiresAt = null;
+    }
+
+    public void disableTotp() {
+        this.totpSecretEncrypted = null;
+        this.pendingTotpSecretEncrypted = null;
+        this.pendingTotpExpiresAt = null;
+        this.totpLastCounter = null;
+        this.mfaEnrolledAt = null;
     }
 
     public Role getRole() {

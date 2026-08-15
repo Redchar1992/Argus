@@ -5,22 +5,44 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { AppConfig } from './config.js';
 import { AppError, UpstreamError } from './errors.js';
+import {
+  MemoryMfaChallengeStore,
+  type MfaChallengeRepository,
+  type MfaMethod,
+} from './mfa-challenge-store.js';
 import type { OidcRelyingParty } from './oidc.js';
 import {
   MemoryOidcTransactionStore,
   type OidcTransactionRepository,
 } from './oidc-transaction-store.js';
 import { SessionStore, type ServerSession, type SessionRepository } from './session-store.js';
-import { HttpUpstreamClient, MockUpstreamClient, type UpstreamClient } from './upstream.js';
+import {
+  HttpUpstreamClient,
+  isMfaChallenge,
+  MockUpstreamClient,
+  type AuthenticationResult,
+  type LoginResult,
+  type UpstreamClient,
+} from './upstream.js';
 
 const SESSION_COOKIE = 'argus_session';
 const CSRF_COOKIE = 'argus_csrf';
 const OIDC_TRANSACTION_COOKIE = 'argus_oidc_tx';
+const MFA_CHALLENGE_COOKIE = 'argus_mfa_tx';
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 
 interface LoginBody {
   username?: unknown;
   password?: unknown;
+}
+
+interface MfaVerifyBody {
+  method?: unknown;
+  code?: unknown;
+}
+
+interface TotpCodeBody {
+  code?: unknown;
 }
 
 interface InvestigationParams {
@@ -33,6 +55,7 @@ export interface AppDependencies {
   rateLimitRedis?: unknown;
   oidc?: OidcRelyingParty;
   oidcTransactions?: OidcTransactionRepository;
+  mfaChallenges?: MfaChallengeRepository;
   close?: () => Promise<void>;
 }
 
@@ -53,6 +76,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     dependencies.upstream ?? (config.mockUpstream ? new MockUpstreamClient() : new HttpUpstreamClient(config));
   const oidc = dependencies.oidc;
   const oidcTransactions = dependencies.oidcTransactions ?? new MemoryOidcTransactionStore();
+  const mfaChallenges = dependencies.mfaChallenges ?? new MemoryMfaChallengeStore();
   if (config.oidcEnabled && !oidc) throw new Error('OIDC is enabled but no relying party was configured');
   const requestSessions = new WeakMap<FastifyRequest, ServerSession>();
 
@@ -134,6 +158,25 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     });
   }
 
+  function setMfaChallengeCookie(reply: FastifyReply, id: string, maxAge: number): void {
+    reply.setCookie(MFA_CHALLENGE_COOKIE, id, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'strict',
+      path: '/bff/auth',
+      maxAge,
+    });
+  }
+
+  function clearMfaChallengeCookie(reply: FastifyReply): void {
+    reply.clearCookie(MFA_CHALLENGE_COOKIE, {
+      httpOnly: true,
+      secure: config.cookieSecure,
+      sameSite: 'strict',
+      path: '/bff/auth',
+    });
+  }
+
   async function currentSession(request: FastifyRequest): Promise<ServerSession | undefined> {
     return sessions.get(request.cookies[SESSION_COOKIE]);
   }
@@ -192,6 +235,46 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     }
   }
 
+  async function beginMfaChallenge(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    result: Extract<AuthenticationResult, { state: 'mfa_required' }>,
+  ): Promise<{ state: 'mfa_required'; methods: MfaMethod[]; username: string; expiresAt: string }> {
+    const previous = request.cookies[MFA_CHALLENGE_COOKIE];
+    await mfaChallenges.delete(previous);
+    clearMfaChallengeCookie(reply);
+    const ttlSeconds = Math.min(config.mfaChallengeTtlSeconds, result.expiresInSeconds);
+    const expiresAt = Date.now() + ttlSeconds * 1_000;
+    const id = await mfaChallenges.create({
+      challengeToken: result.challengeToken,
+      methods: result.methods,
+      username: result.username,
+      expiresAt,
+    });
+    setMfaChallengeCookie(reply, id, ttlSeconds);
+    return { state: 'mfa_required', methods: result.methods, username: result.username,
+      expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  async function establishSession(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    result: LoginResult,
+  ): Promise<{ state: 'authenticated'; user: ServerSession['user']; expiresAt: string }> {
+    await sessions.delete(request.cookies[SESSION_COOKIE]);
+    clearSessionCookie(reply);
+    await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
+    clearMfaChallengeCookie(reply);
+    const session = await sessions.create(
+      result.token,
+      { username: result.username, role: result.role },
+      result.expiresInSeconds,
+    );
+    setSessionCookie(reply, session);
+    ensureCsrf(request, reply, true);
+    return { state: 'authenticated', user: session.user, expiresAt: new Date(session.expiresAt).toISOString() };
+  }
+
   app.get('/health', async () => ({
     status: 'ok',
     sessionStore: config.sessionStore,
@@ -221,16 +304,13 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
         const callbackUrl = new URL(request.url, config.oidcRedirectUri);
         const result = await oidc.complete(callbackUrl, transaction);
         const login = await upstream.oidcLogin(result.idToken, transaction.nonce, request.id);
-
-        await sessions.delete(request.cookies[SESSION_COOKIE]);
-        clearSessionCookie(reply);
-        const session = await sessions.create(
-          login.token,
-          { username: login.username, role: login.role },
-          login.expiresInSeconds,
-        );
-        setSessionCookie(reply, session);
-        ensureCsrf(request, reply, true);
+        if (isMfaChallenge(login)) {
+          await sessions.delete(request.cookies[SESSION_COOKIE]);
+          clearSessionCookie(reply);
+          await beginMfaChallenge(request, reply, login);
+          return reply.code(302).redirect(config.mfaRequiredRedirect);
+        }
+        await establishSession(request, reply, login);
         return reply.code(302).redirect(config.oidcSuccessRedirect);
       } catch {
         return reply.code(302).redirect(config.oidcErrorRedirect);
@@ -242,6 +322,15 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     ensureCsrf(request, reply);
     const session = await currentSession(request);
     if (!session) {
+      const challenge = await mfaChallenges.get(request.cookies[MFA_CHALLENGE_COOKIE]);
+      if (challenge) {
+        return {
+          state: 'mfa_required',
+          methods: challenge.methods,
+          username: challenge.username,
+          expiresAt: new Date(challenge.expiresAt).toISOString(),
+        };
+      }
       const hadCookie = Boolean(request.cookies[SESSION_COOKIE]);
       clearSessionCookie(reply);
       throw new AppError(
@@ -271,20 +360,89 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       clearSessionCookie(reply);
 
       const result = await upstream.login(username, password, request.id);
-      const session = await sessions.create(
-        result.token,
-        { username: result.username, role: result.role },
-        result.expiresInSeconds,
-      );
-      setSessionCookie(reply, session);
-      ensureCsrf(request, reply, true);
-      return { state: 'authenticated', user: session.user, expiresAt: new Date(session.expiresAt).toISOString() };
+      if (isMfaChallenge(result)) return beginMfaChallenge(request, reply, result);
+      return establishSession(request, reply, result);
+    },
+  );
+
+  app.get('/bff/auth/mfa/challenge', async (request, reply) => {
+    ensureCsrf(request, reply);
+    const challenge = await mfaChallenges.get(request.cookies[MFA_CHALLENGE_COOKIE]);
+    if (!challenge) {
+      clearMfaChallengeCookie(reply);
+      throw new AppError(401, 'MFA_CHALLENGE_EXPIRED', 'The verification challenge expired. Sign in again.');
+    }
+    return {
+      state: 'mfa_required',
+      methods: challenge.methods,
+      username: challenge.username,
+      expiresAt: new Date(challenge.expiresAt).toISOString(),
+    };
+  });
+
+  app.post<{ Body: MfaVerifyBody }>(
+    '/bff/auth/mfa/verify',
+    {
+      preHandler: verifyCsrf,
+      config: { rateLimit: { max: config.loginRateLimitMax, timeWindow: config.loginRateLimitWindowMs } },
+    },
+    async (request, reply) => {
+      const method = request.body?.method;
+      const code = typeof request.body?.code === 'string' ? request.body.code.trim().toUpperCase() : '';
+      if ((method !== 'TOTP' && method !== 'RECOVERY_CODE') || !/^[A-Z0-9-]{6,32}$/.test(code)) {
+        throw new AppError(400, 'BAD_REQUEST', 'Enter a valid verification code');
+      }
+      const challengeId = request.cookies[MFA_CHALLENGE_COOKIE];
+      const challenge = await mfaChallenges.get(challengeId);
+      if (!challenge || !challenge.methods.includes(method)) {
+        await mfaChallenges.delete(challengeId);
+        clearMfaChallengeCookie(reply);
+        throw new AppError(401, 'MFA_CHALLENGE_EXPIRED', 'The verification challenge expired. Sign in again.');
+      }
+      try {
+        const result = await upstream.verifyMfa(challenge.challengeToken, method, code, request.id);
+        await mfaChallenges.delete(challengeId);
+        return establishSession(request, reply, result);
+      } catch (error) {
+        if (error instanceof UpstreamError && error.status === 401) {
+          throw new AppError(401, 'INVALID_MFA_CODE', 'The verification code is invalid or expired');
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get('/bff/auth/mfa', { preHandler: requireSession }, async (request, reply) =>
+    proxy(request, reply, (session) => upstream.mfaStatus(session.accessToken, request.id)));
+
+  app.post('/bff/auth/mfa/totp/setup', { preHandler: [verifyCsrf, requireSession] }, async (request, reply) =>
+    proxy(request, reply, (session) => upstream.setupTotp(session.accessToken, request.id)));
+
+  app.post<{ Body: TotpCodeBody }>(
+    '/bff/auth/mfa/totp/confirm',
+    { preHandler: [verifyCsrf, requireSession] },
+    async (request, reply) => {
+      const code = typeof request.body?.code === 'string' ? request.body.code.trim() : '';
+      if (!/^\d{6}$/.test(code)) throw new AppError(400, 'BAD_REQUEST', 'Enter a six-digit code');
+      return proxy(request, reply, (session) => upstream.confirmTotp(session.accessToken, code, request.id));
+    },
+  );
+
+  app.post<{ Body: TotpCodeBody }>(
+    '/bff/auth/mfa/totp/disable',
+    { preHandler: [verifyCsrf, requireSession] },
+    async (request, reply) => {
+      const code = typeof request.body?.code === 'string' ? request.body.code.trim() : '';
+      if (!/^\d{6}$/.test(code)) throw new AppError(400, 'BAD_REQUEST', 'Enter a six-digit code');
+      return proxy(request, reply, (session) => upstream.disableTotp(session.accessToken, code, request.id));
     },
   );
 
   app.post('/bff/auth/logout', { preHandler: verifyCsrf }, async (request, reply) => {
     await sessions.delete(request.cookies[SESSION_COOKIE]);
+    await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
     clearSessionCookie(reply);
+    clearMfaChallengeCookie(reply);
     ensureCsrf(request, reply, true);
     return reply.code(204).send();
   });

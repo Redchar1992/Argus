@@ -45,7 +45,7 @@ orchestrator directly.
 | `bff` | 3001 | Node 20, Fastify | Server-side sessions, CSRF/origin checks, login throttling, error normalization, guarded API proxy |
 | `redis` | 6379 | Redis 7 | Optional development / required production shared BFF Sessions and distributed login limiter |
 | `api-gateway` | 8080 | Spring Cloud Gateway | Routing/CORS for the existing service and admin-console paths |
-| `auth-service` | 8081 | Spring Boot, Security, JPA | bcrypt user store, JWT issue/parse, RBAC |
+| `auth-service` | 8081 | Spring Boot, Security, JPA | Password/OIDC primary auth, encrypted TOTP MFA, JWT issue/parse, RBAC |
 | `agent-orchestrator-service` | 8082 | Spring Boot, WebFlux, optional Mongo | Agent loop and investigation trace store |
 | `screening-tools-service` | 8083 | Spring Boot, JPA | Sanctions/profile/graph/risk tools and catalog |
 | `case-service` | 8084 | Spring Boot, JPA | Cases, audit log, screening policy |
@@ -86,6 +86,8 @@ Cookie properties:
   after login/logout.
 - The BFF session lifetime never exceeds either the upstream JWT lifetime or the configured
   BFF maximum.
+- `argus_mfa_tx`: opaque pre-authentication ID, `HttpOnly`, `SameSite=Strict`, `Path=/bff/auth`.
+  The Java challenge token is encrypted in the server store and never exposed to JavaScript.
 
 Development defaults to an in-memory store. Production startup fails if
 `BFF_COOKIE_SECURE=false`, `BFF_MOCK_UPSTREAM=true`, the Session store is not Redis, or the
@@ -144,7 +146,11 @@ stateDiagram-v2
     anonymous --> authenticating: submit credentials
     expired --> authenticating: submit credentials
     error --> authenticating: retry login
-    authenticating --> authenticated: login succeeds
+    authenticating --> authenticated: no second factor
+    authenticating --> mfa_required: TOTP enrolled
+    mfa_required --> verifying_mfa: submit code
+    verifying_mfa --> authenticated: code accepted
+    verifying_mfa --> mfa_required: invalid code
     authenticating --> error: login fails
     authenticated --> expired: BFF or upstream returns 401
     authenticated --> signingOut: request logout
@@ -173,6 +179,8 @@ data at that deadline even when the user makes no further API request.
 | Unauthorized routes | Fastify pre-handler guards every investigation endpoint; Java services independently validate JWT + roles |
 | Unsafe test mode | Mock upstream is explicit and refused when `NODE_ENV=production` |
 | OIDC login CSRF/replay | Browser-bound state cookie, one-time encrypted transaction, nonce and S256 PKCE; Java repeats provider-token validation |
+| TOTP seed disclosure | TOTP seeds use versioned AES-256-GCM envelopes; production refuses the shipped development key |
+| MFA replay/brute force | Last accepted TOTP counter blocks replay; challenges expire, are pessimistically locked and close after five failed attempts |
 
 React's normal text rendering provides output escaping for investigation data. No code uses
 `dangerouslySetInnerHTML`. XSS is not "solved" by cookies: a same-origin script could still
@@ -196,8 +204,8 @@ These are limitations, not hidden features:
 1. The Redis implementation is real and two-instance tested, but the Compose service is a
    passwordless development fixture. Production still needs private authenticated TLS Redis,
    encryption-key rotation, eviction/availability metrics and a regional outage policy.
-2. Password and OIDC login are real. Refresh-token rotation, MFA, account recovery, WebAuthn
-   and Passkeys are not implemented yet and must not be presented as shipped code.
+2. Password/OIDC login and TOTP MFA are real. Refresh-token rotation, account recovery,
+   WebAuthn and Passkeys are not implemented yet and must not be presented as shipped code.
 3. HTTPS/TLS termination and the SPA document CSP belong to deployment infrastructure, which
    is outside this repository. The BFF itself fails closed on insecure production cookies.
 4. Redis mode makes the application limiter distributed, but an edge/WAF limiter is still
@@ -209,12 +217,12 @@ These are limitations, not hidden features:
 
 ## Test evidence
 
-- `bff/test`: 26 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
+- `bff/test`: 29 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
   the suite checks encrypted-at-rest Session records, tamper/copy rejection, Redis TTL,
   one-time encrypted OIDC transactions, replay rejection, two-instance Session restore/logout,
-  distributed login limits and production fail-fast config.
-- `frontend/analyst-console/src`: seven reducer/React Testing Library tests covering login
-  failure/success, guard, automatic deadline expiry and logout behavior.
+  encrypted MFA pre-authentication state, distributed login limits and production fail-fast config.
+- `frontend/analyst-console/src`: nine reducer/React Testing Library tests covering password +
+  MFA login, failure/success, guard, automatic deadline expiry and logout behavior.
 - `frontend/analyst-console/e2e`: real Chromium anonymous/login/logout journeys using the BFF
   test upstream; asserts the browser session cookie is `HttpOnly` and no JWT/Bearer value is
   placed in Web Storage.

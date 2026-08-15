@@ -97,6 +97,37 @@ describe('protected analyst console', () => {
     await waitFor(() => expect(screen.getByLabelText(/username/i)).toHaveValue('analyst'));
   });
 
+  it('requires and verifies MFA without exposing the backend challenge', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(anonymousResponse())
+      .mockResolvedValueOnce(jsonResponse({
+        state: 'mfa_required',
+        username: 'analyst',
+        methods: ['TOTP'],
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      }))
+      .mockResolvedValueOnce(authenticatedResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.type(await screen.findByLabelText(/username/i), 'analyst');
+    await user.type(screen.getByLabelText(/password/i), 'analyst12345');
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
+
+    expect(await screen.findByRole('heading', { name: /verify your identity/i })).toBeInTheDocument();
+    expect(screen.queryByText(/run an investigation/i)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText(/6-digit authenticator code/i), '123456');
+    await user.click(screen.getByRole('button', { name: /^verify$/i }));
+
+    expect(await screen.findByText(/run an investigation/i)).toBeInTheDocument();
+    const verifyCall = fetchMock.mock.calls[2];
+    expect(verifyCall?.[0]).toBe('/bff/auth/mfa/verify');
+    expect(String(verifyCall?.[1]?.body)).toBe(JSON.stringify({ method: 'TOTP', code: '123456' }));
+    expect(String(verifyCall?.[1]?.body)).not.toContain('challengeToken');
+  });
+
   it('unmounts protected data at the server-declared session deadline', async () => {
     vi.stubGlobal(
       'fetch',

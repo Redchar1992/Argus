@@ -1,6 +1,11 @@
 import { Redis } from 'ioredis';
 import type { AppDependencies } from './app.js';
 import type { AppConfig } from './config.js';
+import {
+  MemoryMfaChallengeStore,
+  RedisMfaChallengeStore,
+  type RedisMfaCommands,
+} from './mfa-challenge-store.js';
 import { OpenIdClientRelyingParty } from './oidc.js';
 import {
   MemoryOidcTransactionStore,
@@ -13,6 +18,7 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
   const oidc = config.oidcEnabled ? await OpenIdClientRelyingParty.discover(config) : undefined;
   if (config.sessionStore === 'memory') {
     return {
+      mfaChallenges: new MemoryMfaChallengeStore(),
       ...(oidc ? { oidc, oidcTransactions: new MemoryOidcTransactionStore() } : {}),
     };
   }
@@ -50,6 +56,11 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
     setex: (key, seconds, value) => redis.setex(key, seconds, value),
     getdel: (key) => redis.getdel(key),
   };
+  const mfaCommands: RedisMfaCommands = {
+    get: (key) => redis.get(key),
+    setex: (key, seconds, value) => redis.setex(key, seconds, value),
+    del: (key) => redis.del(key),
+  };
 
   return {
     sessions: new RedisSessionStore(
@@ -58,6 +69,11 @@ export async function createRuntimeDependencies(config: AppConfig): Promise<AppD
       config.sessionTtlSeconds,
     ),
     rateLimitRedis: redis,
+    mfaChallenges: new RedisMfaChallengeStore(
+      mfaCommands,
+      config.sessionEncryptionKey,
+      config.mfaChallengeTtlSeconds,
+    ),
     ...(oidc
       ? {
           oidc,

@@ -23,6 +23,8 @@ export interface AppConfig {
   oidcSuccessRedirect: string;
   oidcErrorRedirect: string;
   oidcTransactionTtlSeconds: number;
+  mfaChallengeTtlSeconds: number;
+  mfaRequiredRedirect: string;
   logger: boolean;
 }
 
@@ -162,6 +164,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       env.BFF_OIDC_TRANSACTION_TTL_SECONDS,
       300,
       'BFF_OIDC_TRANSACTION_TTL_SECONDS',
+    ),
+    mfaChallengeTtlSeconds: positiveInteger(
+      env.BFF_MFA_CHALLENGE_TTL_SECONDS,
+      300,
+      'BFF_MFA_CHALLENGE_TTL_SECONDS',
+    ),
+    mfaRequiredRedirect: localRedirect(
+      env.BFF_MFA_REQUIRED_REDIRECT,
+      '/?auth=mfa_required',
+      'BFF_MFA_REQUIRED_REDIRECT',
     ),
     logger: booleanValue(env.BFF_LOGGER, production),
   };

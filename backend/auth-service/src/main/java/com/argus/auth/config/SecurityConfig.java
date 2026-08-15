@@ -37,7 +37,8 @@ public class SecurityConfig {
                 .cors(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/oidc/login").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/oidc/login",
+                                "/api/auth/mfa/verify").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .anyRequest().authenticated())
                 // Missing/invalid credentials -> 401 (not 403). 403 is reserved for an

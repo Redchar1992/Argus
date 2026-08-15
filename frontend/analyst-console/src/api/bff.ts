@@ -1,4 +1,4 @@
-import type { AuthSession } from '../auth/authMachine';
+import type { AuthSession, MfaChallenge, MfaMethod } from '../auth/authMachine';
 
 interface ErrorEnvelope {
   error?: {
@@ -88,16 +88,41 @@ async function ensureCsrfCookie(): Promise<void> {
   }
 }
 
-export async function getSession(): Promise<AuthSession> {
-  const response = await bffRequest<{ state: 'authenticated'; user: AuthSession['user']; expiresAt: string }>(
-    '/bff/auth/session',
-  );
-  return { user: response.user, expiresAt: response.expiresAt };
+export type AuthenticationResult =
+  | { state: 'authenticated'; session: AuthSession }
+  | { state: 'mfa_required'; challenge: MfaChallenge };
+
+interface AuthenticationEnvelope {
+  state: 'authenticated' | 'mfa_required';
+  user?: AuthSession['user'];
+  methods?: MfaMethod[];
+  username?: string;
+  expiresAt: string;
 }
 
-export async function login(username: string, password: string): Promise<AuthSession> {
+function authenticationResult(response: AuthenticationEnvelope): AuthenticationResult {
+  if (response.state === 'mfa_required' && response.username && response.methods?.length) {
+    return {
+      state: 'mfa_required',
+      challenge: { username: response.username, methods: response.methods, expiresAt: response.expiresAt },
+    };
+  }
+  if (response.state === 'authenticated' && response.user) {
+    return { state: 'authenticated', session: { user: response.user, expiresAt: response.expiresAt } };
+  }
+  throw new ApiError(502, 'INVALID_RESPONSE', 'The identity service returned an invalid response.');
+}
+
+export async function getSession(): Promise<AuthenticationResult> {
+  const response = await bffRequest<AuthenticationEnvelope>(
+    '/bff/auth/session',
+  );
+  return authenticationResult(response);
+}
+
+export async function login(username: string, password: string): Promise<AuthenticationResult> {
   await ensureCsrfCookie();
-  const response = await bffRequest<{ state: 'authenticated'; user: AuthSession['user']; expiresAt: string }>(
+  const response = await bffRequest<AuthenticationEnvelope>(
     '/bff/auth/login',
     {
       method: 'POST',
@@ -106,7 +131,22 @@ export async function login(username: string, password: string): Promise<AuthSes
       body: JSON.stringify({ username, password }),
     },
   );
-  return { user: response.user, expiresAt: response.expiresAt };
+  return authenticationResult(response);
+}
+
+export async function verifyMfa(method: MfaMethod, code: string): Promise<AuthSession> {
+  await ensureCsrfCookie();
+  const response = await bffRequest<AuthenticationEnvelope>('/bff/auth/mfa/verify', {
+    method: 'POST',
+    csrf: true,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method, code }),
+  });
+  const result = authenticationResult(response);
+  if (result.state !== 'authenticated') {
+    throw new ApiError(502, 'INVALID_RESPONSE', 'The identity service returned another verification challenge.');
+  }
+  return result.session;
 }
 
 export async function logout(): Promise<void> {
