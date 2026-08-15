@@ -20,6 +20,7 @@ intentionally strict: interview design knowledge is not labelled as an implement
 | **Authenticated service transport** | Production BFF requires CA-validated mTLS to auth-service; Spring requires the BFF client certificate; Redis requires `rediss://` + ACL auth and supports client-cert mTLS; short-lived local PKI/secure-Redis fixture is executable | **Built + smoke/Redis tested** |
 | **Online key rotation** | Versioned BFF envelope key ring, old-key reads, lazy live-Session rewrite, real Redis rolling-rotation test; Java TOTP lazy rewrite plus bounded ADMIN drain for dormant accounts | **Built + tested** |
 | **Identity observability** | Region-labelled Node/Java Prometheus metrics, Redis-aware readiness, auth/upstream latency and outcomes, key/decrypt/certificate signals, 11 validated alert rules and response runbook; telemetry explicitly excludes PII and credentials | **Built + tested** |
+| **Regional resilience** | Two independent BFF regions, TLS Redis primary/replica, fail-closed shared-store behavior, replica promotion, RTO/RPO evidence and a production-gap runbook | **Local 11-check drill built + CI-wired**; not a production deployment |
 | **Resilient UX** | Loading, invalid-login, service-error, expired-session, authenticated and sign-out views; stale protected data is unmounted on auth loss or the server-declared expiry deadline | **Built + tested** |
 | **Frontend unit tests** | Vitest + React Testing Library + user-event: reducer, guard, password/MFA/recovery/Passkey flows, deadline expiry and logout | **13 tests passing** |
 | **Browser/E2E coverage** | Playwright Chromium: anonymous guard, password login/HttpOnly cookie/no Web Storage token, logout and virtual-authenticator Passkey registration/passwordless login | **4 journeys passing** |
@@ -59,10 +60,12 @@ policy remain deployment/product decisions rather than implied features.
 `.github/workflows/ci.yml` uses reproducible lockfile installs:
 
 1. Maven `package` for all backend modules.
-2. BFF `npm ci`, dependency audit, TypeScript build and 39 Vitest tests against a Redis 7 CI service.
+2. BFF `npm ci`, dependency audit, TypeScript build and 47 Vitest tests against a Redis 7 CI service.
 3. Analyst console `npm ci`, dependency audit, type/build and Vitest/RTL tests.
 4. Playwright Chromium install and four browser identity journeys, including virtual WebAuthn.
 5. Vue admin-console `npm ci`, dependency audit and build.
+6. Disposable local-PKI drill with two BFF regions and a TLS Redis primary/replica, including
+   state-store loss, manual promotion, Session RPO and post-failover logout checks.
 
 ## Most important interview walkthrough
 
@@ -81,13 +84,15 @@ A concise code tour should follow this order:
 ## Remaining gaps and the correct production answer
 
 - Deploy the implemented authenticated TLS/Redis path with managed certificate and ACL lifecycle;
-  add encryption-key rotation, eviction/availability metrics, regional drills and an edge/WAF limiter.
+  add managed/quorum cross-region failover, global traffic steering, WAN/backup drills and an
+  edge/WAF limiter. Encryption-key rotation, availability metrics and the local regional drill exist.
 - Add refresh-token rotation/revocation; OIDC code + PKCE and IdP key discovery are built.
 - Define authenticator-attestation trust and enterprise enrollment policy where managed-device
   assurance is required; the current `attestation=none` consumer-style flow is deliberate.
 - Extend the built TOTP challenge into risk-based step-up and richer factor orchestration.
 - Add edge/ingress TLS, restrictive SPA CSP, HSTS and asset integrity/deployment controls.
-- Add OpenTelemetry traces, login funnel/RUM/Core Web Vitals, SLOs and alerting.
+- Add OpenTelemetry traces, login funnel/RUM/Core Web Vitals and production SLO/error-budget routing;
+  Prometheus metrics and 11 alert rules are implemented locally.
 - Add a live KYC/liveness provider only behind explicit consent, privacy/retention controls,
   vendor fallback and human review.
 

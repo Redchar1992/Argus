@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-08-15T02:37:57.313Z",
+  "passed": true,
+  "topology": {
+    "application": "two independently instantiated BFF regions",
+    "state": "TLS + password + client-certificate Redis primary/replica",
+    "failover": "manual promotion and regional BFF restart"
+  },
+  "objectives": {
+    "applicationRegionRtoMs": 5000,
+    "redisFailoverRtoMs": 30000,
+    "sessionRpoLost": 0
+  },
+  "observations": {
+    "applicationRegionRtoMs": 3,
+    "redisFailoverRtoMs": 433,
+    "sessionRpoLost": 0
+  },
+  "checks": [
+    {
+      "name": "Region A login succeeds without exposing a JWT",
+      "passed": true
+    },
+    {
+      "name": "Region B restores the Session created in Region A",
+      "passed": true
+    },
+    {
+      "name": "Replica contains the encrypted Session before fault injection",
+      "passed": true
+    },
+    {
+      "name": "Regional metrics are labelled and contain no account identifier",
+      "passed": true
+    },
+    {
+      "name": "Region B continues authorization after Region A is stopped",
+      "passed": true
+    },
+    {
+      "name": "Application-region RTO stays within the local objective",
+      "passed": true
+    },
+    {
+      "name": "State-store outage returns 503 and never authorizes from stale process memory",
+      "passed": true
+    },
+    {
+      "name": "Promoted TLS replica restores the pre-failure Session",
+      "passed": true
+    },
+    {
+      "name": "Observed Session RPO is zero",
+      "passed": true
+    },
+    {
+      "name": "Redis failover RTO stays within the local objective",
+      "passed": true
+    },
+    {
+      "name": "Logout on the promoted region globally revokes the Session",
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "Local Docker fault injection does not emulate WAN latency, DNS, quorum, or cloud control-plane delay.",
+    "Redis promotion is deliberately manual; production requires a managed or quorum-controlled failover mechanism.",
+    "The drill proves Session continuity and fail-closed authorization, not globally active-active Redis writes."
+  ],
+  "completedAt": "2026-08-15T02:37:57.935Z"
+}

@@ -148,6 +148,23 @@ certificate expiry. Production replaces static local targets with service discov
 credentials, durable storage and Alertmanager routing; the response sequence is documented in
 [`runbooks/identity-monitoring.md`](runbooks/identity-monitoring.md).
 
+### Multi-region failure behavior
+
+Stateless BFF instances restore encrypted Sessions and one-time authentication records from the
+shared Redis store; they never authorize from a process-local fallback when that store is selected.
+If Redis fails after startup, `/ready` returns 503 and Session access returns the stable
+`IDENTITY_STORE_UNAVAILABLE` 503 without exposing Redis details or stale identity data.
+
+The executable local drill starts two independent BFF regions plus a TLS/password/client-certificate
+Redis primary and replica. It proves Session restore across application regions, continued service
+after one BFF region stops, fail-closed state-store loss, manual replica promotion, zero observed
+Session loss and global logout on the promoted store. The 2026-08-15 evidence passed 11/11 checks.
+See [`runbooks/multi-region-auth-drill.md`](runbooks/multi-region-auth-drill.md).
+
+This is fault-injection evidence, not a production multi-region deployment. A production design
+still needs health-based global traffic steering, managed or quorum-controlled promotion and
+fencing, realistic WAN tests, regional PKI/secret management, durable backups and on-call routing.
+
 ### OIDC Authorization Code + PKCE
 
 The optional OIDC path uses provider discovery, a fresh state, nonce and S256 PKCE verifier
@@ -287,6 +304,7 @@ data at that deadline even when the user makes no further API request.
 | Redis network/anonymous access | Production requires `rediss://` plus ACL password; CA validation is mandatory and Redis client certificates are supported |
 | Encryption-key compromise/retirement | Versioned key rings support overlap; live Sessions and TOTP seeds re-encrypt online, with a bounded ADMIN drain for dormant accounts |
 | Blind identity outage or telemetry leak | Region-labelled, low-cardinality Prometheus metrics; readiness probes and alert rules; explicit ban on identity/credential values in labels |
+| Regional/application-store outage | Shared encrypted Session restore across BFF regions; no local authorization fallback; readiness 503; executable TLS replica-promotion and logout drill |
 
 React's normal text rendering provides output escaping for investigation data. No code uses
 `dangerouslySetInnerHTML`. XSS is not "solved" by cookies: a same-origin script could still
@@ -309,8 +327,9 @@ These are limitations, not hidden features:
 
 1. The Redis implementation is real and two-instance tested. Production transport enforces
    `rediss://` plus authentication and supports mTLS. Online record-key rotation is implemented;
-   availability/decrypt/certificate metrics and alert rules are implemented; deployment still
-   needs managed certificate/ACL lifecycle, durable metrics/Alertmanager and a regional outage policy.
+   availability/decrypt/certificate metrics, alert rules and a local regional fault drill are
+   implemented. Deployment still needs managed certificate/ACL lifecycle, durable metrics/
+   Alertmanager, global traffic steering and managed/quorum failover tested under WAN conditions.
 2. Password/OIDC login, TOTP MFA, offline-code recovery and Passkeys are real. Refresh-token
    rotation and provider-specific account-linking policy are not implemented yet.
 3. BFF→auth-service mTLS is implemented. Public ingress TLS termination and the SPA document CSP
@@ -324,11 +343,14 @@ These are limitations, not hidden features:
 
 ## Test evidence
 
-- `bff/test`: 46 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
+- `bff/test`: 47 tests with Redis enabled. Besides cookie/CSRF/guard/expiry/error behavior,
   the suite checks encrypted-at-rest Session records, tamper/copy rejection, Redis TTL,
   one-time encrypted OIDC transactions, replay rejection, two-instance Session restore/logout,
   encrypted MFA/WebAuthn pre-authentication state, cross-replica one-time consumption,
-  distributed login limits and production fail-fast config.
+  distributed login limits, fail-closed store outages and production fail-fast config.
+- `infra/drills`: an 11-check local fault exercise verifies application-region continuity,
+  state-store fail-closed behavior, TLS Redis replica promotion, zero observed Session loss and
+  logout after promotion. The result records limitations instead of presenting local RTO as an SLO.
 - `frontend/analyst-console/src`: 13 reducer/React Testing Library tests covering password,
   MFA, offline recovery, Passkey login/registration, guard, deadline expiry and logout.
 - `frontend/analyst-console/e2e`: four real Chromium journeys using the BFF test upstream,

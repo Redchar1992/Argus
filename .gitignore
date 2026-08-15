@@ -37,3 +37,4 @@ frontend/*/vite.config.d.ts
 
 # Locally generated development PKI; never commit private keys/cert bundles.
 /infra/tls/generated/
+/infra/drills/results/

@@ -192,8 +192,8 @@ These are seeded for local demo only and are hashed with bcrypt (cost 12) at boo
 
 ```bash
 cd bff
-npm ci && npm run build && npm test                   # 42 pass; 4 real-Redis tests skip
-BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 46/46 incl. replicas + key rotation
+npm ci && npm run build && npm test                   # 43 pass; 4 real-Redis tests skip
+BFF_TEST_REDIS_URL=redis://127.0.0.1:6379/15 npm test  # 47/47 incl. replicas + key rotation
 
 cd ../frontend/analyst-console
 npm ci && npm run build && npm run test:unit        # 13 reducer/RTL lifecycle tests
@@ -207,7 +207,8 @@ npm ci && npm audit && npm run build                # 0 vulnerabilities; Vue/Vit
 CI uses `npm ci`, runs the BFF suite against a Redis 7 service, runs both frontend test
 layers, and installs Chromium for four Playwright journeys. Playwright starts the BFF
 with its explicit test-only deterministic upstream; production startup refuses mock mode,
-insecure cookies and the memory Session store.
+insecure cookies and the memory Session store. A separate CI job runs the authenticated-TLS
+regional failover drill against disposable Redis primary/replica containers.
 
 ### Identity monitoring
 
@@ -226,6 +227,22 @@ The fixture includes 11 alert rules for target/dependency outages, authenticatio
 rejection spikes, upstream p95 latency, encrypted-record failures and certificate expiry. See
 [`docs/runbooks/identity-monitoring.md`](docs/runbooks/identity-monitoring.md) for production
 scrape controls and triage.
+
+### Multi-region identity fault drill
+
+Run the isolated two-BFF-region and TLS Redis primary/replica exercise:
+
+```bash
+./infra/drills/run-multi-region-auth-drill.sh
+```
+
+The runner proves cross-region Session restore, continued authorization after one BFF region is
+stopped, fail-closed 503 behavior while the state store is unavailable, Session recovery after
+manual replica promotion, and post-promotion logout. The committed 2026-08-15 local evidence passed
+11/11 checks with 3 ms application-instance RTO, 433 ms Redis promotion/reconnect and zero observed
+Session loss. These single-machine measurements are not production SLO evidence; WAN, load-balancer,
+DNS, quorum and cloud control-plane behavior remain to be exercised. See
+[`docs/runbooks/multi-region-auth-drill.md`](docs/runbooks/multi-region-auth-drill.md).
 
 ---
 
@@ -273,6 +290,11 @@ scrape controls and triage.
   dependency state, key migration and workload-certificate expiry with region labels but no PII.
   Separate liveness/readiness endpoints, a pinned Prometheus fixture and executable alert rules
   cover outage, latency, decrypt-failure and expiry signals.
+- **Multi-region fault injection:** an executable drill creates two independent BFF regions over
+  a TLS/mTLS Redis primary/replica, verifies cross-region encrypted Session continuity, stops one
+  application region, proves shared-store outages fail authorization closed, promotes the replica
+  and verifies RPO plus global logout. Dedicated containers are always cleaned up and the
+  secrets-free result is committed as reviewable evidence.
 - **Explicit frontend state model:** a TypeScript discriminated union/reducer models
   `checking → anonymous → authenticating/authenticating_passkey → authenticated → signingOut/expired/error`.
   The route guard never renders investigation data for an anonymous/expired state, and a
@@ -298,8 +320,9 @@ scrape controls and triage.
 **Scaffolded / simplified / TODO (called out so nothing is oversold):**
 - Memory Session/rate-limit state remains the convenient development default. Production now
   refuses it and requires the implemented authenticated `rediss://` path. Online encryption-key
-  rotation and live dependency/availability metrics are implemented, while a real deployment
-  still needs managed certificate/ACL lifecycle, backup policy and a tested regional outage strategy.
+  rotation, live dependency/availability metrics and a local regional fault drill are implemented.
+  A real deployment still needs managed certificate/ACL lifecycle, backup/restore policy, global
+  traffic steering, quorum-controlled promotion and a WAN/cloud regional outage exercise.
 - OIDC Authorization Code + PKCE, TOTP MFA, one-time offline recovery codes and Passkeys are implemented,
   including encrypted server-side pre-authentication state, replay counters, attempt lockout,
   MFA fallback, password reset and discoverable passwordless credentials. Refresh-token

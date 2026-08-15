@@ -10,7 +10,7 @@ import type {
   VerifiedPasskeyAuthentication,
   VerifiedPasskeyRegistration,
 } from '../src/passkeys.js';
-import { SessionStore } from '../src/session-store.js';
+import { SessionStore, type SessionRepository } from '../src/session-store.js';
 import { MockUpstreamClient, type UpstreamClient } from '../src/upstream.js';
 import type { AuthenticationResult, LoginResult } from '../src/upstream.js';
 
@@ -227,6 +227,27 @@ describe('identity BFF', () => {
     expect(ready.statusCode).toBe(503);
     expect(ready.json()).toMatchObject({ status: 'not_ready' });
     expect(ready.body).not.toContain('redis unavailable');
+  });
+
+  it('fails Session authorization closed when the shared identity store is unavailable', async () => {
+    const unavailable: SessionRepository = {
+      create: async () => { throw new Error('redis host and credential detail'); },
+      get: async () => { throw new Error('redis host and credential detail'); },
+      delete: async () => { throw new Error('redis host and credential detail'); },
+      deleteForUser: async () => { throw new Error('redis host and credential detail'); },
+    };
+    const app = await buildApp(config, { sessions: unavailable });
+    apps.push(app);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/bff/auth/session',
+      headers: { cookie: `argus_session=${'s'.repeat(43)}` },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ error: { code: 'IDENTITY_STORE_UNAVAILABLE' } });
+    expect(response.body).not.toContain('redis');
+    expect(response.body).not.toContain('credential');
+    expect(response.body).not.toContain('authenticated');
   });
 
   it('returns a normalized anonymous response and bootstraps a CSRF cookie', async () => {

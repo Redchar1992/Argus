@@ -46,6 +46,19 @@ cd bff
 BFF_TEST_REDIS_URL="$BFF_REDIS_URL" npm test
 ```
 
+The generator also creates separate `redis-drill-primary` and `redis-drill-replica` identities
+with server and client EKUs because the replica opens an authenticated TLS connection to the
+primary. Existing local PKI can be extended without overwriting its CA:
+
+```bash
+./infra/tls/ensure-dev-drill-pki.sh
+./infra/drills/run-multi-region-auth-drill.sh
+```
+
+Those identities, the default drill password and the local CA are disposable test fixtures only.
+See [`../../docs/runbooks/multi-region-auth-drill.md`](../../docs/runbooks/multi-region-auth-drill.md)
+for scope, cleanup and production limitations.
+
 ## Production ownership
 
 - Issue certificates from the workload PKI, not this development CA.

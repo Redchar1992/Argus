@@ -94,6 +94,104 @@ services:
       timeout: 5s
       retries: 10
 
+  redis-drill-primary:
+    profiles: ["drill"]
+    image: redis:7-alpine
+    container_name: argus-redis-drill-primary
+    user: "0:0"
+    environment:
+      ARGUS_DRILL_REDIS_PASSWORD: ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6379"
+      - --tls-cert-file
+      - /tls/redis-drill-primary.crt
+      - --tls-key-file
+      - /tls/redis-drill-primary.key
+      - --tls-ca-cert-file
+      - /tls/ca.crt
+      - --tls-auth-clients
+      - "yes"
+      - --requirepass
+      - ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - "always"
+    ports:
+      - "6391:6379"
+    volumes:
+      - ./infra/tls/generated:/tls:ro
+    tmpfs:
+      - /data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          REDISCLI_AUTH=$${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+          redis-cli --tls -h localhost -p 6379 --cacert /tls/ca.crt
+          --cert /tls/bff-redis-client.crt --key /tls/bff-redis-client.key ping
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  redis-drill-replica:
+    profiles: ["drill"]
+    image: redis:7-alpine
+    container_name: argus-redis-drill-replica
+    user: "0:0"
+    depends_on:
+      redis-drill-primary:
+        condition: service_healthy
+    environment:
+      ARGUS_DRILL_REDIS_PASSWORD: ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6379"
+      - --tls-cert-file
+      - /tls/redis-drill-replica.crt
+      - --tls-key-file
+      - /tls/redis-drill-replica.key
+      - --tls-ca-cert-file
+      - /tls/ca.crt
+      - --tls-auth-clients
+      - "yes"
+      - --tls-replication
+      - "yes"
+      - --replicaof
+      - redis-drill-primary
+      - "6379"
+      - --masterauth
+      - ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+      - --requirepass
+      - ${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - "always"
+    ports:
+      - "6392:6379"
+    volumes:
+      - ./infra/tls/generated:/tls:ro
+    tmpfs:
+      - /data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          REDISCLI_AUTH=$${ARGUS_DRILL_REDIS_PASSWORD:-argus-drill-redis-secret}
+          redis-cli --tls -h localhost -p 6379 --cacert /tls/ca.crt
+          --cert /tls/bff-redis-client.crt --key /tls/bff-redis-client.key ping
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
   prometheus:
     profiles: ["monitoring"]
     image: prom/prometheus:v3.13.1

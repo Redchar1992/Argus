@@ -284,7 +284,19 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   }
 
   async function currentSession(request: FastifyRequest): Promise<ServerSession | undefined> {
-    return sessions.get(request.cookies[SESSION_COOKIE]);
+    return sessionStoreOperation(() => sessions.get(request.cookies[SESSION_COOKIE]));
+  }
+
+  async function sessionStoreOperation<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch {
+      throw new AppError(
+        503,
+        'IDENTITY_STORE_UNAVAILABLE',
+        'Sign-in is temporarily unavailable. Try again.',
+      );
+    }
   }
 
   async function verifyCsrf(request: FastifyRequest): Promise<void> {
@@ -334,7 +346,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       return await action(session);
     } catch (error) {
       if (error instanceof UpstreamError && error.status === 401) {
-        await sessions.delete(session.id);
+        await sessionStoreOperation(() => sessions.delete(session.id));
         metrics.recordSession('expired');
         clearSessionCookie(reply);
         throw new AppError(401, 'SESSION_EXPIRED', 'Your session expired. Sign in again.');
@@ -369,15 +381,15 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
     reply: FastifyReply,
     result: LoginResult,
   ): Promise<{ state: 'authenticated'; user: ServerSession['user']; expiresAt: string }> {
-    await sessions.delete(request.cookies[SESSION_COOKIE]);
+    await sessionStoreOperation(() => sessions.delete(request.cookies[SESSION_COOKIE]));
     clearSessionCookie(reply);
     await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
     clearMfaChallengeCookie(reply);
-    const session = await sessions.create(
+    const session = await sessionStoreOperation(() => sessions.create(
       result.token,
       { username: result.username, role: result.role },
       result.expiresInSeconds,
-    );
+    ));
     metrics.recordSession('created');
     setSessionCookie(reply, session);
     ensureCsrf(request, reply, true);
@@ -440,7 +452,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
         const result = await oidc.complete(callbackUrl, transaction);
         const login = await upstream.oidcLogin(result.idToken, transaction.nonce, request.id);
         if (isMfaChallenge(login)) {
-          await sessions.delete(request.cookies[SESSION_COOKIE]);
+          await sessionStoreOperation(() => sessions.delete(request.cookies[SESSION_COOKIE]));
           clearSessionCookie(reply);
           await beginMfaChallenge(request, reply, login);
           recordAuthentication(request, 'oidc', 'mfa_required');
@@ -496,7 +508,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       }
 
       const previousId = request.cookies[SESSION_COOKIE];
-      await sessions.delete(previousId);
+      await sessionStoreOperation(() => sessions.delete(previousId));
       clearSessionCookie(reply);
 
       const result = await upstream.login(username, password, request.id);
@@ -606,7 +618,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
       }
       try {
         const result = await upstream.recoverAccount(username, recoveryCode, newPassword, request.id);
-        await sessions.deleteForUser(username);
+        await sessionStoreOperation(() => sessions.deleteForUser(username));
         metrics.recordSession('user_invalidated');
         await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
         clearSessionCookie(reply);
@@ -773,7 +785,7 @@ export async function buildApp(config: AppConfig, dependencies: AppDependencies 
   }
 
   app.post('/bff/auth/logout', { preHandler: verifyCsrf }, async (request, reply) => {
-    await sessions.delete(request.cookies[SESSION_COOKIE]);
+    await sessionStoreOperation(() => sessions.delete(request.cookies[SESSION_COOKIE]));
     metrics.recordSession('deleted');
     await mfaChallenges.delete(request.cookies[MFA_CHALLENGE_COOKIE]);
     clearSessionCookie(reply);
