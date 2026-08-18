@@ -1,90 +1,89 @@
 package com.argus.auth.security;
 
 import com.argus.auth.model.UserAccount;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.argus.security.jwt.JwtSecurity;
+import com.argus.security.jwt.KeyPurpose;
+import com.argus.security.jwt.RsaKeyRing;
+import com.nimbusds.jwt.JWTClaimsSet;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Service;
 
-import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
- * Issues and validates HS256 JWTs. The signing secret comes from configuration
- * (env in production). Tokens carry the username (subject) and the role claim
- * so downstream services can enforce RBAC without a round-trip.
+ * Issues versioned RS256 user access tokens and validates them with the public half of the
+ * configured key ring. Retired public keys remain trusted during a zero-downtime rotation;
+ * only the primary private key is used for new tokens.
  */
 @Service
 public class JwtService {
 
-    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
+    private static final String ORCHESTRATOR_AUDIENCE = "argus-orchestrator";
 
-    /** The shipped dev default. Issuing real tokens signed with this is a public-key leak. */
-    static final String DEFAULT_DEV_SECRET = "argus-dev-secret-change-me-please-32bytes-minimum-length";
-
-    private final SecretKey key;
+    private final RsaKeyRing keyRing;
+    private final JwtDecoder decoder;
+    private final String issuer;
+    private final List<String> audiences;
     private final long expirySeconds;
 
     public JwtService(
-            @Value("${argus.jwt.secret}") String secret,
+            @Value("${argus.jwt.primary-key-id:}") String primaryKeyId,
+            @Value("${argus.jwt.private-keys:}") String privateKeys,
+            @Value("${argus.jwt.public-keys:}") String publicKeys,
+            @Value("${argus.jwt.issuer:urn:argus:auth}") String issuer,
+            @Value("${argus.jwt.audiences:argus-orchestrator,argus-admin-api}") List<String> audiences,
             @Value("${argus.jwt.expiry-seconds:3600}") long expirySeconds,
             Environment environment) {
-        assertSecretConfigured(secret, environment);
-        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        boolean production = Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> profile.equalsIgnoreCase("prod")
+                        || profile.equalsIgnoreCase("production"));
+        if (expirySeconds < 60 || expirySeconds > 86_400) {
+            throw new IllegalStateException("User access-token expiry must be between 60 and 86400 seconds");
+        }
+        this.audiences = audiences.stream().map(String::trim).filter(value -> !value.isBlank()).toList();
+        if (!this.audiences.contains(ORCHESTRATOR_AUDIENCE)) {
+            throw new IllegalStateException("User access-token audiences must include " + ORCHESTRATOR_AUDIENCE);
+        }
+        this.issuer = issuer;
         this.expirySeconds = expirySeconds;
-    }
-
-    /**
-     * auth-service is the token ISSUER, so the shipped dev default is most dangerous here:
-     * fail fast on a production profile (never sign tokens with a key that lives in the repo)
-     * and log a loud WARN everywhere else (dev / tests legitimately use the default).
-     */
-    private static void assertSecretConfigured(String secret, Environment environment) {
-        if (!DEFAULT_DEV_SECRET.equals(secret)) {
-            return;
-        }
-        boolean production = false;
-        for (String profile : environment.getActiveProfiles()) {
-            if ("prod".equalsIgnoreCase(profile) || "production".equalsIgnoreCase(profile)) {
-                production = true;
-                break;
-            }
-        }
-        if (production) {
-            throw new IllegalStateException(
-                    "ARGUS_JWT_SECRET is still the shipped dev default on a production profile. "
-                            + "Set ARGUS_JWT_SECRET to a real secret (>=32 bytes) before deploying.");
-        }
-        log.warn("ARGUS_JWT_SECRET is using the shipped dev default — this signing key is public. "
-                + "Acceptable for dev/test only; set ARGUS_JWT_SECRET before any real deployment.");
+        this.keyRing = RsaKeyRing.signing(primaryKeyId, privateKeys, publicKeys,
+                KeyPurpose.AUTH, production);
+        this.decoder = JwtSecurity.decoder(new JwtSecurity.TrustRoute(
+                keyRing.publicKeys(),
+                JwtSecurity.validator(issuer, ORCHESTRATOR_AUDIENCE, JwtSecurity.USER_TOKEN_TYPE)));
     }
 
     public String issue(UserAccount user) {
         Instant now = Instant.now();
-        return Jwts.builder()
+        JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .issuer(issuer)
                 .subject(user.getUsername())
+                .audience(audiences)
+                .jwtID(UUID.randomUUID().toString())
+                .claim("token_type", JwtSecurity.USER_TOKEN_TYPE)
                 .claim("role", user.getRole().name())
                 .claim("uid", user.getId())
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plusSeconds(expirySeconds)))
-                // Do not let the library upgrade the algorithm based on key length:
-                // every resource server has an explicit HS256 verification contract.
-                .signWith(key, Jwts.SIG.HS256)
-                .compact();
+                .issueTime(Date.from(now))
+                .notBeforeTime(Date.from(now))
+                .expirationTime(Date.from(now.plusSeconds(expirySeconds)))
+                .build();
+        return keyRing.sign(claims);
     }
 
-    public Claims parse(String token) {
-        return Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
+    public Jwt parse(String token) {
+        return decoder.decode(token);
+    }
+
+    public Map<String, Object> publicJwkSet() {
+        return keyRing.publicJwkSet();
     }
 
     public long getExpirySeconds() {

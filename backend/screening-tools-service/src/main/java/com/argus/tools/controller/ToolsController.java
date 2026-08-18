@@ -59,28 +59,28 @@ public class ToolsController {
     }
 
     @PostMapping("/sanctions_screen")
-    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
+    @PreAuthorize("hasRole('SERVICE')")
     public SanctionsScreenResponse sanctionsScreen(@RequestBody SanctionsScreenRequest req) {
         requireEnabled("sanctions_screen");
         return sanctionsScreenService.screen(req);
     }
 
     @PostMapping("/trace_transactions")
-    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
+    @PreAuthorize("hasRole('SERVICE')")
     public TraceResponse traceTransactions(@RequestBody TraceRequest req) {
         requireEnabled("trace_transactions");
         return traceTransactionsService.trace(req);
     }
 
     @PostMapping("/address_profile")
-    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
+    @PreAuthorize("hasRole('SERVICE')")
     public AddressProfileResponse addressProfile(@RequestBody AddressProfileRequest req) {
         requireEnabled("address_profile");
         return addressProfileService.profile(req);
     }
 
     @PostMapping("/risk_rules")
-    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
+    @PreAuthorize("hasRole('SERVICE')")
     public RiskRulesResponse riskRules(@RequestBody RiskRulesRequest req) {
         requireEnabled("risk_rules");
         return riskRulesService.evaluate(req);
@@ -89,7 +89,7 @@ public class ToolsController {
     // ---- catalog ----
 
     @GetMapping("/catalog")
-    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('SERVICE', 'ANALYST', 'ADMIN')")
     public List<ToolStatus> catalog() {
         return toolStatusRepository.findAll();
     }

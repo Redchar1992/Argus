@@ -15,8 +15,18 @@ spring:
 
 argus:
   jwt:
-    # MUST match auth-service's signing secret (shared HMAC). Supplied via env in prod.
-    secret: ${ARGUS_JWT_SECRET:argus-dev-secret-change-me-please-32bytes-minimum-length}
+    public-keys: ${ARGUS_AUTH_JWT_PUBLIC_KEYS:}
+    issuer: ${ARGUS_AUTH_JWT_ISSUER:urn:argus:auth}
+    audience: ${ARGUS_ORCHESTRATOR_JWT_AUDIENCE:argus-orchestrator}
+  workload:
+    jwt:
+      primary-key-id: ${ARGUS_WORKLOAD_JWT_PRIMARY_KEY_ID:}
+      private-keys: ${ARGUS_WORKLOAD_JWT_PRIVATE_KEYS:}
+      public-keys: ${ARGUS_WORKLOAD_JWT_PUBLIC_KEYS:}
+      issuer: ${ARGUS_WORKLOAD_JWT_ISSUER:urn:argus:workload}
+      subject: ${ARGUS_WORKLOAD_JWT_SUBJECT:agent-orchestrator}
+      audiences: ${ARGUS_WORKLOAD_JWT_AUDIENCES:argus-screening-tools,argus-case-service}
+      ttl-seconds: ${ARGUS_WORKLOAD_JWT_TTL_SECONDS:60}
   trace:
     store: ${ARGUS_TRACE_STORE:memory}        # memory | mongo
   llm:

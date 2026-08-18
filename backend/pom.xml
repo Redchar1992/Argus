@@ -26,6 +26,7 @@
     </properties>
 
     <modules>
+        <module>security-common</module>
         <module>api-gateway</module>
         <module>auth-service</module>
         <module>agent-orchestrator-service</module>

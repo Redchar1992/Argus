@@ -31,7 +31,7 @@ Status is intentionally strict: design knowledge is not labelled as an implement
 
 | Protocol/topic | Repository evidence | Honest status |
 |---|---|---|
-| **JWT** | Spring auth-service issues HS256 JWT; every Java business service validates it; BFF keeps it off the browser | **Built** |
+| **JWT** | Auth issues versioned RS256 user tokens; the orchestrator issues audience-bound 60-second workload tokens; services validate issuer/audience/type/expiry/algorithm/`kid`; public-only JWKS and overlapping key rings support rotation; BFF keeps user tokens off the browser | **Built + negative tested** |
 | **Cookie sessions** | Development memory store plus production-required Redis store; AES-256-GCM-encrypted bearer material, opaque cookie, capped TTL and cross-instance restore/logout | **Built + two-instance tested** |
 | **OAuth 2.0 / OIDC** | BFF Authorization Code + PKCE with discovery, state and nonce; encrypted one-time transaction store; Java re-verifies JWKS signature, issuer, audience, expiry and nonce and maps only by issuer + subject | **Built + negative tested** |
 | **WebAuthn / FIDO2 / Passkey** | Discoverable registration and usernameless authentication; required user verification; exact origin/RP/challenge/signature checks in Node; Java credential inventory plus atomic counter compare-and-update; Redis one-time ceremony state; React management UX | **Built + unit/Redis/Chromium tested** |
@@ -47,7 +47,7 @@ policy remain deployment/product decisions rather than implied features.
 
 | Capability | Concrete evidence | Status |
 |---|---|---|
-| **Java / Spring microservices** | Five-module Maven reactor: gateway, auth, agent orchestrator, screening tools and case service; Java 17, Spring Boot 3.5, Spring Cloud 2025.0 | **Built + 53 tests** |
+| **Java / Spring microservices** | Six-module Maven reactor including shared JWT security, gateway, auth, agent orchestrator, screening tools and case service; Java 17, Spring Boot 3.5, Spring Cloud 2025.0 | **Built + tested** |
 | **REST API design** | Typed DTOs/controllers across `/api/auth`, `/api/investigations`, `/api/tools`, `/api/cases`, `/api/policies`, `/api/audit`; BFF exposes a browser-specific contract | **Built** |
 | **SQL + NoSQL judgement** | JPA/H2/Postgres for relational identity/policy/case data; Mongo implementation for variable investigation traces; zero-infra memory defaults | **Built** |
 | **Production packaging + migrations** | Non-root multi-stage images; isolated Flyway `auth`/`tools`/`cases` schemas; production Hibernate validation; demo-seed suppression; executable reference Compose health graph | **Built + real Postgres/container smoke-tested** |

@@ -15,6 +15,9 @@ import org.springframework.test.web.servlet.MvcResult;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -100,5 +103,16 @@ class AuthRbacWebTest {
         mvc.perform(post("/api/auth/admin/identity-keys/rotate")
                         .header("Authorization", bearerFor("admin")))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void publicJwksIsAnonymousCacheableAndContainsNoPrivateExponent() throws Exception {
+        MvcResult result = mvc.perform(get("/.well-known/jwks.json"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("public")))
+                .andExpect(jsonPath("$.keys[0].kid").value("demo-auth-v1"))
+                .andReturn();
+        JsonNode body = mapper.readTree(result.getResponse().getContentAsString());
+        assertEquals(false, body.path("keys").get(0).has("d"));
     }
 }

@@ -77,7 +77,8 @@ Sign in and select two seeded wallets:
 - `0xc1ean…` shows sanctions → profile → rules → **CLEAR**, deliberately skipping graph tracing;
 - `0xbadc0de…` shows the longer tool path and ends **BLOCK** for a direct sanctions fixture.
 
-The planner, REST tool calls, policy gates, JWT propagation, trace persistence, audit timeline and
+The planner, REST tool calls, policy gates, short-lived workload JWT exchange, trace persistence,
+audit timeline and
 case mirroring are real local code. The wallet graph, balances and sanctions entries are synthetic
 fixtures, not live Chainalysis/TRM/Elliptic/OFAC data.
 
@@ -180,7 +181,7 @@ a claim of deployed geographic infrastructure.
 
 | Capability | Local demo status | Boundary not claimed |
 |---|---|---|
-| Password, bcrypt, JWT HS256 and RBAC | Real | Seed credentials are development-only |
+| Password, bcrypt, RS256 user/workload JWTs and RBAC | Real | Deterministic keys and seed credentials are development-only |
 | Node BFF Session, cookies, CSRF and rate limit | Real; encrypted TLS Redis in full profile | No managed Redis/secret manager |
 | OIDC protocol and token verification | Real | Account directory, corporate policy and KYC are mock |
 | TOTP, counter replay defense and recovery codes | Real | No SMS/email delivery or help-desk workflow |

@@ -32,9 +32,14 @@ argus:
   demo:
     seed: ${ARGUS_DEMO_SEED:true}
   jwt:
-    # Demo secret. In production this MUST come from the environment (ARGUS_JWT_SECRET).
-    secret: ${ARGUS_JWT_SECRET:argus-dev-secret-change-me-please-32bytes-minimum-length}
-    expiry-seconds: 3600
+    # Comma-separated kid:base64 DER key rings. Blank values select deterministic,
+    # public demo keys outside prod; prod fails fast until real rings are injected.
+    primary-key-id: ${ARGUS_AUTH_JWT_PRIMARY_KEY_ID:}
+    private-keys: ${ARGUS_AUTH_JWT_PRIVATE_KEYS:}
+    public-keys: ${ARGUS_AUTH_JWT_PUBLIC_KEYS:}
+    issuer: ${ARGUS_AUTH_JWT_ISSUER:urn:argus:auth}
+    audiences: ${ARGUS_AUTH_JWT_AUDIENCES:argus-orchestrator,argus-admin-api}
+    expiry-seconds: ${ARGUS_AUTH_JWT_EXPIRY_SECONDS:3600}
   oidc:
     enabled: ${ARGUS_OIDC_ENABLED:false}
     issuer: ${ARGUS_OIDC_ISSUER:}

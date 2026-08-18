@@ -1,6 +1,7 @@
 package com.argus.orchestrator.client;
 
 import com.argus.orchestrator.agent.DecisionPolicy;
+import com.argus.orchestrator.security.WorkloadTokenService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -27,29 +28,29 @@ public class PolicyClient {
     private final WebClient webClient;
     private final ObjectMapper mapper;
     private final boolean enabled;
+    private final WorkloadTokenService workloadTokens;
 
     public PolicyClient(
             @Value("${argus.case.base-url:http://localhost:8084}") String baseUrl,
             @Value("${argus.policy.enabled:true}") boolean enabled,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            WorkloadTokenService workloadTokens) {
         this.webClient = WebClient.builder().baseUrl(baseUrl).build();
         this.enabled = enabled;
         this.mapper = mapper;
+        this.workloadTokens = workloadTokens;
     }
 
-    /** Fetches the current decision bands, propagating the caller's bearer token. */
-    public DecisionPolicy fetchDecisionPolicy(String bearerToken) {
+    /** Fetches current decision bands with the orchestrator workload identity. */
+    public DecisionPolicy fetchDecisionPolicy(String actor) {
         if (!enabled) {
             return DecisionPolicy.defaults();
         }
         try {
             String body = webClient.get()
                     .uri("/api/policies")
-                    .headers(h -> {
-                        if (bearerToken != null && !bearerToken.isBlank()) {
-                            h.set("Authorization", bearerToken);
-                        }
-                    })
+                    .header("Authorization", workloadTokens.authorizationFor(
+                            WorkloadTokenService.CASES_AUDIENCE, actor))
                     .retrieve()
                     .bodyToMono(String.class)
                     .timeout(Duration.ofSeconds(5))

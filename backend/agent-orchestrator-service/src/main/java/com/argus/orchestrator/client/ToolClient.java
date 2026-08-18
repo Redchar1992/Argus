@@ -1,5 +1,6 @@
 package com.argus.orchestrator.client;
 
+import com.argus.orchestrator.security.WorkloadTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,29 +24,28 @@ public class ToolClient {
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final WorkloadTokenService workloadTokens;
 
     public ToolClient(@Value("${argus.tools.base-url:http://localhost:8083}") String baseUrl,
-                      ObjectMapper objectMapper) {
+                      ObjectMapper objectMapper,
+                      WorkloadTokenService workloadTokens) {
         this.webClient = WebClient.builder().baseUrl(baseUrl).build();
         this.objectMapper = objectMapper;
+        this.workloadTokens = workloadTokens;
     }
 
     /**
-     * Invokes a screening tool, propagating the caller's bearer token so the now-secured
-     * screening-tools-service authorises the service-to-service call as the originating
-     * analyst/admin. A null/blank token means an unauthenticated call (will be rejected
-     * by the downstream service) — this keeps the end-to-end RBAC chain intact.
+     * Invokes a screening tool with a fresh, audience-bound workload token. The actor is
+     * an audit claim; the browser's user token is intentionally never propagated.
      */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> invoke(String toolName, Map<String, Object> args, String bearerToken) {
+    public Map<String, Object> invoke(String toolName, Map<String, Object> args, String actor) {
         try {
+            String authorization = workloadTokens.authorizationFor(
+                    WorkloadTokenService.TOOLS_AUDIENCE, actor);
             String body = webClient.post()
                     .uri("/api/tools/{tool}", toolName)
-                    .headers(h -> {
-                        if (bearerToken != null && !bearerToken.isBlank()) {
-                            h.set("Authorization", bearerToken);
-                        }
-                    })
+                    .header("Authorization", authorization)
                     .bodyValue(args == null ? Map.of() : args)
                     .retrieve()
                     .bodyToMono(String.class)

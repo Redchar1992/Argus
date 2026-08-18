@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -39,13 +38,12 @@ public class InvestigationController {
     @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public ResponseEntity<SubmitResponse> submit(
             @Valid @RequestBody SubmitRequest request,
-            @AuthenticationPrincipal Jwt principal,
-            @RequestHeader(value = "Authorization", required = false) String authorization) {
+            @AuthenticationPrincipal Jwt principal) {
         boolean runSync = Boolean.TRUE.equals(request.runSync());
-        // The requester is the authenticated subject; the bearer token is propagated to
-        // the downstream (now-secured) tools/case services on the agent's internal calls.
+        // Store the authenticated actor; downstream calls use a separate short-lived
+        // workload identity carrying this actor as a signed audit claim.
         String user = principal != null ? principal.getSubject() : "analyst";
-        SubmitResponse response = service.submit(request.address(), runSync, user, authorization);
+        SubmitResponse response = service.submit(request.address(), runSync, user);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 

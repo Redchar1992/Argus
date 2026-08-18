@@ -74,26 +74,21 @@ public class AgentOrchestrator {
 
     /** Runs the loop asynchronously so the submit endpoint can return immediately. */
     @Async
-    public void runAsync(String investigationId, String bearerToken) {
-        run(investigationId, bearerToken);
-    }
-
-    /** Convenience overload (no propagated caller token) used by tests. */
-    public Investigation run(String investigationId) {
-        return run(investigationId, null);
+    public void runAsync(String investigationId) {
+        run(investigationId);
     }
 
     /**
      * The actual loop. Public + synchronous so tests can drive it deterministically.
-     * The {@code bearerToken} (the caller's {@code Authorization} header) is propagated
-     * on every service-to-service call so the now-secured screening-tools-service and
-     * case-service authorise the request as the originating analyst/admin.
+     * Internal clients exchange the stored requester for a short-lived workload token;
+     * the original browser credential never leaves the orchestrator boundary.
      */
-    public Investigation run(String investigationId, String bearerToken) {
+    public Investigation run(String investigationId) {
         Investigation inv = store.findById(investigationId)
                 .orElseThrow(() -> new IllegalArgumentException("No investigation " + investigationId));
         // Load the admin-editable decision bands so the policy actually drives the decision.
-        DecisionPolicy decisionPolicy = policyClient.fetchDecisionPolicy(bearerToken);
+        String actor = inv.getRequestedBy();
+        DecisionPolicy decisionPolicy = policyClient.fetchDecisionPolicy(actor);
         AgentContext ctx = new AgentContext(
                 inv.getSubjectAddress(), ToolSpec.defaultCatalog(), decisionPolicy);
 
@@ -106,13 +101,13 @@ public class AgentOrchestrator {
 
                 if (action.type() == AgentAction.Type.FINISH) {
                     recordFinish(inv, step, action, System.currentTimeMillis() - t0);
-                    complete(inv, bearerToken);
+                    complete(inv);
                     return store.save(inv);
                 }
 
                 // ACT
                 Map<String, Object> observation =
-                        toolClient.invoke(action.toolName(), action.toolArgs(), bearerToken);
+                        toolClient.invoke(action.toolName(), action.toolArgs(), actor);
 
                 // OBSERVE
                 ctx.record(action.toolName(), action.toolArgs(), observation);
@@ -122,7 +117,7 @@ public class AgentOrchestrator {
 
             // Hit the step cap without finishing -> force a conservative REVIEW close-out.
             forceReviewOnStepCap(inv);
-            complete(inv, bearerToken);
+            complete(inv);
             return store.save(inv);
 
         } catch (Exception e) {
@@ -178,12 +173,12 @@ public class AgentOrchestrator {
         inv.setSummary(buildSummary(inv));
     }
 
-    private void complete(Investigation inv, String bearerToken) {
+    private void complete(Investigation inv) {
         inv.setStatus("COMPLETED");
         inv.setCompletedAt(Instant.now());
         caseServiceClient.mirrorCase(inv.getId(), inv.getSubjectAddress(), inv.getDecision(),
                 inv.getRiskScore() == null ? 0 : inv.getRiskScore(), inv.getRiskBand(),
-                inv.getSummary(), inv.getRiskFactors(), inv.getRequestedBy(), bearerToken);
+                inv.getSummary(), inv.getRiskFactors(), inv.getRequestedBy());
     }
 
     private String buildSummary(Investigation inv) {

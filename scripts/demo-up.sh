@@ -169,7 +169,6 @@ else
 fi
 
 export ARGUS_REGION=local-demo
-export ARGUS_JWT_SECRET=argus-local-demo-jwt-secret-change-before-production-2026
 export ARGUS_IDENTITY_PRIMARY_KEY_ID=demo-v1
 export ARGUS_IDENTITY_KEYS=demo-v1:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 export ARGUS_RECOVERY_PEPPER=YXJndXMtcmVjb3ZlcnktZGV2LXBlcHBlci1rZXktdjE=

@@ -1,8 +1,8 @@
 # Identity encryption-key rotation
 
 This runbook rotates application-level AES-256-GCM keys without placing plaintext identity
-material in Redis, logs, command output or the browser. It covers the BFF key ring and the Java
-TOTP key ring; JWT signing-key rotation is a separate provider/service migration.
+material in Redis, logs, command output or the browser. It covers the BFF key ring, Java TOTP
+key ring and the two independent RS256 signing rings.
 
 ## Preconditions
 
@@ -50,6 +50,24 @@ Removing the old bytes too early deliberately fails closed and invalidates unrea
 4. Repeat until both `scanned` and `rotated` are zero. Investigate rather than skipping any
    malformed/unreadable envelope.
 5. Confirm every region reports the new primary, then remove `old-v1` and roll once more.
+
+## RS256 auth and workload signing keys
+
+Auth-service owns `ARGUS_AUTH_JWT_PRIVATE_KEYS`; the orchestrator owns
+`ARGUS_WORKLOAD_JWT_PRIVATE_KEYS`. Resource services receive only the corresponding public rings.
+Repeat this sequence independently for each trust domain:
+
+1. Generate a new RSA pair with `scripts/generate-jwt-key-rings.sh` or the managed KMS. Never
+   reuse a `kid` with different bytes.
+2. Add the new `kid:key` to both private and public rings, leaving the old key primary. Deploy all
+   verifiers first and confirm both keys appear in the public-only JWKS.
+3. Change `*_JWT_PRIMARY_KEY_ID` on the single owning signer and roll it. New tokens now carry the
+   new `kid`; retained old public keys keep in-flight tokens valid.
+4. Wait longer than the maximum user-token TTL for auth keys (or workload-token TTL for workload
+   keys), including clock-skew and rollback margin.
+5. Remove the old private and public entries, deploy, then verify wrong-audience and retired-key
+   negative tests. Rollback before retirement is a primary-ID change; after retirement it requires
+   restoring the retained secret version.
 
 ## Evidence to retain
 

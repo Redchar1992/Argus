@@ -69,12 +69,12 @@ identity-bff (Node 20 + Fastify, :3001)
         ├── password/OIDC/WebAuthn ─────────────▶ auth-service (:8081)
         └── /api/investigations/* ─────────────▶ agent-orchestrator (:8082)
                                                       │
-                                                      ├── tools ──▶ screening-tools (:8083)
-                                                      └── case ───▶ case-service (:8084)
+                                                      ├── RS256 workload token ──▶ screening-tools (:8083)
+                                                      └── RS256 workload token ──▶ case-service (:8084)
 
 admin-console (Vue, :5174) ──▶ api-gateway (Spring Cloud Gateway, :8080)
 
-Every Java business service validates the JWT and enforces @PreAuthorize role gates.
+User and workload JWTs use separate RS256 key rings, issuers, audiences and role gates.
 ```
 
 Full detail: [`docs/architecture.md`](docs/architecture.md).
@@ -313,10 +313,15 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
 - Three+ real tools over REST: `sanctions_screen`, `trace_transactions` (a real BFS over
   the seeded graph with path reconstruction), `address_profile`, `risk_rules` (transparent
   points-based AML rules).
-- Auth + per-service RBAC: bcrypt user store, JWT issue/parse, and **every** business
-  service (orchestrator, screening-tools, case) is an OAuth2 resource server that validates
-  the shared-secret JWT and enforces `@PreAuthorize` role gating — real, tested. Self-service
+- Auth + per-service RBAC: bcrypt user store, versioned RS256 access-token issue/parse, and
+  **every** business service (orchestrator, screening-tools, case) is an OAuth2 resource server
+  that validates issuer, audience, token class, expiry, algorithm and `kid` before applying
+  `@PreAuthorize` role gating — real, tested. Self-service
   registration is fixed at the lowest privilege; role elevation is an admin-only endpoint.
+- **Workload identity:** the orchestrator never forwards a user's bearer token to tools/cases.
+  It signs a separate 60-second RS256 SERVICE token for exactly one downstream audience and
+  includes the originating user only as a signed `actor` audit claim. Auth and workload
+  public-only JWKS endpoints plus overlapping public-key rings support zero-downtime rotation.
 - **Browser-safe identity BFF:** a real Fastify service calls `POST /api/auth/login`, stores
   the returned JWT only in a server-side session, rotates a 256-bit opaque session ID, and
   gives the browser an `HttpOnly` + `SameSite=Strict` cookie. Protected investigation routes
@@ -396,13 +401,13 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
   protects the JSON BFF responses, while the SPA document's CSP/HSTS/asset-integrity policy
   must be configured by the CDN or web server that hosts it.
 - The gateway does **not** validate JWTs centrally — it is routing + CORS only. Enforcement
-  is **per-service**: each service is an OAuth2 resource server validating the same
-  shared-secret JWT and applying `@PreAuthorize`. (A JWT filter at the gateway would add
+  is **per-service**: each service is an OAuth2 resource server validating its configured
+  asymmetric trust domains and applying `@PreAuthorize`. (A JWT filter at the gateway would add
   defence-in-depth but is not the enforcement boundary — the services are.)
-- Service-to-service calls (orchestrator → screening-tools / case) propagate the **caller's**
-  bearer token, so internal calls are authorised as the originating analyst/admin. A dedicated
-  service credential would be a cleaner production design; token propagation is the current,
-  working approach.
+- Service-to-service calls use a dedicated orchestrator workload credential. Tool execution and
+  case persistence reject user tokens, while catalog/policy administration rejects SERVICE-only
+  credentials. Local development uses explicitly public deterministic pairs; every `prod` profile
+  fails fast until distinct real key rings are injected.
 - The on-chain data is **seeded/synthetic**, not a live chain indexer. The graph and
   sanctions list are illustrative fixtures (no real OFAC addresses).
 - Multi-stage non-root images and an executable production-reference Compose topology are built.

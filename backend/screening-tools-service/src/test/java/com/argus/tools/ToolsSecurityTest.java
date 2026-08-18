@@ -1,53 +1,57 @@
 package com.argus.tools;
 
-import com.nimbusds.jose.JWSAlgorithm;
-import com.nimbusds.jose.JWSHeader;
-import com.nimbusds.jose.crypto.MACSigner;
+import com.argus.security.jwt.JwtSecurity;
+import com.argus.security.jwt.KeyPurpose;
+import com.argus.security.jwt.RsaKeyRing;
 import com.nimbusds.jwt.JWTClaimsSet;
-import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Date;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * Proves screening-tools-service is no longer "裸奔": every tool endpoint now requires a
- * valid JWT, and the admin-gated catalog mutation rejects an analyst. Tokens are REAL
- * HS256 JWTs signed with the shared secret, so the actual NimbusJwtDecoder + role
- * mapping are exercised end-to-end (not stubbed).
- */
+/** Proves user and workload tokens have distinct audiences and capabilities. */
 @SpringBootTest
 @AutoConfigureMockMvc
 class ToolsSecurityTest {
 
+    private static final RsaKeyRing AUTH_KEYS = RsaKeyRing.signing(
+            "", "", "", KeyPurpose.AUTH, false);
+    private static final RsaKeyRing WORKLOAD_KEYS = RsaKeyRing.signing(
+            "", "", "", KeyPurpose.WORKLOAD, false);
+
     @Autowired
     private MockMvc mvc;
 
-    @Value("${argus.jwt.secret}")
-    private String secret;
+    private String userToken(String role) {
+        return token(AUTH_KEYS, "urn:argus:auth", "tester", "argus-admin-api",
+                JwtSecurity.USER_TOKEN_TYPE, role, null);
+    }
 
-    /** Mint a real HS256 token carrying the given role, exactly like auth-service does. */
-    private String token(String role) throws Exception {
-        SignedJWT jwt = new SignedJWT(
-                new JWSHeader(JWSAlgorithm.HS256),
-                new JWTClaimsSet.Builder()
-                        .subject("tester")
-                        .claim("role", role)
-                        .issueTime(new Date())
-                        .expirationTime(new Date(System.currentTimeMillis() + 3600_000))
-                        .build());
-        jwt.sign(new MACSigner(secret.getBytes(StandardCharsets.UTF_8)));
-        return "Bearer " + jwt.serialize();
+    private String workloadToken(String audience) {
+        return token(WORKLOAD_KEYS, "urn:argus:workload", "agent-orchestrator", audience,
+                JwtSecurity.WORKLOAD_TOKEN_TYPE, "SERVICE", "analyst-jane");
+    }
+
+    private String token(RsaKeyRing keys, String issuer, String subject, String audience,
+                         String type, String role, String actor) {
+        Instant now = Instant.now();
+        JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
+                .issuer(issuer).subject(subject).audience(audience)
+                .claim("token_type", type).claim("role", role)
+                .issueTime(Date.from(now)).notBeforeTime(Date.from(now))
+                .expirationTime(Date.from(now.plusSeconds(3600)));
+        if (actor != null) claims.claim("actor", actor);
+        return "Bearer " + keys.sign(claims.build());
     }
 
     @Test
@@ -59,18 +63,38 @@ class ToolsSecurityTest {
     }
 
     @Test
-    void analystTokenCanRunScreening() throws Exception {
+    void analystUserTokenCannotExecuteInternalTool() throws Exception {
         mvc.perform(post("/api/tools/sanctions_screen")
-                        .header("Authorization", token("ANALYST"))
+                        .header("Authorization", userToken("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addresses\":[\"0xabc\"]}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void workloadTokenCanExecuteScreening() throws Exception {
+        mvc.perform(post("/api/tools/sanctions_screen")
+                        .header("Authorization", workloadToken("argus-screening-tools"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"addresses\":[\"0xabc\"]}"))
                 .andExpect(status().isOk());
     }
 
     @Test
-    void analystCannotMutateToolCatalog() throws Exception {
+    void workloadTokenForAnotherAudienceIs401() throws Exception {
+        mvc.perform(post("/api/tools/sanctions_screen")
+                        .header("Authorization", workloadToken("argus-case-service"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addresses\":[\"0xabc\"]}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void analystCanReadButCannotMutateCatalog() throws Exception {
+        mvc.perform(get("/api/tools/catalog").header("Authorization", userToken("ANALYST")))
+                .andExpect(status().isOk());
         mvc.perform(put("/api/tools/catalog/sanctions_screen")
-                        .header("Authorization", token("ANALYST"))
+                        .header("Authorization", userToken("ANALYST"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"enabled\":false}"))
                 .andExpect(status().isForbidden());
@@ -79,7 +103,7 @@ class ToolsSecurityTest {
     @Test
     void adminCanMutateToolCatalog() throws Exception {
         mvc.perform(put("/api/tools/catalog/sanctions_screen")
-                        .header("Authorization", token("ADMIN"))
+                        .header("Authorization", userToken("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"enabled\":true}"))
                 .andExpect(status().isOk());

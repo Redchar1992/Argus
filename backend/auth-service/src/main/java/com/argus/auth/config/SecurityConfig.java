@@ -41,6 +41,7 @@ public class SecurityConfig {
                                 "/api/auth/mfa/verify").permitAll()
                         .requestMatchers("/api/auth/recovery/complete").permitAll()
                         .requestMatchers("/api/auth/internal/passkeys/**").permitAll()
+                        .requestMatchers("/.well-known/jwks.json").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .anyRequest().authenticated())
                 // Missing/invalid credentials -> 401 (not 403). 403 is reserved for an

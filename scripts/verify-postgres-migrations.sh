@@ -51,7 +51,6 @@ start_and_check() {
     ARGUS_PG_URL="$PG_URL" \
     ARGUS_PG_USER=argus \
     ARGUS_PG_PASSWORD=argus \
-    ARGUS_JWT_SECRET=argus-postgres-validation-secret-at-least-32-bytes \
     java -jar "$ROOT/backend/$module/target/$module-0.1.0.jar" \
       --server.port="$APP_PORT" >"$log_file" 2>&1 &
   local pid=$!

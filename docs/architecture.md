@@ -25,8 +25,8 @@ flowchart LR
     Auth -->|"JWT — server-to-server only"| BFF
     BFF -->|"Bearer JWT + investigation API"| Agent
     BFF -->|"rediss + ACL/mTLS: AES-GCM records + rate keys"| Redis
-    Agent -->|"tool calls"| Tools
-    Agent -->|"case mirror"| Cases
+    Agent -->|"60s RS256 workload JWT — tools audience"| Tools
+    Agent -->|"60s RS256 workload JWT — case audience"| Cases
     Admin --> Gateway
     Gateway --> Auth
     Gateway --> Tools
@@ -51,7 +51,9 @@ orchestrator directly.
 | `case-service` | 8084 | Spring Boot, JPA | Cases, audit log, screening policy |
 
 The Java backend remains one Maven reactor on Java 17, Spring Boot 3.5 and Spring Cloud
-2025.0.x. Every business service validates the JWT and applies its own role authorization.
+2025.0.x. Every business service validates its accepted RS256 issuer, audience, token class,
+expiry and key ID and applies its own role authorization. User access tokens and orchestrator
+workload tokens have separate key rings and cannot be substituted for one another.
 
 ## Authentication and session flow
 
@@ -228,8 +230,9 @@ sequenceDiagram
     Browser->>BFF: POST /bff/api/investigations<br/>session cookie + CSRF header
     BFF->>BFF: CSRF guard + session guard
     BFF->>Agent: POST /api/investigations<br/>Authorization: Bearer server-side-JWT
-    Agent->>Tools: PLAN → ACT → OBSERVE tool calls
-    Agent->>Cases: Best-effort completed-case mirror
+    Agent->>Agent: Mint audience-bound 60s SERVICE JWT<br/>signed actor=browser subject
+    Agent->>Tools: PLAN → ACT → OBSERVE + tools workload JWT
+    Agent->>Cases: Policy/case calls + case workload JWT
     Agent-->>BFF: investigationId
     BFF-->>Browser: normalized JSON
     loop While RUNNING
@@ -339,8 +342,9 @@ These are limitations, not hidden features:
    needed to absorb volumetric traffic before it reaches Node or Redis.
 5. On-chain data is seeded/synthetic; it is not a live chain indexer or production sanctions
    provider.
-6. Service-to-service calls inside the Java workflow propagate the originating user's token;
-   dedicated workload identity would be cleaner in production.
+6. Java service-to-service calls use a dedicated short-lived workload identity. The original
+   user credential stops at the orchestrator; a signed `actor` claim preserves audit attribution.
+   Production still needs a managed KMS/secret-manager rotation workflow for the implemented rings.
 7. Production images and schema migrations are executable, but the reference Compose topology is
    single-host and does not replace managed ingress, secrets, backups or orchestration.
 

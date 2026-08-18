@@ -18,8 +18,7 @@ public final class CaseDtos {
             int riskScore,
             String riskBand,
             String summary,
-            String riskFactorsJson,
-            String createdBy) {
+            String riskFactorsJson) {
     }
 
     public record CaseView(

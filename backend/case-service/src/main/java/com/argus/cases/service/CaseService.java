@@ -32,11 +32,12 @@ public class CaseService {
         this.policyRepository = policyRepository;
     }
 
-    public CaseView persist(PersistCaseRequest req) {
+    public CaseView persist(PersistCaseRequest req, String actor) {
+        String trustedActor = actor == null || actor.isBlank() ? "unknown" : actor;
         CaseRecord saved = caseRepository.save(new CaseRecord(
                 req.id(), req.subjectAddress(), req.decision(), req.riskScore(),
-                req.riskBand(), req.summary(), req.riskFactorsJson(), req.createdBy()));
-        audit(req.createdBy() == null ? "system" : req.createdBy(),
+                req.riskBand(), req.summary(), req.riskFactorsJson(), trustedActor));
+        audit(trustedActor,
                 "CASE_PERSISTED", req.id(),
                 "decision=" + req.decision() + " score=" + req.riskScore());
         return toView(saved);

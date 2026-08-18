@@ -29,12 +29,12 @@ import com.argus.auth.service.MfaService;
 import com.argus.auth.service.RecoveryService;
 import com.argus.auth.service.PasskeyService;
 import com.argus.auth.security.InternalBffAuth;
-import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -207,10 +207,10 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<Map<String, Object>> me(
             @RequestHeader("Authorization") String authorization) {
-        Claims claims = jwtService.parse(authorization.substring(7));
+        Jwt claims = jwtService.parse(authorization.substring(7));
         return ResponseEntity.ok(Map.of(
                 "username", claims.getSubject(),
-                "role", claims.get("role", String.class)));
+                "role", claims.getClaimAsString("role")));
     }
 
     /** Admin-only smoke endpoint proving RBAC is enforced, not faked. */

@@ -8,10 +8,10 @@ managed ingress, a secret manager, managed databases or an orchestrator such as 
 
 | Service | Production behavior |
 |---|---|
-| `auth-service` | Requires Postgres, mTLS key/trust stores and non-development identity secrets; disables demo users; Flyway migrates the `auth` schema and Hibernate uses `validate` only |
-| `screening-tools-service` | Requires Postgres; disables illustrative fixtures; Flyway migrates the `tools` schema and Hibernate uses `validate` only |
-| `case-service` | Requires Postgres; Flyway migrates the `cases` schema and Hibernate uses `validate` only |
-| `agent-orchestrator-service` | Requires Mongo, the external Anthropic provider and an API key; rejects memory traces and the local rule provider |
+| `auth-service` | Requires Postgres, mTLS key/trust stores, a non-demo RS256 auth signing ring and non-development identity secrets; disables demo users; Flyway migrates the `auth` schema and Hibernate uses `validate` only |
+| `screening-tools-service` | Requires Postgres plus auth/workload public rings; disables illustrative fixtures; Flyway migrates the `tools` schema and Hibernate uses `validate` only |
+| `case-service` | Requires Postgres plus auth/workload public rings; Flyway migrates the `cases` schema and Hibernate uses `validate` only |
+| `agent-orchestrator-service` | Requires Mongo, auth public keys, a non-demo workload signing ring, the external Anthropic provider and an API key; rejects memory traces and the local rule provider |
 | `api-gateway` | Requires an explicit public Origin and does not publish the BFF-only auth route |
 | Node BFF | Retains its existing production checks for Secure cookies, encrypted Redis, Redis authentication/TLS, auth-service mTLS and metrics authentication |
 
@@ -70,6 +70,8 @@ Generate only short-lived **local** PKI, then provide disposable validation secr
 ```bash
 ./infra/tls/generate-dev-pki.sh             # skip if a still-valid local PKI already exists
 cp .env.production.example .env.production  # replace every placeholder
+./scripts/generate-jwt-key-rings.sh .env.jwt.generated
+# copy the six generated ARGUS_*_JWT_* values into .env.production
 
 docker compose --env-file .env.production -f compose.production.yml config -q
 docker compose --env-file .env.production -f compose.production.yml \
@@ -90,6 +92,9 @@ fully interactive localhost review flow.
 
 - `.env.production` is ignored and is only a local Compose input; production injects credentials
   from its secret manager.
+- Auth private keys are mounted only into `auth-service`; workload private keys only into the
+  orchestrator. Tools/case services receive public rings only. Keep a retired public key through
+  the maximum token TTL before removing it.
 - `infra/tls/generated` contains development certificates and is ignored. Never ship its CA or
   private keys.
 - Database, Mongo and Redis volumes in the reference file are single-host fixtures, not HA.

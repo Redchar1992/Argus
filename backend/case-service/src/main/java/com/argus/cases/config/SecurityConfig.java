@@ -1,8 +1,8 @@
 package com.argus.cases.config;
 
-import jakarta.annotation.PostConstruct;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.argus.security.jwt.JwtSecurity;
+import com.argus.security.jwt.KeyPurpose;
+import com.argus.security.jwt.RsaKeyRing;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,71 +15,51 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 
-/**
- * OAuth2 resource-server security for case-service. Validates the SAME HS256 JWT that
- * auth-service issues (shared {@code ARGUS_JWT_SECRET}) and maps the {@code role} claim
- * onto a {@code ROLE_*} authority so {@code @PreAuthorize} gates the case/audit/policy
- * endpoints. Before this fix case-service was completely unauthenticated.
- */
+/** Separately validates user-admin and orchestrator-workload RS256 trust domains. */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
+    private final RsaKeyRing authKeys;
+    private final RsaKeyRing workloadKeys;
+    private final String authIssuer;
+    private final String authAudience;
+    private final String workloadIssuer;
+    private final String workloadAudience;
 
-    /** The shipped dev default. Signing real tokens with this is a public-key leak. */
-    static final String DEFAULT_DEV_SECRET = "argus-dev-secret-change-me-please-32bytes-minimum-length";
-
-    private final String jwtSecret;
-    private final Environment environment;
-
-    public SecurityConfig(@Value("${argus.jwt.secret}") String jwtSecret, Environment environment) {
-        this.jwtSecret = jwtSecret;
-        this.environment = environment;
-    }
-
-    /**
-     * Guard against silently shipping the public dev signing key. If the JWT secret is still
-     * the shipped default, fail fast on a production profile (so a misconfigured deploy can
-     * never sign tokens with a key that is in the repo) and log a loud WARN everywhere else
-     * (dev / tests, which legitimately use the default).
-     */
-    @PostConstruct
-    void assertJwtSecretConfigured() {
-        if (!DEFAULT_DEV_SECRET.equals(jwtSecret)) {
-            return;
-        }
-        boolean production = false;
-        for (String profile : environment.getActiveProfiles()) {
-            if ("prod".equalsIgnoreCase(profile) || "production".equalsIgnoreCase(profile)) {
-                production = true;
-                break;
-            }
-        }
-        if (production) {
-            throw new IllegalStateException(
-                    "ARGUS_JWT_SECRET is still the shipped dev default on a production profile. "
-                            + "Set ARGUS_JWT_SECRET to a real secret (>=32 bytes) before deploying.");
-        }
-        log.warn("ARGUS_JWT_SECRET is using the shipped dev default — this signing key is public. "
-                + "Acceptable for dev/test only; set ARGUS_JWT_SECRET before any real deployment.");
+    public SecurityConfig(
+            @Value("${argus.jwt.public-keys:}") String authPublicKeys,
+            @Value("${argus.jwt.issuer:urn:argus:auth}") String authIssuer,
+            @Value("${argus.jwt.audience:argus-admin-api}") String authAudience,
+            @Value("${argus.workload.jwt.public-keys:}") String workloadPublicKeys,
+            @Value("${argus.workload.jwt.issuer:urn:argus:workload}") String workloadIssuer,
+            @Value("${argus.workload.jwt.audience:argus-case-service}") String workloadAudience,
+            Environment environment) {
+        boolean production = Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> profile.equalsIgnoreCase("prod")
+                        || profile.equalsIgnoreCase("production"));
+        this.authKeys = RsaKeyRing.verification(authPublicKeys, KeyPurpose.AUTH, production);
+        this.workloadKeys = RsaKeyRing.verification(workloadPublicKeys, KeyPurpose.WORKLOAD, production);
+        this.authIssuer = authIssuer;
+        this.authAudience = authAudience;
+        this.workloadIssuer = workloadIssuer;
+        this.workloadAudience = workloadAudience;
     }
 
     @Bean
     public JwtDecoder jwtDecoder() {
-        SecretKeySpec key = new SecretKeySpec(
-                jwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-        return NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+        return JwtSecurity.decoder(
+                new JwtSecurity.TrustRoute(authKeys.publicKeys(), JwtSecurity.validator(
+                        authIssuer, authAudience, JwtSecurity.USER_TOKEN_TYPE)),
+                new JwtSecurity.TrustRoute(workloadKeys.publicKeys(), JwtSecurity.validator(
+                        workloadIssuer, workloadAudience, JwtSecurity.WORKLOAD_TOKEN_TYPE)));
     }
 
     @Bean
@@ -87,11 +67,8 @@ public class SecurityConfig {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(jwt -> {
             String role = jwt.getClaimAsString("role");
-            if (role == null || role.isBlank()) {
-                return List.of();
-            }
-            List<GrantedAuthority> authorities =
-                    List.of(new SimpleGrantedAuthority("ROLE_" + role));
+            if (role == null || role.isBlank()) return List.of();
+            List<GrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role));
             return authorities;
         });
         return converter;

@@ -1,5 +1,6 @@
 package com.argus.orchestrator.client;
 
+import com.argus.orchestrator.security.WorkloadTokenService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,19 +25,22 @@ public class CaseServiceClient {
     private final WebClient webClient;
     private final ObjectMapper mapper;
     private final boolean enabled;
+    private final WorkloadTokenService workloadTokens;
 
     public CaseServiceClient(
             @Value("${argus.case.base-url:http://localhost:8084}") String baseUrl,
             @Value("${argus.case.mirror-enabled:true}") boolean enabled,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            WorkloadTokenService workloadTokens) {
         this.webClient = WebClient.builder().baseUrl(baseUrl).build();
         this.enabled = enabled;
         this.mapper = mapper;
+        this.workloadTokens = workloadTokens;
     }
 
     public void mirrorCase(String id, String subjectAddress, String decision, int riskScore,
                            String riskBand, String summary, List<String> riskFactors,
-                           String createdBy, String bearerToken) {
+                           String actor) {
         if (!enabled) {
             return;
         }
@@ -48,15 +52,11 @@ public class CaseServiceClient {
                     "riskScore", riskScore,
                     "riskBand", riskBand == null ? "" : riskBand,
                     "summary", summary == null ? "" : summary,
-                    "riskFactorsJson", mapper.writeValueAsString(riskFactors),
-                    "createdBy", createdBy == null ? "system" : createdBy);
+                    "riskFactorsJson", mapper.writeValueAsString(riskFactors));
             webClient.post()
                     .uri("/api/cases")
-                    .headers(h -> {
-                        if (bearerToken != null && !bearerToken.isBlank()) {
-                            h.set("Authorization", bearerToken);
-                        }
-                    })
+                    .header("Authorization", workloadTokens.authorizationFor(
+                            WorkloadTokenService.CASES_AUDIENCE, actor))
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(String.class)

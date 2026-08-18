@@ -33,7 +33,8 @@ class AuthServiceApplicationTests {
         assertTrue(token.expiresInSeconds() > 0);
         String header = new String(Base64.getUrlDecoder().decode(token.token().split("\\.")[0]),
                 StandardCharsets.UTF_8);
-        assertTrue(header.contains("\"alg\":\"HS256\""));
+        assertTrue(header.contains("\"alg\":\"RS256\""));
+        assertTrue(header.contains("\"kid\":\"demo-auth-v1\""));
     }
 
     @Test

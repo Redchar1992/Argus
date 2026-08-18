@@ -5,6 +5,7 @@ ARG MODULE
 WORKDIR /workspace
 
 COPY pom.xml ./
+COPY security-common/pom.xml security-common/pom.xml
 COPY api-gateway/pom.xml api-gateway/pom.xml
 COPY auth-service/pom.xml auth-service/pom.xml
 COPY agent-orchestrator-service/pom.xml agent-orchestrator-service/pom.xml

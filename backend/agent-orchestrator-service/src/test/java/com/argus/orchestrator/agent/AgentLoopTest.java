@@ -34,7 +34,7 @@ class AgentLoopTest {
         InvestigationStore store = new InMemoryInvestigationStore();
         CaseServiceClient caseClient = mock(CaseServiceClient.class);
         doNothing().when(caseClient).mirrorCase(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
-                any(), any(), any(), any(), any());
+                any(), any(), any(), any());
         PolicyClient policyClient = mock(PolicyClient.class);
         when(policyClient.fetchDecisionPolicy(any())).thenReturn(DecisionPolicy.defaults());
         return new AgentOrchestrator(new LocalRuleAgentProvider(), toolClient, store, caseClient,
@@ -46,7 +46,7 @@ class AgentLoopTest {
         InvestigationStore store = new InMemoryInvestigationStore();
         CaseServiceClient caseClient = mock(CaseServiceClient.class);
         doNothing().when(caseClient).mirrorCase(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(),
-                any(), any(), any(), any(), any());
+                any(), any(), any(), any());
         PolicyClient policyClient = mock(PolicyClient.class);
         when(policyClient.fetchDecisionPolicy(any())).thenReturn(policy);
         return new AgentOrchestrator(new LocalRuleAgentProvider(), toolClient, store, caseClient,
