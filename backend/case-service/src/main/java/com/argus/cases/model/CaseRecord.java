@@ -3,7 +3,6 @@ package com.argus.cases.model;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
@@ -33,11 +32,9 @@ public class CaseRecord {
     @Column(name = "risk_band", nullable = false)
     private String riskBand;
 
-    @Lob
     @Column(name = "summary", nullable = false, length = 4000)
     private String summary;
 
-    @Lob
     @Column(name = "risk_factors_json", length = 8000)
     private String riskFactorsJson;
 

@@ -314,7 +314,8 @@ CDN/ingress and keep dependencies patched.
 ## Data stores
 
 - **SQL (Postgres or zero-infra H2):** users, sanctions fixtures, transaction edges, tool
-  status, cases, audit entries and policy.
+  status, cases, audit entries and policy. Flyway owns isolated `auth`, `tools` and `cases`
+  Postgres schemas; production runs Hibernate in validation-only mode.
 - **NoSQL (Mongo or in-memory default):** variable-length investigation documents and their
   step/tool observations.
 - **BFF development session store:** in-process `Map`; restart intentionally signs users out.
@@ -340,6 +341,8 @@ These are limitations, not hidden features:
    provider.
 6. Service-to-service calls inside the Java workflow propagate the originating user's token;
    dedicated workload identity would be cleaner in production.
+7. Production images and schema migrations are executable, but the reference Compose topology is
+   single-host and does not replace managed ingress, secrets, backups or orchestration.
 
 ## Test evidence
 

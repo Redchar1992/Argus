@@ -5,7 +5,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
@@ -32,7 +31,6 @@ public class AuditLogEntry {
     @Column(name = "target")
     private String target;
 
-    @Lob
     @Column(name = "detail", length = 4000)
     private String detail;
 

@@ -20,6 +20,8 @@ jobs:
       - name: Build + test
         working-directory: backend
         run: mvn -B -q package
+      - name: Verify Flyway migrations on Postgres
+        run: ./scripts/verify-postgres-migrations.sh --skip-build
 
   identity-bff:
     name: BFF (Node + Fastify)

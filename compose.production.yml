@@ -1,0 +1,326 @@
+name: argus-production
+
+# Reference production topology. Put real secrets in an external secret manager;
+# .env.production is only a local validation input and is ignored by Git.
+services:
+  auth-tls-init:
+    image: alpine:3.21
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        cp /source/auth-server.p12 /source/auth-trust.p12
+        /source/ca.crt /source/bff-auth-client.crt /source/bff-auth-client.key /target/;
+        chown -R 10001:10001 /target;
+        chmod 0400 /target/*
+    volumes:
+      - ./infra/tls/generated:/source:ro
+      - prod-auth-tls:/target
+
+  bff-tls-init:
+    image: alpine:3.21
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        cp /source/ca.crt /source/bff-auth-client.crt /source/bff-auth-client.key
+        /source/bff-redis-client.crt /source/bff-redis-client.key /target/;
+        chown -R 1000:1000 /target;
+        chmod 0400 /target/*
+    volumes:
+      - ./infra/tls/generated:/source:ro
+      - prod-bff-tls:/target
+
+  postgres:
+    image: postgres:16.8-alpine
+    environment:
+      POSTGRES_DB: argus
+      POSTGRES_USER: ${ARGUS_PG_USER:?set ARGUS_PG_USER}
+      POSTGRES_PASSWORD: ${ARGUS_PG_PASSWORD:?set ARGUS_PG_PASSWORD}
+    volumes:
+      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+      - prod-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7.0.16
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${ARGUS_MONGO_USER:?set ARGUS_MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${ARGUS_MONGO_PASSWORD:?set ARGUS_MONGO_PASSWORD}
+    volumes:
+      - prod-mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis-secure:
+    image: redis:7.4.2-alpine
+    user: "0:0"
+    command:
+      - redis-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6380"
+      - --tls-cert-file
+      - /run/tls/redis-server.crt
+      - --tls-key-file
+      - /run/tls/redis-server.key
+      - --tls-ca-cert-file
+      - /run/tls/ca.crt
+      - --tls-auth-clients
+      - "yes"
+      - --requirepass
+      - ${ARGUS_REDIS_PASSWORD:?set ARGUS_REDIS_PASSWORD}
+      - --appendonly
+      - "yes"
+    volumes:
+      - ./infra/tls/generated:/run/tls:ro
+      - prod-redis:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          REDISCLI_AUTH=$${ARGUS_REDIS_PASSWORD}
+          redis-cli --tls -h localhost -p 6380 --cacert /run/tls/ca.crt
+          --cert /run/tls/bff-redis-client.crt --key /run/tls/bff-redis-client.key ping
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      ARGUS_REDIS_PASSWORD: ${ARGUS_REDIS_PASSWORD:?set ARGUS_REDIS_PASSWORD}
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: auth-service
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      ARGUS_AUTH_PG_URL: jdbc:postgresql://postgres:5432/argus
+      ARGUS_PG_USER: ${ARGUS_PG_USER:?set ARGUS_PG_USER}
+      ARGUS_PG_PASSWORD: ${ARGUS_PG_PASSWORD:?set ARGUS_PG_PASSWORD}
+      ARGUS_JWT_SECRET: ${ARGUS_JWT_SECRET:?set ARGUS_JWT_SECRET}
+      ARGUS_IDENTITY_PRIMARY_KEY_ID: ${ARGUS_IDENTITY_PRIMARY_KEY_ID:?set ARGUS_IDENTITY_PRIMARY_KEY_ID}
+      ARGUS_IDENTITY_KEYS: ${ARGUS_IDENTITY_KEYS:?set ARGUS_IDENTITY_KEYS}
+      ARGUS_RECOVERY_PEPPER: ${ARGUS_RECOVERY_PEPPER:?set ARGUS_RECOVERY_PEPPER}
+      ARGUS_INTERNAL_BFF_SECRET: ${ARGUS_INTERNAL_BFF_SECRET:?set ARGUS_INTERNAL_BFF_SECRET}
+      ARGUS_AUTH_TLS_ENABLED: "true"
+      ARGUS_AUTH_TLS_KEY_STORE: file:/run/tls/auth-server.p12
+      ARGUS_AUTH_TLS_KEY_STORE_PASSWORD: ${ARGUS_TLS_KEYSTORE_PASSWORD:?set ARGUS_TLS_KEYSTORE_PASSWORD}
+      ARGUS_AUTH_TLS_TRUST_STORE: file:/run/tls/auth-trust.p12
+      ARGUS_AUTH_TLS_TRUST_STORE_PASSWORD: ${ARGUS_TLS_KEYSTORE_PASSWORD:?set ARGUS_TLS_KEYSTORE_PASSWORD}
+      ARGUS_AUTH_TLS_CLIENT_AUTH: need
+      ARGUS_REGION: ${ARGUS_REGION:?set ARGUS_REGION}
+    volumes:
+      - prod-auth-tls:/run/tls:ro
+    depends_on:
+      auth-tls-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS --cacert /run/tls/ca.crt --cert /run/tls/bff-auth-client.crt
+          --key /run/tls/bff-auth-client.key https://localhost:8081/actuator/health/readiness
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  screening-tools:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: screening-tools-service
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      ARGUS_TOOLS_PG_URL: jdbc:postgresql://postgres:5432/argus
+      ARGUS_PG_USER: ${ARGUS_PG_USER:?set ARGUS_PG_USER}
+      ARGUS_PG_PASSWORD: ${ARGUS_PG_PASSWORD:?set ARGUS_PG_PASSWORD}
+      ARGUS_JWT_SECRET: ${ARGUS_JWT_SECRET:?set ARGUS_JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  case-service:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: case-service
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      ARGUS_CASE_PG_URL: jdbc:postgresql://postgres:5432/argus
+      ARGUS_PG_USER: ${ARGUS_PG_USER:?set ARGUS_PG_USER}
+      ARGUS_PG_PASSWORD: ${ARGUS_PG_PASSWORD:?set ARGUS_PG_PASSWORD}
+      ARGUS_JWT_SECRET: ${ARGUS_JWT_SECRET:?set ARGUS_JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  agent-orchestrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: agent-orchestrator-service
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      ARGUS_JWT_SECRET: ${ARGUS_JWT_SECRET:?set ARGUS_JWT_SECRET}
+      ARGUS_MONGO_URI: mongodb://${ARGUS_MONGO_USER:?set ARGUS_MONGO_USER}:${ARGUS_MONGO_PASSWORD:?set ARGUS_MONGO_PASSWORD}@mongo:27017/argus?authSource=admin
+      ARGUS_LLM_PROVIDER: anthropic
+      ARGUS_ANTHROPIC_API_KEY: ${ARGUS_ANTHROPIC_API_KEY:?set ARGUS_ANTHROPIC_API_KEY}
+      ARGUS_ANTHROPIC_MODEL: ${ARGUS_ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      ARGUS_TOOLS_URL: http://screening-tools:8083
+      ARGUS_CASE_URL: http://case-service:8084
+    depends_on:
+      mongo:
+        condition: service_healthy
+      screening-tools:
+        condition: service_healthy
+      case-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        MODULE: api-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      ARGUS_ALLOWED_ORIGINS: ${ARGUS_PUBLIC_ORIGIN:?set ARGUS_PUBLIC_ORIGIN}
+      ARGUS_ORCHESTRATOR_URI: http://agent-orchestrator:8082
+      ARGUS_TOOLS_URI: http://screening-tools:8083
+      ARGUS_CASE_URI: http://case-service:8084
+    depends_on:
+      agent-orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  bff:
+    build:
+      context: ./bff
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      BFF_HOST: 0.0.0.0
+      BFF_PORT: "3001"
+      ARGUS_AUTH_URL: https://auth-service:8081
+      ARGUS_INVESTIGATION_URL: http://agent-orchestrator:8082
+      BFF_ALLOWED_ORIGINS: ${ARGUS_PUBLIC_ORIGIN:?set ARGUS_PUBLIC_ORIGIN}
+      BFF_COOKIE_SECURE: "true"
+      BFF_SESSION_STORE: redis
+      BFF_REDIS_URL: rediss://redis-secure:6380
+      BFF_REDIS_USERNAME: default
+      BFF_REDIS_PASSWORD: ${ARGUS_REDIS_PASSWORD:?set ARGUS_REDIS_PASSWORD}
+      BFF_REDIS_TLS_CA_FILE: /run/tls/ca.crt
+      BFF_REDIS_TLS_CERT_FILE: /run/tls/bff-redis-client.crt
+      BFF_REDIS_TLS_KEY_FILE: /run/tls/bff-redis-client.key
+      BFF_REDIS_TLS_SERVER_NAME: redis-secure
+      BFF_ENCRYPTION_PRIMARY_KEY_ID: ${BFF_ENCRYPTION_PRIMARY_KEY_ID:?set BFF_ENCRYPTION_PRIMARY_KEY_ID}
+      BFF_ENCRYPTION_KEYS: ${BFF_ENCRYPTION_KEYS:?set BFF_ENCRYPTION_KEYS}
+      BFF_AUTH_MTLS_ENABLED: "true"
+      BFF_AUTH_TLS_CA_FILE: /run/tls/ca.crt
+      BFF_AUTH_TLS_CERT_FILE: /run/tls/bff-auth-client.crt
+      BFF_AUTH_TLS_KEY_FILE: /run/tls/bff-auth-client.key
+      BFF_AUTH_TLS_SERVER_NAME: auth-service
+      BFF_OIDC_ENABLED: "false"
+      BFF_PASSKEY_ENABLED: "true"
+      BFF_WEBAUTHN_RP_ID: ${ARGUS_PUBLIC_HOST:?set ARGUS_PUBLIC_HOST}
+      BFF_WEBAUTHN_ORIGIN: ${ARGUS_PUBLIC_ORIGIN:?set ARGUS_PUBLIC_ORIGIN}
+      ARGUS_INTERNAL_BFF_SECRET: ${ARGUS_INTERNAL_BFF_SECRET:?set ARGUS_INTERNAL_BFF_SECRET}
+      ARGUS_REGION: ${ARGUS_REGION:?set ARGUS_REGION}
+      BFF_METRICS_ENABLED: "true"
+      BFF_METRICS_TOKEN: ${BFF_METRICS_TOKEN:?set BFF_METRICS_TOKEN}
+    volumes:
+      - prod-bff-tls:/run/tls:ro
+    depends_on:
+      bff-tls-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      redis-secure:
+        condition: service_healthy
+      agent-orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  analyst-console:
+    build:
+      context: ./frontend/analyst-console
+      dockerfile: Dockerfile
+    ports:
+      - "${ARGUS_ANALYST_PORT:-8088}:8080"
+    depends_on:
+      bff:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  admin-console:
+    build:
+      context: ./frontend/admin-console
+      dockerfile: Dockerfile
+    profiles: ["admin"]
+    ports:
+      - "${ARGUS_ADMIN_PORT:-8089}:8080"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  prod-auth-tls:
+  prod-bff-tls:
+  prod-postgres:
+  prod-mongo:
+  prod-redis:

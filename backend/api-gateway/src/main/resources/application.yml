@@ -40,3 +40,35 @@ management:
     web:
       exposure:
         include: health,info
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  cloud:
+    gateway:
+      server:
+        webflux:
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOrigins: ${ARGUS_ALLOWED_ORIGINS}
+                allowedMethods: "*"
+                allowedHeaders: "*"
+                allowCredentials: true
+          # Identity is intentionally BFF-only in production. Do not expose the
+          # mTLS-protected auth-service through a gateway that lacks a client cert.
+          routes:
+            - id: orchestrator-service
+              uri: ${ARGUS_ORCHESTRATOR_URI}
+              predicates:
+                - Path=/api/investigations/**
+            - id: tools-service
+              uri: ${ARGUS_TOOLS_URI}
+              predicates:
+                - Path=/api/tools/**
+            - id: case-service
+              uri: ${ARGUS_CASE_URI}
+              predicates:
+                - Path=/api/cases/**, /api/policies/**, /api/audit/**

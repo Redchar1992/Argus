@@ -5,7 +5,8 @@
 #
 # The Spring services default to in-memory H2 + in-memory trace store, so this
 # compose file is OPTIONAL for a demo. Use it to exercise the real SQL + NoSQL
-# path:
+# path. The postgres profile runs service-owned Flyway migrations in the auth,
+# tools and cases schemas, then validates the JPA mappings:
 #   SPRING_PROFILES_ACTIVE=postgres   (auth/tools/case services)
 #   SPRING_PROFILES_ACTIVE=mongo + ARGUS_TRACE_STORE=mongo  (orchestrator)
 

@@ -206,6 +206,26 @@ cp .env.example .env   # then edit
 # for real LLM:      ARGUS_LLM_PROVIDER=anthropic ARGUS_ANTHROPIC_API_KEY=sk-...
 ```
 
+### Production packaging and migrations
+
+Every service now has a multi-stage, non-root container image. `auth-service`,
+`screening-tools-service` and `case-service` own independent Flyway histories in the Postgres
+`auth`, `tools` and `cases` schemas; the `prod` profile disables demo seeds and changes Hibernate
+from schema mutation to `validate`. The orchestrator's production profile requires durable Mongo
+traces and an explicitly configured external LLM.
+
+```bash
+cp .env.production.example .env.production  # replace every placeholder
+docker compose --env-file .env.production -f compose.production.yml config -q
+docker compose --env-file .env.production -f compose.production.yml \
+  up -d --build --wait --wait-timeout 300
+```
+
+The reference topology also exercises auth mTLS and encrypted TLS Redis. Public TLS ingress,
+managed secrets/databases/PKI, registry policy and HA remain environment infrastructure. See
+[`docs/production-deployment.md`](docs/production-deployment.md) for migration rollout and the
+legacy prototype-database caveat.
+
 ### Demo credentials (auth-service, real bcrypt hashing)
 
 | Username | Password | Role |
@@ -356,8 +376,9 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
   valid evidence; missing/failed evidence escalates to REVIEW (never a silent CLEAR). The
   admin-editable `screening_policy` thresholds — not the model — drive the BLOCK/REVIEW bands.
   This is the "boundary between probabilistic AI and deterministic compliance logic" made concrete.
-- Persistence: cases + audit + policies in JPA (SQL); investigation traces in a store
-  with a real MongoDB implementation (NoSQL) and an in-memory default for zero-infra demos.
+- Persistence: cases + audit + policies in JPA (SQL); versioned Flyway migrations own three
+  isolated Postgres schemas and production uses Hibernate validation only. Investigation traces
+  have a real MongoDB implementation (NoSQL) and an in-memory default for zero-infra demos.
 - Both frontends build and render the real API shapes.
 
 **Scaffolded / simplified / TODO (called out so nothing is oversold):**
@@ -384,7 +405,9 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
   working approach.
 - The on-chain data is **seeded/synthetic**, not a live chain indexer. The graph and
   sanctions list are illustrative fixtures (no real OFAC addresses).
-- No Dockerfiles for the services yet (compose covers the DBs); services run via `java -jar`.
+- Multi-stage non-root images and an executable production-reference Compose topology are built.
+  It intentionally does not pretend to provide managed ingress, secret distribution, database
+  backups, registry signing or cross-region orchestration.
 
 See [`docs/agent-design.md`](docs/agent-design.md) for the prompt, tool schema, and the
 local-vs-LLM tradeoff in detail.

@@ -13,8 +13,12 @@ spring:
     hibernate:
       ddl-auto: update
     open-in-view: false
+  flyway:
+    enabled: false
 
 argus:
+  demo:
+    seed: ${ARGUS_DEMO_SEED:true}
   jwt:
     # MUST match auth-service's signing secret (shared HMAC). Supplied via env in prod.
     secret: ${ARGUS_JWT_SECRET:argus-dev-secret-change-me-please-32bytes-minimum-length}
@@ -31,10 +35,46 @@ spring:
     activate:
       on-profile: postgres
   datasource:
-    url: ${ARGUS_PG_URL:jdbc:postgresql://localhost:5432/argus}
+    url: ${ARGUS_TOOLS_PG_URL:${ARGUS_PG_URL:jdbc:postgresql://localhost:5432/argus}}
     driver-class-name: org.postgresql.Driver
     username: ${ARGUS_PG_USER:argus}
     password: ${ARGUS_PG_PASSWORD:argus}
+  flyway:
+    enabled: true
+    schemas: tools
+    default-schema: tools
+    create-schemas: true
+    locations: classpath:db/migration
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: tools
+
+---
+argus:
+  demo:
+    seed: false
+
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${ARGUS_TOOLS_PG_URL}
+    driver-class-name: org.postgresql.Driver
+    username: ${ARGUS_PG_USER}
+    password: ${ARGUS_PG_PASSWORD}
+  flyway:
+    enabled: true
+    schemas: tools
+    default-schema: tools
+    create-schemas: false
+    locations: classpath:db/migration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: tools

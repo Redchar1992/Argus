@@ -13,6 +13,8 @@ spring:
     hibernate:
       ddl-auto: update
     open-in-view: false
+  flyway:
+    enabled: false
 
 argus:
   jwt:
@@ -31,10 +33,42 @@ spring:
     activate:
       on-profile: postgres
   datasource:
-    url: ${ARGUS_PG_URL:jdbc:postgresql://localhost:5432/argus}
+    url: ${ARGUS_CASE_PG_URL:${ARGUS_PG_URL:jdbc:postgresql://localhost:5432/argus}}
     driver-class-name: org.postgresql.Driver
     username: ${ARGUS_PG_USER:argus}
     password: ${ARGUS_PG_PASSWORD:argus}
+  flyway:
+    enabled: true
+    schemas: cases
+    default-schema: cases
+    create-schemas: true
+    locations: classpath:db/migration
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: cases
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${ARGUS_CASE_PG_URL}
+    driver-class-name: org.postgresql.Driver
+    username: ${ARGUS_PG_USER}
+    password: ${ARGUS_PG_PASSWORD}
+  flyway:
+    enabled: true
+    schemas: cases
+    default-schema: cases
+    create-schemas: false
+    locations: classpath:db/migration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: cases

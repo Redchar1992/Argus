@@ -50,6 +50,7 @@ policy remain deployment/product decisions rather than implied features.
 | **Java / Spring microservices** | Five-module Maven reactor: gateway, auth, agent orchestrator, screening tools and case service; Java 17, Spring Boot 3.5, Spring Cloud 2025.0 | **Built + 53 tests** |
 | **REST API design** | Typed DTOs/controllers across `/api/auth`, `/api/investigations`, `/api/tools`, `/api/cases`, `/api/policies`, `/api/audit`; BFF exposes a browser-specific contract | **Built** |
 | **SQL + NoSQL judgement** | JPA/H2/Postgres for relational identity/policy/case data; Mongo implementation for variable investigation traces; zero-infra memory defaults | **Built** |
+| **Production packaging + migrations** | Non-root multi-stage images; isolated Flyway `auth`/`tools`/`cases` schemas; production Hibernate validation; demo-seed suppression; executable reference Compose health graph | **Built + real Postgres/container smoke-tested** |
 | **AI/agent workflows** | Real bounded plan → act → observe loop; local tool-selecting provider plus Anthropic tool-use provider; every step persisted for audit | **Built; Anthropic requires a key** |
 | **Compliance/security product thinking** | Fail-closed CLEAR decision, deterministic policy bands around probabilistic AI, role-gated operations and case/audit trail | **Centerpiece, built** |
 | **Ambiguous end-to-end ownership** | Browser UX → Node security boundary → Java auth/resource servers → data stores → CI/test evidence, with explicit trade-offs and limitations | **Demonstrated** |

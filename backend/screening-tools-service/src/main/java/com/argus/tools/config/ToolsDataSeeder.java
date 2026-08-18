@@ -9,6 +9,7 @@ import com.argus.tools.repository.TransactionEdgeRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -22,6 +23,7 @@ import java.util.List;
  * Addresses are illustrative (0xC1.. style); none are real OFAC entries.
  */
 @Configuration
+@ConditionalOnProperty(name = "argus.demo.seed", havingValue = "true", matchIfMissing = true)
 public class ToolsDataSeeder {
 
     private static final Logger log = LoggerFactory.getLogger(ToolsDataSeeder.class);

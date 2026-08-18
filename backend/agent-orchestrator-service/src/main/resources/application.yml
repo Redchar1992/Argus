@@ -53,3 +53,27 @@ spring:
 argus:
   trace:
     store: mongo
+
+---
+# Production must use durable traces and an explicitly configured external model.
+spring:
+  config:
+    activate:
+      on-profile: prod
+  autoconfigure:
+    exclude: []
+  data:
+    mongodb:
+      uri: ${ARGUS_MONGO_URI}
+
+argus:
+  trace:
+    store: mongo
+  llm:
+    provider: ${ARGUS_LLM_PROVIDER}
+    anthropic:
+      model: ${ARGUS_ANTHROPIC_MODEL:claude-sonnet-4-6}
+  tools:
+    base-url: ${ARGUS_TOOLS_URL}
+  case:
+    base-url: ${ARGUS_CASE_URL}
