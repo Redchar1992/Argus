@@ -33,7 +33,7 @@ Useful lifecycle commands:
 
 ```bash
 ./scripts/demo-status.sh
-./scripts/demo-verify.sh       # 4 Playwright journeys against the real running stack
+./scripts/demo-verify.sh       # 5 Playwright journeys against the real running stack
 ./scripts/demo-down.sh
 ```
 
@@ -74,13 +74,17 @@ seed accounts.
 
 Sign in and select two seeded wallets:
 
+- `0x098B716B…` is a real public Lazarus address from the clearly labelled OFAC snapshot and ends
+  **BLOCK** with `OFAC-SDN` entity/program/version evidence;
 - `0xc1ean…` shows sanctions → profile → rules → **CLEAR**, deliberately skipping graph tracing;
 - `0xbadc0de…` shows the longer tool path and ends **BLOCK** for a direct sanctions fixture.
 
 The planner, REST tool calls, policy gates, short-lived workload JWT exchange, trace persistence,
 audit timeline and
-case mirroring are real local code. The wallet graph, balances and sanctions entries are synthetic
-fixtures, not live Chainalysis/TRM/Elliptic/OFAC data.
+case mirroring are real local code. The wallet graph and local watchlist are synthetic. OFAC uses
+the real parser/provider over a two-address official snapshot; the full current feed is required by
+the production profile but is not downloaded during the deterministic local demo. No licensed
+Chainalysis/TRM/Elliptic integration is mocked as real.
 
 ### 3. OIDC Authorization Code + PKCE
 
@@ -186,7 +190,8 @@ a claim of deployed geographic infrastructure.
 | OIDC protocol and token verification | Real | Account directory, corporate policy and KYC are mock |
 | TOTP, counter replay defense and recovery codes | Real | No SMS/email delivery or help-desk workflow |
 | WebAuthn/Passkey | Real; virtual authenticator only in automation | No device-attestation policy or physical CI key |
-| Agent loop, tools, deterministic policy and audit | Real | Chain/provider data is seeded; external LLM is optional and not called |
+| Agent loop, tools, deterministic policy and audit | Real | Graph/activity data is seeded; external LLM is optional and not called |
+| OFAC SDN provider | Real parser/provider over labelled snapshot; full feed and prod profile locally validated | Snapshot is not complete/current; external deployment not claimed |
 | BFF→auth mTLS and Redis TLS/ACL/mTLS | Real short-lived local CA | No managed certificate issuance/revocation |
 | Metrics and alert evaluation | Real local Prometheus | No PagerDuty/Sentry/on-call delivery |
 | Multi-region drill | Real fault injection | Single machine, no WAN/LB/DNS/cloud control plane |

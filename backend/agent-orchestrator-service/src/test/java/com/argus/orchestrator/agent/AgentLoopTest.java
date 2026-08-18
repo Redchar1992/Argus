@@ -137,6 +137,28 @@ class AgentLoopTest {
                         && f.contains("risk_rules")));
     }
 
+    @Test
+    void incompleteRequiredProviderEvidenceFailsClosedToReview() {
+        ToolClient tools = mock(ToolClient.class);
+        when(tools.invoke(eq("sanctions_screen"), any(), any())).thenReturn(Map.of(
+                "addressesChecked", 1, "hitCount", 0, "directHit", false,
+                "evidenceComplete", false, "hits", List.of()));
+        when(tools.invoke(eq("address_profile"), any(), any())).thenReturn(Map.of(
+                "address", "0xstale", "totalInflowUsd", 100.0, "totalOutflowUsd", 20.0,
+                "counterpartyCount", 1, "txCount", 1));
+        when(tools.invoke(eq("risk_rules"), any(), any())).thenReturn(Map.of(
+                "address", "0xstale", "riskScore", 0, "riskBand", "MINIMAL",
+                "firedRules", List.of()));
+
+        AgentOrchestrator orch = buildOrchestrator(tools);
+        orch.createInvestigation("inv-provider-stale", "0xstale", "tester");
+        Investigation inv = orch.run("inv-provider-stale");
+
+        assertEquals("REVIEW", inv.getDecision());
+        assertTrue(inv.getRiskFactors().stream().anyMatch(factor ->
+                factor.contains("Incomplete evidence") && factor.contains("sanctions_screen")));
+    }
+
     /**
      * POLICY-DRIVEN BANDS (issue #4): the same borderline score lands in a DIFFERENT band
      * when the admin lowers the review threshold. With defaults (review>=30) a score of 20

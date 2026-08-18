@@ -88,7 +88,7 @@ actual="$({
   docker exec "$CONTAINER" psql -U argus -d argus -Atc \
     "select table_schema || ':' || count(*) from information_schema.tables where table_schema in ('auth','tools','cases') group by table_schema order by table_schema;"
 } | tr -d '\r')"
-expected=$'auth:5\ncases:4\ntools:4'
+expected=$'auth:5\ncases:4\ntools:6'
 if [[ "$actual" != "$expected" ]]; then
   printf 'Unexpected migrated table counts:\n%s\n' "$actual" >&2
   exit 1

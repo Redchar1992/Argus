@@ -284,8 +284,9 @@ $(if [[ "$PROFILE" == full ]]; then printf '  Prometheus:      http://localhost:
 Real locally: password/bcrypt, JWT/RBAC, BFF Session, CSRF, TOTP/recovery,
 WebAuthn verification and the agent loop/tools/audit.
 $(if [[ "$PROFILE" == full ]]; then printf 'Full-profile controls: authenticated mTLS, encrypted shared Redis and Prometheus metrics.'; else printf 'Lite-profile substitutions: plain HTTP auth transport, in-process Session state and no Prometheus.'; fi)
-Mocked/synthetic: the external OIDC account source, on-chain/provider fixtures,
-and the optional external LLM (the deterministic local agent is used).
+Mocked/synthetic: the external OIDC account source, on-chain graph and local watchlist;
+the optional external LLM is not called (the deterministic local agent is used).
+Snapshot boundary: OFAC parsing/matching uses two real public records, not the complete live feed.
 
 Walkthrough: docs/local-demo.md
 Verify:      ./scripts/demo-verify.sh

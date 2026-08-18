@@ -29,7 +29,35 @@ public final class ToolDtos {
             int addressesChecked,
             int hitCount,
             boolean directHit,
-            List<SanctionsHit> hits) {
+            List<SanctionsHit> hits,
+            int riskScore,
+            String riskBand,
+            boolean evidenceComplete,
+            List<ProviderEvidence> providers,
+            List<SanctionsRiskSignal> signals) {
+    }
+
+    public record ProviderEvidence(
+            String address,
+            String providerId,
+            boolean required,
+            boolean evidenceComplete,
+            boolean sanctioned,
+            int riskScore,
+            String riskBand,
+            String datasetVersion,
+            String error) {
+    }
+
+    public record SanctionsRiskSignal(
+            String address,
+            String providerId,
+            String category,
+            String exposure,
+            int hopsAway,
+            int severity,
+            String entity,
+            String detail) {
     }
 
     // ---- trace_transactions ----

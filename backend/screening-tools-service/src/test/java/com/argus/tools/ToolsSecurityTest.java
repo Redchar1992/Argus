@@ -93,6 +93,12 @@ class ToolsSecurityTest {
     void analystCanReadButCannotMutateCatalog() throws Exception {
         mvc.perform(get("/api/tools/catalog").header("Authorization", userToken("ANALYST")))
                 .andExpect(status().isOk());
+        mvc.perform(get("/api/tools/catalog/ofac/status")
+                        .header("Authorization", userToken("ANALYST")))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/tools/catalog/ofac/refresh")
+                        .header("Authorization", userToken("ANALYST")))
+                .andExpect(status().isForbidden());
         mvc.perform(put("/api/tools/catalog/sanctions_screen")
                         .header("Authorization", userToken("ANALYST"))
                         .contentType(MediaType.APPLICATION_JSON)

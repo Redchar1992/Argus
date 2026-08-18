@@ -12,8 +12,9 @@ import { MfaSettings } from '../components/MfaSettings';
 
 const REPO = 'https://github.com/Redchar1992/argus';
 
-// Pre-seeded demo wallets (match infra/screening-tools seed data).
+// Deterministic local fixtures plus one real public address from the labelled OFAC excerpt.
 const DEMO_WALLETS = [
+  { value: '0x098B716B8Aaf21512996dC57EB0615e2383E2f96', short: '0x098B716B…', noteKey: 'demo.ofac', verdict: 'BLOCK', vclass: 'v-block' },
   { value: '0xbadc0de000000000000000000000000000000bad', short: '0xbadc0de…', noteKey: 'demo.block', verdict: 'BLOCK', vclass: 'v-block' },
   { value: '0xc0ffee00000000000000000000000000000c0ffee', short: '0xc0ffee…', noteKey: 'demo.mixer', verdict: 'REVIEW', vclass: 'v-review' },
   { value: '0xdeadbeef0000000000000000000000000deadbeef', short: '0xdeadbeef…', noteKey: 'demo.structuring', verdict: 'REVIEW', vclass: 'v-review' },

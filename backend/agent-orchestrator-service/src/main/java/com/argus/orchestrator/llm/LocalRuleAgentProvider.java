@@ -140,7 +140,8 @@ public class LocalRuleAgentProvider implements LlmProvider {
 
     /**
      * The tools whose evidence is MANDATORY before a wallet can be cleared. If any of
-     * these did not produce a valid observation (never ran, errored, or was disabled),
+     * these did not produce a valid observation (never ran, errored, was disabled, or
+     * reported incomplete provider evidence),
      * we must not CLEAR. {@code address_profile}/{@code trace_transactions} are not in
      * this list because the agent legitimately skips tracing for tiny clean wallets, and
      * profiling is supporting context rather than a gating control.
@@ -157,10 +158,11 @@ public class LocalRuleAgentProvider implements LlmProvider {
         return missing;
     }
 
-    /** A valid observation exists, is non-empty, and does not carry a tool {@code error}. */
+    /** Valid evidence is non-empty, error-free and not explicitly provider-incomplete. */
     private boolean hasValidObservation(AgentContext ctx, String tool) {
         Map<String, Object> obs = ctx.latestObservation(tool);
-        return obs != null && !obs.isEmpty() && !obs.containsKey("error");
+        return obs != null && !obs.isEmpty() && !obs.containsKey("error")
+                && !Boolean.FALSE.equals(obs.get("evidenceComplete"));
     }
 
     @SuppressWarnings("unchecked")

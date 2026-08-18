@@ -43,6 +43,37 @@ class ScreeningToolsTests {
                 new SanctionsScreenRequest(List.of("0xc1ean000000000000000000000000000000c1ean")));
         assertFalse(r.directHit());
         assertEquals(0, r.hitCount());
+        assertTrue(r.evidenceComplete());
+        assertEquals(2, r.providers().size());
+    }
+
+    @Test
+    void emptyAddressSetCannotBeReportedAsCompleteEvidence() {
+        SanctionsScreenResponse r = sanctionsScreenService.screen(
+                new SanctionsScreenRequest(List.of(" ")));
+        assertEquals(0, r.addressesChecked());
+        assertFalse(r.evidenceComplete());
+    }
+
+    @Test
+    void realOfacExcerptEthereumAddressIsDetectedWithSourceEvidence() {
+        SanctionsScreenResponse r = sanctionsScreenService.screen(new SanctionsScreenRequest(
+                List.of("0x098B716B8Aaf21512996dC57EB0615e2383E2f96")));
+        assertTrue(r.directHit());
+        assertEquals(100, r.riskScore());
+        assertEquals("SEVERE", r.riskBand());
+        assertTrue(r.hits().stream().anyMatch(hit -> hit.listSource().equals("OFAC-SDN")
+                && hit.entity().equals("Lazarus Group")));
+        assertTrue(r.providers().stream().anyMatch(provider -> provider.providerId().equals("ofac")
+                && provider.datasetVersion().startsWith("snapshot-2026-08-07-")));
+    }
+
+    @Test
+    void realOfacExcerptTronAddressPreservesBase58Case() {
+        SanctionsScreenResponse r = sanctionsScreenService.screen(new SanctionsScreenRequest(
+                List.of("TNiq9AXBp9EjUqhDhrwrfvAA8U3GUQZH81")));
+        assertTrue(r.directHit());
+        assertTrue(r.hits().stream().anyMatch(hit -> hit.program().contains("IRAN")));
     }
 
     @Test

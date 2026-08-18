@@ -28,6 +28,23 @@ argus:
       public-keys: ${ARGUS_WORKLOAD_JWT_PUBLIC_KEYS:}
       issuer: ${ARGUS_WORKLOAD_JWT_ISSUER:urn:argus:workload}
       audience: ${ARGUS_TOOLS_WORKLOAD_JWT_AUDIENCE:argus-screening-tools}
+  screening:
+    providers: ${ARGUS_SCREENING_PROVIDERS:local,ofac}
+    local:
+      required: ${ARGUS_LOCAL_SCREENING_REQUIRED:true}
+    ofac:
+      # The default is an explicitly labelled two-address official-format snapshot so
+      # local demos stay offline/deterministic. Prod below requires the complete live feed.
+      source-uri: ${ARGUS_OFAC_SOURCE_URI:classpath:fixtures/ofac-sdn-advanced-excerpt.xml}
+      required: ${ARGUS_OFAC_REQUIRED:true}
+      refresh-on-startup: ${ARGUS_OFAC_REFRESH_ON_STARTUP:true}
+      refresh-cron: ${ARGUS_OFAC_REFRESH_CRON:0 0 3 * * *}
+      refresh-if-older-than: ${ARGUS_OFAC_REFRESH_IF_OLDER_THAN:PT6H}
+      max-age: ${ARGUS_OFAC_MAX_AGE:PT48H}
+      request-timeout: ${ARGUS_OFAC_REQUEST_TIMEOUT:PT180S}
+      max-bytes: ${ARGUS_OFAC_MAX_BYTES:200000000}
+      minimum-address-count: ${ARGUS_OFAC_MINIMUM_ADDRESS_COUNT:1}
+      user-agent: ${ARGUS_OFAC_USER_AGENT:ArgusComplianceDemo/0.1}
 
 management:
   endpoints:
@@ -62,6 +79,13 @@ spring:
 argus:
   demo:
     seed: false
+  screening:
+    providers: ofac
+    ofac:
+      source-uri: https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN_ADVANCED.XML
+      required: true
+      refresh-on-startup: true
+      minimum-address-count: 100
 
 spring:
   config:

@@ -20,7 +20,8 @@ import java.util.List;
  * tool catalog. The graph is hand-built so the demo wallets produce interesting,
  * deterministic agent investigations (direct hit, multi-hop exposure, and clean).
  *
- * Addresses are illustrative (0xC1.. style); none are real OFAC entries.
+ * These entries are illustrative and labelled LOCAL-DEMO-WATCHLIST. The separate OFAC provider
+ * ingests official records and carries its own dataset provenance.
  */
 @Configuration
 @ConditionalOnProperty(name = "argus.demo.seed", havingValue = "true", matchIfMissing = true)
@@ -42,13 +43,13 @@ public class ToolsDataSeeder {
             if (sanctions.count() == 0) {
                 sanctions.saveAll(List.of(
                         new SanctionedAddress("0xbadc0de000000000000000000000000000000bad",
-                                "Lazarus-linked wallet", "OFAC-SDN", "DPRK", 95),
+                                "Lazarus-style demo wallet", "LOCAL-DEMO-WATCHLIST", "DEMO-DPRK", 95),
                         new SanctionedAddress("0x515c70000000000000000000000000000000m1xr",
-                                "TornadoCash-style mixer", "OFAC-SDN", "CYBER2", 90),
+                                "TornadoCash-style mixer", "LOCAL-DEMO-WATCHLIST", "DEMO-CYBER", 90),
                         new SanctionedAddress("0x4444f1a6000000000000000000000000000scam1",
-                                "Known fraud cash-out", "INTERNAL-WATCHLIST", "FRAUD", 70),
+                                "Known fraud cash-out", "LOCAL-DEMO-WATCHLIST", "DEMO-FRAUD", 70),
                         new SanctionedAddress("0x9999dark00000000000000000000000000market",
-                                "Darknet market hot wallet", "EU-CONSOLIDATED", "NARCOTICS", 85)
+                                "Darknet market hot wallet", "LOCAL-DEMO-WATCHLIST", "DEMO-NARCOTICS", 85)
                 ));
                 log.info("Seeded {} sanctioned addresses", sanctions.count());
             }

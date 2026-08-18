@@ -47,7 +47,7 @@ orchestrator directly.
 | `api-gateway` | 8080 | Spring Cloud Gateway | Routing/CORS for the existing service and admin-console paths |
 | `auth-service` | 8081 | Spring Boot, Security, JPA | Password/OIDC/Passkey identity, encrypted TOTP MFA, recovery, JWT issue/parse, RBAC |
 | `agent-orchestrator-service` | 8082 | Spring Boot, WebFlux, optional Mongo | Agent loop and investigation trace store |
-| `screening-tools-service` | 8083 | Spring Boot, JPA | Sanctions/profile/graph/risk tools and catalog |
+| `screening-tools-service` | 8083 | Spring Boot, JPA | Provider-federated OFAC/local sanctions screening, profile/graph/risk tools and catalog |
 | `case-service` | 8084 | Spring Boot, JPA | Cases, audit log, screening policy |
 
 The Java backend remains one Maven reactor on Java 17, Spring Boot 3.5 and Spring Cloud
@@ -340,8 +340,9 @@ These are limitations, not hidden features:
    remain deployment infrastructure; the BFF also fails closed on insecure production cookies.
 4. Redis mode makes the application limiter distributed, but an edge/WAF limiter is still
    needed to absorb volumetric traffic before it reaches Node or Redis.
-5. On-chain data is seeded/synthetic; it is not a live chain indexer or production sanctions
-   provider.
+5. Transaction graph/activity data is seeded/synthetic and is not a live chain indexer. OFAC
+   direct-address ingest is implemented; local mode intentionally uses a labelled two-row snapshot,
+   while the production profile requires the complete official feed. Vendor KYT adapters are absent.
 6. Java service-to-service calls use a dedicated short-lived workload identity. The original
    user credential stops at the orchestrator; a signed `actor` claim preserves audit attribution.
    Production still needs a managed KMS/secret-manager rotation workflow for the implemented rings.

@@ -6,8 +6,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 /**
- * A single entry on the (seeded) sanctions / watchlist. In a real system this
- * mirrors OFAC SDN, EU/UN consolidated lists, and chain-analytics flags.
+ * A single entry in the deterministic local demo/watchlist provider. Official OFAC
+ * records live in their own versioned dataset tables and never masquerade as fixtures.
  */
 @Entity
 @Table(name = "sanctioned_address")

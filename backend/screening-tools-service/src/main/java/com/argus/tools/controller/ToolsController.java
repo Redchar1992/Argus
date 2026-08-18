@@ -14,7 +14,9 @@ import com.argus.tools.service.AddressProfileService;
 import com.argus.tools.service.RiskRulesService;
 import com.argus.tools.service.SanctionsScreenService;
 import com.argus.tools.service.TraceTransactionsService;
-import org.springframework.http.ResponseEntity;
+import com.argus.tools.screening.ofac.OfacSdnBootstrap;
+import com.argus.tools.screening.ofac.OfacSdnIngestionService;
+import com.argus.tools.screening.ofac.OfacSdnProvider;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -45,17 +47,23 @@ public class ToolsController {
     private final RiskRulesService riskRulesService;
     private final AddressProfileService addressProfileService;
     private final ToolStatusRepository toolStatusRepository;
+    private final OfacSdnBootstrap ofacBootstrap;
+    private final OfacSdnProvider ofacProvider;
 
     public ToolsController(SanctionsScreenService sanctionsScreenService,
                            TraceTransactionsService traceTransactionsService,
                            RiskRulesService riskRulesService,
                            AddressProfileService addressProfileService,
-                           ToolStatusRepository toolStatusRepository) {
+                           ToolStatusRepository toolStatusRepository,
+                           OfacSdnBootstrap ofacBootstrap,
+                           OfacSdnProvider ofacProvider) {
         this.sanctionsScreenService = sanctionsScreenService;
         this.traceTransactionsService = traceTransactionsService;
         this.riskRulesService = riskRulesService;
         this.addressProfileService = addressProfileService;
         this.toolStatusRepository = toolStatusRepository;
+        this.ofacBootstrap = ofacBootstrap;
+        this.ofacProvider = ofacProvider;
     }
 
     @PostMapping("/sanctions_screen")
@@ -92,6 +100,18 @@ public class ToolsController {
     @PreAuthorize("hasAnyRole('SERVICE', 'ANALYST', 'ADMIN')")
     public List<ToolStatus> catalog() {
         return toolStatusRepository.findAll();
+    }
+
+    @GetMapping("/catalog/ofac/status")
+    @PreAuthorize("hasAnyRole('SERVICE', 'ANALYST', 'ADMIN')")
+    public OfacSdnProvider.DatasetStatus ofacStatus() {
+        return ofacProvider.status();
+    }
+
+    @PostMapping("/catalog/ofac/refresh")
+    @PreAuthorize("hasRole('ADMIN')")
+    public OfacSdnIngestionService.RefreshResult refreshOfac() {
+        return ofacBootstrap.refreshNow();
     }
 
     @PutMapping("/catalog/{toolId}")

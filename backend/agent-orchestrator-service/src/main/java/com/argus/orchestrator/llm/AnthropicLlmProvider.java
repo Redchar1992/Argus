@@ -59,7 +59,8 @@ public class AnthropicLlmProvider implements LlmProvider {
 
             FAIL CLOSED (critical): you may only return CLEAR when BOTH sanctions_screen
             AND risk_rules have run successfully and returned valid results. If either of
-            those required tools is missing, failed, errored, or was disabled, you MUST NOT
+            those required tools is missing, failed, errored, disabled, or returns
+            evidenceComplete=false because a required screening provider is unavailable, you MUST NOT
             return CLEAR — return REVIEW and cite the missing evidence in riskFactors.
 
             Be concise and auditable. Every tool call should have a clear purpose.
@@ -130,7 +131,8 @@ public class AnthropicLlmProvider implements LlmProvider {
         List<String> missing = new ArrayList<>();
         for (String tool : REQUIRED_TOOLS) {
             Map<String, Object> obs = ctx.latestObservation(tool);
-            if (obs == null || obs.isEmpty() || obs.containsKey("error")) {
+            if (obs == null || obs.isEmpty() || obs.containsKey("error")
+                    || Boolean.FALSE.equals(obs.get("evidenceComplete"))) {
                 missing.add(tool);
             }
         }

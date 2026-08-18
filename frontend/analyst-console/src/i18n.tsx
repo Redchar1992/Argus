@@ -164,6 +164,7 @@ export const DICT = {
 
   // demo wallet labels
   'demo.block': { en: 'directly sanctioned', zh: '直接受制裁' },
+  'demo.ofac': { en: 'official OFAC snapshot', zh: 'OFAC 官方快照' },
   'demo.mixer': { en: '1-hop mixer exposure', zh: '一跳混幣器關聯' },
   'demo.structuring': { en: 'structuring pattern', zh: '化整為零模式' },
   'demo.clean': { en: 'clean wallet', zh: '乾淨錢包' },

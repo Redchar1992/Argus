@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!--
+  Curated, offline-only excerpt of the official OFAC SDN Advanced XML publication dated
+  2026-08-07. It preserves the official schema shape and real public SDN addresses but is NOT
+  a complete/current list. Production downloads the full source from the OFAC SLS endpoint.
+-->
+<Sanctions xmlns="https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ADVANCED_XML" Version="3">
+  <DateOfIssue CalendarTypeID="1"><Year>2026</Year><Month>8</Month><Day>7</Day></DateOfIssue>
+  <ReferenceValueSets>
+    <FeatureTypeValues>
+      <FeatureType ID="345" FeatureTypeGroupID="1">Digital Currency Address - ETH</FeatureType>
+      <FeatureType ID="992" FeatureTypeGroupID="1">Digital Currency Address - TRX</FeatureType>
+    </FeatureTypeValues>
+  </ReferenceValueSets>
+  <DistinctParties>
+    <DistinctParty FixedRef="27307">
+      <Profile ID="27307" PartySubTypeID="3">
+        <Identity ID="19011" FixedRef="27307" Primary="true" False="false">
+          <Alias FixedRef="27307" AliasTypeID="1403" Primary="true" LowQuality="false">
+            <DocumentedName ID="37142" FixedRef="27307" DocNameStatusID="1">
+              <DocumentedNamePart><NamePartValue ScriptID="215">Lazarus Group</NamePartValue></DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+        </Identity>
+        <Feature ID="50215" FeatureTypeID="345">
+          <FeatureVersion ID="47914" ReliabilityID="1560">
+            <VersionDetail DetailTypeID="1432">0x098B716B8Aaf21512996dC57EB0615e2383E2f96</VersionDetail>
+          </FeatureVersion>
+        </Feature>
+      </Profile>
+    </DistinctParty>
+    <DistinctParty FixedRef="4632">
+      <Profile ID="4632" PartySubTypeID="3">
+        <Identity ID="751" FixedRef="4632" Primary="true" False="false">
+          <Alias FixedRef="4632" AliasTypeID="1403" Primary="true" LowQuality="false">
+            <DocumentedName ID="751" FixedRef="4632" DocNameStatusID="1">
+              <DocumentedNamePart><NamePartValue ScriptID="215">BANK MARKAZI JOMHOURI ISLAMI IRAN</NamePartValue></DocumentedNamePart>
+            </DocumentedName>
+          </Alias>
+        </Identity>
+        <Feature ID="97667" FeatureTypeID="992">
+          <FeatureVersion ID="95306" ReliabilityID="1">
+            <VersionDetail DetailTypeID="1432">TNiq9AXBp9EjUqhDhrwrfvAA8U3GUQZH81</VersionDetail>
+          </FeatureVersion>
+        </Feature>
+      </Profile>
+    </DistinctParty>
+  </DistinctParties>
+  <SanctionsEntries>
+    <SanctionsEntry ID="27307" ProfileID="27307" ListID="1550">
+      <SanctionsMeasure ID="154166" SanctionsTypeID="1"><Comment>DPRK3</Comment></SanctionsMeasure>
+    </SanctionsEntry>
+    <SanctionsEntry ID="4632" ProfileID="4632" ListID="1550">
+      <SanctionsMeasure ID="126772" SanctionsTypeID="1"><Comment>IRAN</Comment></SanctionsMeasure>
+      <SanctionsMeasure ID="154314" SanctionsTypeID="1"><Comment>IFSR</Comment></SanctionsMeasure>
+      <SanctionsMeasure ID="154315" SanctionsTypeID="1"><Comment>IRGC</Comment></SanctionsMeasure>
+      <SanctionsMeasure ID="154316" SanctionsTypeID="1"><Comment>SDGT</Comment></SanctionsMeasure>
+    </SanctionsEntry>
+  </SanctionsEntries>
+</Sanctions>

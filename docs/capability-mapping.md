@@ -22,9 +22,9 @@ Status is intentionally strict: design knowledge is not labelled as an implement
 | **Identity observability** | Region-labelled Node/Java Prometheus metrics, Redis-aware readiness, auth/upstream latency and outcomes, key/decrypt/certificate signals, 11 validated alert rules and response runbook; telemetry explicitly excludes PII and credentials | **Built + tested** |
 | **Regional resilience** | Two independent BFF regions, TLS Redis primary/replica, fail-closed shared-store behavior, replica promotion, RTO/RPO evidence and a production-gap runbook | **Local 11-check drill built + CI-wired**; not a production deployment |
 | **Resilient UX** | Loading, invalid-login, service-error, expired-session, authenticated and sign-out views; stale protected data is unmounted on auth loss or the server-declared expiry deadline | **Built + tested** |
-| **Frontend unit tests** | Vitest + React Testing Library + user-event: reducer, guard, password/MFA/recovery/Passkey flows, deadline expiry and logout | **13 tests passing** |
-| **Browser/E2E coverage** | Playwright Chromium: anonymous guard, password login/HttpOnly cookie/no Web Storage token, logout and virtual-authenticator Passkey registration/passwordless login | **4 journeys passing** |
-| **Performance fundamentals** | Production build is approximately 189 kB JS / 61 kB gzip including the WebAuthn client; auth boot performs one session check; polling stops on terminal result/unmount | **Measured baseline**; no production RUM/Core Web Vitals yet |
+| **Frontend unit tests** | Vitest + React Testing Library + user-event: reducer, guard, password/MFA/recovery/Passkey flows, deadline expiry and logout | **14 tests passing** |
+| **Browser/E2E coverage** | Playwright Chromium: 4 isolated identity journeys plus 5 real-stack journeys covering Session/investigation, OFAC evidence, OIDC, MFA/recovery and virtual-authenticator Passkeys | **4 + 5 journeys passing** |
+| **Performance fundamentals** | Production build is approximately 198 kB JS / 63 kB gzip including the WebAuthn client; auth boot performs one session check; polling stops on terminal result/unmount | **Measured baseline**; no production RUM/Core Web Vitals yet |
 | **Responsive/accessibility fundamentals** | Mobile layout, semantic form labels, button disabled states, alert roles, reduced-motion handling and keyboard-friendly controls | **Built**; no formal WCAG audit |
 
 ## Identity protocol coverage
@@ -53,6 +53,8 @@ policy remain deployment/product decisions rather than implied features.
 | **Production packaging + migrations** | Non-root multi-stage images; isolated Flyway `auth`/`tools`/`cases` schemas; production Hibernate validation; demo-seed suppression; executable reference Compose health graph | **Built + real Postgres/container smoke-tested** |
 | **AI/agent workflows** | Real bounded plan → act → observe loop; local tool-selecting provider plus Anthropic tool-use provider; every step persisted for audit | **Built; Anthropic requires a key** |
 | **Compliance/security product thinking** | Fail-closed CLEAR decision, deterministic policy bands around probabilistic AI, role-gated operations and case/audit trail | **Centerpiece, built** |
+| **Sanctions provider federation** | Configured `ScreeningProvider` implementations normalize matches/signals/version/freshness; required-provider failure sets `evidenceComplete=false` and both agent paths reject CLEAR | **Built + negative tested** |
+| **Official OFAC SDN data** | XXE-safe streaming Advanced-XML ingest, source-Digest/SHA-256 + count/date/size bounds, atomic SQL replacement, daily refresh, stale-data fail-close, ETH/TRX snapshot demo and opt-in 125 MB full-feed test | **Built + prod-profile/full-feed smoke-tested locally**; external deployment not claimed |
 | **Ambiguous end-to-end ownership** | Browser UX → Node security boundary → Java auth/resource servers → data stores → CI/test evidence, with explicit trade-offs and limitations | **Demonstrated** |
 | **Remote/async communication** | Architecture, threat model, runbook, test commands and code-to-JD traceability live alongside the code | **Documented** |
 
@@ -60,17 +62,18 @@ policy remain deployment/product decisions rather than implied features.
 
 `.github/workflows/ci.yml` uses reproducible lockfile installs:
 
-1. Maven `package` for all backend modules.
-2. BFF `npm ci`, dependency audit, TypeScript build and 47 Vitest tests against a Redis 7 CI service.
+1. Maven `package` for all backend modules (81 hermetic tests; the complete-feed parser test is opt-in).
+2. BFF `npm ci`, dependency audit, TypeScript build and 50 Vitest tests against a Redis 7 CI service.
 3. Analyst console `npm ci`, dependency audit, type/build and Vitest/RTL tests.
-4. Playwright Chromium install and four browser identity journeys, including virtual WebAuthn.
+4. Playwright Chromium install, four isolated identity journeys and five real-stack product journeys,
+   including OFAC provenance and virtual WebAuthn.
 5. Vue admin-console `npm ci`, dependency audit and build.
 6. Disposable local-PKI drill with two BFF regions and a TLS Redis primary/replica, including
    state-store loss, manual promotion, Session RPO and post-failover logout checks.
 7. Dependabot security alerts/updates plus weekly grouped maintenance for every npm lockfile,
    Maven and Actions. Spring release-train patches are grouped, while minor train changes stay
-   manual so Boot/Cloud compatibility is verified together; the recorded 2026-08-15 baseline
-   has zero open alerts.
+   manual so Boot/Cloud compatibility is verified together; the 2026-08-18 local `npm audit`
+   baseline is zero findings in all three workspaces.
 
 ## Most important review walkthrough
 
@@ -85,6 +88,8 @@ A concise code tour should follow this order:
 7. `backend/auth-service/.../PasskeyService.java` — credential ownership and counter race defense.
 8. `bff/test/redis-integration.test.ts` — two-instance Session/ceremony/rate-limit proof.
 9. `frontend/analyst-console/e2e/auth.spec.ts` — browser proof with a virtual authenticator.
+10. `backend/screening-tools-service/.../OfacSdnParser.java` and `OfacSdnIngestionService.java`
+    — streaming official-list ingest, integrity bounds and last-known-good replacement.
 
 ## Remaining gaps and the correct production answer
 
@@ -96,6 +101,8 @@ A concise code tour should follow this order:
   assurance is required; the current `attestation=none` consumer-style flow is deliberate.
 - Extend the built TOTP challenge into risk-based step-up and richer factor orchestration.
 - Add edge/ingress TLS, restrictive SPA CSP, HSTS and asset integrity/deployment controls.
+- Add licensed, contract-tested Chainalysis/TRM/Elliptic adapters if behavioral KYT coverage is
+  required; the current provider core and OFAC direct-list provider are built.
 - Add OpenTelemetry traces, login funnel/RUM/Core Web Vitals and production SLO/error-budget routing;
   Prometheus metrics and 11 alert rules are implemented locally.
 - Add a live KYC/liveness provider only behind explicit consent, privacy/retention controls,

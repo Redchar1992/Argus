@@ -17,8 +17,9 @@ phishing-resistant Passkey identity flows: the browser receives only an
 opaque `HttpOnly` session cookie while the upstream JWT stays server-side in the BFF. The
 README is deliberately
 **honest**: it claims only what is built and runs. [`docs/capability-mapping.md`](docs/capability-mapping.md)
-maps each product capability to code; a pluggable third-party-screening design (real OFAC SDN +
-Chainalysis/TRM/Elliptic adapters) is in [`docs/wallet-screening-providers.md`](docs/wallet-screening-providers.md);
+maps each product capability to code; the built provider abstraction and official OFAC SDN ingest
+(with vendor adapters explicitly left as extension work) are in
+[`docs/wallet-screening-providers.md`](docs/wallet-screening-providers.md);
 and the "What's real vs scaffolded" section below draws the line precisely.
 
 ---
@@ -100,7 +101,8 @@ the live stack:
 ```
 
 The external OIDC account/directory is mocked while the code + PKCE/state/nonce/JWKS validation is
-real. Chain/provider evidence is seeded, and the default local agent is deterministic. The exact
+real. The chain graph and local watchlist are seeded; OFAC matching uses two real public records in
+an explicitly incomplete snapshot, and the default local agent is deterministic. The exact
 real-versus-mock matrix and ten-minute walkthrough are in
 [`docs/local-demo.md`](docs/local-demo.md). Use `./scripts/demo-up.sh --lite` only when Docker is
 unavailable; it omits authenticated transport, shared Redis and Prometheus rather than pretending
@@ -115,7 +117,7 @@ The commands below expose each service separately when you want to inspect or re
 ```bash
 cd backend
 mvn -q -DskipTests package      # build all 5 modules
-mvn -q test                     # 53 tests (gateway, identity/RBAC, tools, agent loop, security)
+mvn -q test                     # 81 hermetic tests pass; 1 opt-in full-OFAC test skips
 ```
 
 Run the three Java services needed for the authenticated analyst demo (they default to in-memory stores —
@@ -246,7 +248,7 @@ cd ../frontend/analyst-console
 npm ci && npm run build && npm run test:unit        # 14 reducer/RTL identity lifecycle tests
 npx playwright install chromium                     # once per machine
 npm run test:e2e                                    # 4 journeys incl. a virtual WebAuthn authenticator
-../../scripts/demo-verify.sh                         # 4 more journeys against the real local stack
+../../scripts/demo-verify.sh                         # 5 more journeys against the real local stack + OFAC snapshot
 
 cd ../admin-console
 npm ci && npm audit && npm run build                # 0 vulnerabilities; Vue/Vite build
@@ -254,16 +256,15 @@ npm ci && npm audit && npm run build                # 0 vulnerabilities; Vue/Vit
 
 CI uses `npm ci`, runs the BFF suite against a Redis 7 service and installs Chromium for both
 browser layers. One four-journey suite starts the BFF with its explicit test-only deterministic
-upstream; a second four-journey suite launches the real Java/BFF/React stack in the no-Docker
-profile and exercises OIDC, TOTP/recovery and WebAuthn. Production startup refuses mock mode,
+upstream; a second five-journey suite launches the real Java/BFF/React stack in the no-Docker
+profile and exercises OFAC evidence, OIDC, TOTP/recovery and WebAuthn. Production startup refuses mock mode,
 insecure cookies and the memory Session store. A separate CI job runs the authenticated-TLS
 regional failover drill against disposable Redis primary/replica containers. Repository
 Dependabot alerts/security updates are enabled, and weekly grouped update PRs cover all three
 npm lockfiles, the Maven reactor and GitHub Actions. Routine npm/Maven PRs are limited to
 compatible non-major updates; major framework/runtime migrations stay explicit engineering work.
 CI blocks moderate-or-higher npm findings;
-the 2026-08-15 audit baseline is zero findings in each npm workspace and zero open repository
-Dependabot alerts across the 489-package dependency graph.
+the 2026-08-18 local audit baseline is zero findings in each npm workspace.
 
 ### Identity monitoring
 
@@ -313,6 +314,13 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
 - Three+ real tools over REST: `sanctions_screen`, `trace_transactions` (a real BFS over
   the seeded graph with path reconstruction), `address_profile`, `risk_rules` (transparent
   points-based AML rules).
+- **Pluggable sanctions providers + official OFAC ingest:** a normalized provider contract and
+  fail-closed composite federate the local scenario data with an OFAC SDN provider. The full
+  Advanced XML is streamed with XXE disabled, its SHA-256 is computed and compared with the
+  source `Digest` when present, freshness/integrity is bounded, and the accepted data is
+  atomically versioned in SQL. Local UI/CI uses a clearly labelled two-address official snapshot;
+  `prod` requires the complete official HTTPS feed. A 2026-08-18 full-feed parse yielded 976
+  deduplicated digital-currency records, including ETH and TRX.
 - Auth + per-service RBAC: bcrypt user store, versioned RS256 access-token issue/parse, and
   **every** business service (orchestrator, screening-tools, case) is an OAuth2 resource server
   that validates issuer, audience, token class, expiry, algorithm and `kid` before applying
@@ -370,8 +378,9 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
   recovery-code fallback and offline password reset.
 - **Executable real-stack demo:** one launcher owns seven local processes plus secure Redis and
   Prometheus; a second command verifies password/Session/investigation, local-provider OIDC,
-  TOTP/recovery and WebAuthn end-to-end. The mock IdP page and documentation explicitly distinguish
-  the external identity source from the real OIDC protocol validation.
+  TOTP/recovery, WebAuthn and a real-record OFAC snapshot BLOCK end-to-end. The mock IdP page and
+  documentation explicitly distinguish the external identity source from the real OIDC protocol
+  validation, and label the snapshot as incomplete.
 - **Identity test pyramid:** Fastify injection tests cover cookies, CSRF, expiry, upstream
   timeout/401, rate limiting and Passkey replay; Vitest/RTL covers reducer/login/guard/logout
   and WebAuthn UX; Playwright uses a Chromium virtual authenticator and asserts the session
@@ -408,8 +417,10 @@ DNS, quorum and cloud control-plane behavior remain to be exercised. See
   case persistence reject user tokens, while catalog/policy administration rejects SERVICE-only
   credentials. Local development uses explicitly public deterministic pairs; every `prod` profile
   fails fast until distinct real key rings are injected.
-- The on-chain data is **seeded/synthetic**, not a live chain indexer. The graph and
-  sanctions list are illustrative fixtures (no real OFAC addresses).
+- Transaction edges/activity remain **seeded/synthetic**, not a live chain indexer. Local scenario
+  watchlist rows are labelled `LOCAL-DEMO-WATCHLIST`; the separate OFAC provider is real. Local
+  mode uses a two-address snapshot, production pulls the complete official feed. No licensed
+  Chainalysis/TRM/Elliptic adapter is claimed.
 - Multi-stage non-root images and an executable production-reference Compose topology are built.
   It intentionally does not pretend to provide managed ingress, secret distribution, database
   backups, registry signing or cross-region orchestration.

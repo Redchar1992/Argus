@@ -1,174 +1,136 @@
-# Design: Pluggable Wallet-Screening Providers
+# Wallet-screening providers and OFAC SDN ingestion
 
-Status: **design** (not yet built). Scope: `screening-tools-service`.
+Status: **provider core and OFAC provider built**. Chainalysis/TRM/Elliptic adapters remain
+explicit extension work, not claimed capabilities.
 
-## Why
+## Product boundary
 
-Today `sanctions_screen` matches an address against a **seeded fixture** list
-(`SanctionedAddress` in H2/Postgres). That is enough to drive the agent loop, but a
-production compliance system does not screen against one hand-made list — it **federates
-several sources**:
+OFAC's Sanctions List Service (SLS) distributes raw sanctions-list files; Argus performs the
+application-side download, validation, parsing, indexing and exact wallet match. The implementation
+uses the official SDN Advanced XML because it contains typed `Digital Currency Address - <asset>`
+features and rich entity/program relationships. OFAC states that the advanced file contains the
+entire SDN list and is updated with its other list products:
 
-- **Authoritative sanctions lists** — OFAC SDN, EU/UN consolidated, UK OFSI. These are
-  the legal ground truth for a **direct** sanctions hit (→ BLOCK).
-- **Chain-analytics vendors** — Chainalysis, TRM Labs, Elliptic. These add **behavioural
-  risk** an address list can't: mixer/darknet/scam/stolen-funds *exposure*, direct vs
-  indirect, cluster attribution, a normalised risk score.
+- [OFAC Sanctions List Service](https://ofac.treasury.gov/sanctions-list-service)
+- [OFAC advanced-format FAQ](https://ofac.treasury.gov/sdn-list-data-formats-data-schemas/frequently-asked-questions-on-advanced-sanctions-list-standard)
+- [OFAC 2024 namespace notice](https://ofac.treasury.gov/recent-actions/20240507_44)
+- official machine source: `https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN_ADVANCED.XML`
 
-This design introduces a `ScreeningProvider` abstraction so screening sources are swappable
-and composable — **exactly mirroring the existing swappable `LlmProvider`** (`local` vs
-`anthropic`) pattern. It also closes the README's honest gap *"addresses are illustrative
-(no real OFAC entries)"* by shipping a provider that ingests the **real, public OFAC SDN
-digital-currency addresses** (no API key required).
+This is exact address screening, not fuzzy person/name matching, transaction monitoring or legal
+advice. A direct official-list hit is authoritative input to Argus's deterministic BLOCK rule.
 
-The point is not vendor lock-in — it's to demonstrate (a) a real sanctions-list ingest and
-(b) fluency with how the major KYT/screening APIs are actually shaped and how their differing
-risk taxonomies get normalised into one internal model.
-
-## The abstraction
-
-The hard part is **normalisation**: OFAC gives a binary listing; Chainalysis gives
-`Severe/High/Medium/Low` + exposure categories; TRM gives per-category risk levels +
-`riskType` (ownership/counterparty/indirect). One internal model absorbs all of them.
+## Provider model
 
 ```java
 public interface ScreeningProvider {
-    String id();                          // "ofac", "chainalysis", "trm", "local"
-    ScreeningResult screen(String address, Chain chain);
+    String id();
+    boolean required();
+    ScreeningResult screen(String address);
 }
 ```
 
-```java
-public record ScreeningResult(
-        String address,
-        String source,               // provider id that produced this
-        boolean sanctioned,          // TRUE only for a DIRECT authoritative-list hit → BLOCK
-        int riskScore,               // 0..100, normalised across providers
-        RiskBand band,               // LOW | MEDIUM | HIGH | SEVERE
-        List<RiskSignal> signals,    // the evidence the agent/risk_rules reason over
-        boolean evidenceComplete,    // false ⇒ provider errored/timed out (fail-closed)
-        JsonNode raw)                // the vendor's raw verdict, persisted for audit
-{ }
+Every provider maps into the same internal result:
 
-public record RiskSignal(
-        RiskCategory category,       // SANCTIONS, DARKNET_MARKET, MIXER, SCAM,
-                                     // STOLEN_FUNDS, TERRORISM_FINANCING, CHILD_ABUSE,
-                                     // GAMBLING, HIGH_RISK_EXCHANGE, ...
-        Exposure exposure,           // DIRECT | INDIRECT
-        int hopsAway,                // 0 = the address itself; N = N-hop counterparty
-        int severity,                // 0..100
-        String entity,               // named entity if attributed (e.g. "Lazarus Group")
-        String detail) { }
-```
+- direct `sanctioned` flag and normalized 0–100 score/band;
+- named `ScreeningMatch` evidence;
+- normalized category/exposure `RiskSignal`s;
+- dataset version and provider error code; and
+- `evidenceComplete`, used by the agent's deterministic fail-closed guard.
 
-`RiskCategory` is the standard KYT category set shared by Chainalysis/TRM/Elliptic — using
-their vocabulary is deliberate (it's the language a compliance reviewer expects).
+`CompositeScreeningProvider` loads the configured provider IDs in order, fans out for each address,
+uses the worst score/band, lets any authoritative hit win and unions evidence. A failed **required**
+provider makes the aggregate incomplete. Both the local and Anthropic agent paths reject CLEAR when
+`sanctions_screen.evidenceComplete=false`; this rule is code-enforced rather than left to a prompt.
 
-## Providers
+### Built providers
 
-| Provider | Source | Key needed | Notes |
+| ID | Purpose | Local mode | Production mode |
 |---|---|---|---|
-| `LocalFixtureProvider` | seeded `sanctioned_address` table | no | current behaviour; default, zero-config demo |
-| `OfacSdnProvider` | **real OFAC SDN** digital-currency addresses | **no** | public data — turns the honest gap into a real capability |
-| `ChainalysisProvider` | Chainalysis Address Screening / KYT | yes | key-gated, mockable |
-| `TrmProvider` | TRM `/public/v2/screening` | yes | key-gated, mockable |
-| `EllipticProvider` | Elliptic Wallet Screening | yes (HMAC) | key-gated, mockable |
-| `CompositeScreeningProvider` | fan-out + merge | — | the production shape |
+| `local` | deterministic transaction-graph/watchlist scenarios | enabled and labelled `LOCAL-DEMO-WATCHLIST` | disabled |
+| `ofac` | exact match over SDN digital-currency features | two-address, real-public-data **snapshot**, version starts `snapshot-` | complete official HTTPS feed, version starts `official-` |
 
-### `OfacSdnProvider` (real, buildable now)
+The response retains the old `directHit`/`hits` contract and adds provider evidence, signals,
+normalized risk, freshness outcome and dataset version, so the investigation trace itself preserves
+which source produced the verdict.
 
-OFAC publishes the SDN list with machine-readable **"Digital Currency Address"** features
-(`SDN.CSV` / `sdn_advanced.xml`, and the newer Sanctions List Service). Each crypto entry is
-a feature like `Digital Currency Address - XBT <addr>` / `- ETH <addr>` on an SDN entity
-(e.g. Lazarus Group, Garantex, Tornado Cash contracts).
+## OFAC ingest lifecycle
 
-- A scheduled ingest (`@Scheduled`, daily) downloads the SDN source, parses the digital-currency
-  features, upserts them into `sanctioned_address` with `listSource="OFAC-SDN"`, `program`,
-  `entity`, and `severity=100`.
-- `screen()` then does a direct lookup → `sanctioned=true`, `SANCTIONS/DIRECT/hops=0` on a hit.
-- Ships with a **checked-in SDN excerpt fixture** so CI + the offline demo have real (public)
-  sanctioned addresses without a network call.
+1. `OfacSourceLoader` accepts only the configured classpath snapshot or HTTP source, sends an
+   identifiable User-Agent, refuses redirects, checks status/content type and enforces a 200 MB cap.
+2. `OfacSdnParser` uses XXE/DTD-disabled StAX. It streams the 100+ MB publication rather than building
+   a DOM, resolves feature-type IDs, primary entity names, sanctions programs and typed addresses,
+   and preserves Base58 case while canonicalizing EVM/Bech32 forms.
+3. The ingestion computes SHA-256 over the bytes actually parsed, compares the source's SHA-256
+   `Digest` header when present, and rejects invalid dates, empty feature sets, future publications
+   or a result below the configured address-count floor.
+4. `OfacDatasetStore` replaces address rows and provenance metadata in one database transaction.
+   A failed download/parse never deletes the last-known-good dataset.
+5. Startup refreshes a missing/old dataset; a UTC daily scheduler maintains it. A fresh retained
+   dataset survives a transient refresh outage. Once older than `max-age`, screening returns
+   `dataset_stale` and fails closed.
+6. ADMIN can trigger `POST /api/tools/catalog/ofac/refresh`; authenticated users can inspect
+   `GET /api/tools/catalog/ofac/status` without receiving raw source bytes.
 
-This alone is the highest-credibility piece: "real OFAC SDN ingest + screening" is a concrete,
-verifiable compliance capability, not scaffolding.
+The reference Compose runs one screening replica. A horizontally scaled deployment should elect a
+single refresh leader (or add a database/distributed lock); each replica may safely read the shared
+last-known-good tables, but cross-process scheduler coordination is deployment work, not mocked here.
 
-### Vendor adapters (`Chainalysis` / `TRM` / `Elliptic`)
+Flyway V2 owns `screening_dataset` and `ofac_sdn_address`, including content hash, publication date,
+fetch time, source URI, version, entry count and an indexed normalized address.
 
-Each adapter is a thin REST client that maps the vendor response into `ScreeningResult`,
-modelled on the vendors' documented API shapes:
+## Honest local versus production behavior
 
-- **Chainalysis** — register + `GET` the address entity; map `risk` (Severe/High/Medium/Low)
-  → `band`, `exposures[]` → `RiskSignal`s (category + direct/indirect).
-- **TRM** — `POST /public/v2/screening` `[{address, chain}]`; map `addressRiskIndicators[]`
-  (`category`, `categoryRiskScoreLevel`, `riskType`) → signals; `entities[]` → attribution.
-- **Elliptic** — HMAC-signed wallet screening; map `risk_score` + `contributions[]` by category.
+The committed excerpt contains one real Lazarus ETH address and one real Central Bank of Iran TRX
+address from the official 2026-08-07 publication. It exists so CI and a disconnected interview demo
+exercise the real parser/provider/UI without pretending a two-row snapshot is current or complete.
+The UI labels it **official OFAC snapshot**, and the dataset version starts `snapshot-`.
 
-All three are **key-gated** (`@ConditionalOnProperty` + env key) and **mocked in tests** via a
-recorded response fixture — no live key in CI, same discipline as the Anthropic provider today.
+The `prod` profile instead:
 
-### `CompositeScreeningProvider` (the production shape)
+- enables only `ofac`;
+- fixes the source to the official SLS HTTPS host/path;
+- requires startup refresh and at least 100 parsed digital-currency addresses; and
+- refuses the classpath snapshot or a non-official host.
 
-Fan-out to the configured providers, then merge **fail-closed** (consistent with Argus's
-existing decisioning):
+A point-in-time full-source validation is recorded in
+[`evidence/ofac-live-validation-2026-08-18.md`](evidence/ofac-live-validation-2026-08-18.md).
+This is local engineering evidence, not an availability claim about a deployed feed.
 
-1. Run OFAC (authoritative) **always**; any direct hit ⇒ `sanctioned=true` wins → BLOCK.
-2. Run the configured vendor(s) for behavioural exposure; union their signals.
-3. `riskScore` = max across providers; `band` = worst.
-4. If a **configured** provider errors/times out ⇒ `evidenceComplete=false` ⇒ the agent must
-   escalate to REVIEW, never silently CLEAR. (Mirrors the existing "required tool missing →
-   REVIEW" rule.)
-
-## Config (mirrors `LlmProvider`)
+## Configuration
 
 ```yaml
 argus:
   screening:
-    providers: local            # csv: e.g. "ofac,trm"  (default: local)
+    providers: local,ofac
     ofac:
-      source-url: https://.../sdn_advanced.xml
+      source-uri: classpath:fixtures/ofac-sdn-advanced-excerpt.xml
+      required: true
+      refresh-on-startup: true
       refresh-cron: "0 0 3 * * *"
-    chainalysis: { base-url: ..., api-key: ${ARGUS_CHAINALYSIS_API_KEY:} }
-    trm:         { base-url: https://api.trmlabs.com, api-key: ${ARGUS_TRM_API_KEY:} }
+      refresh-if-older-than: PT6H
+      max-age: PT48H
+      request-timeout: PT180S
+      max-bytes: 200000000
+      minimum-address-count: 1
 ```
 
-Beans are `@ConditionalOnProperty`; `CompositeScreeningProvider` wires whichever are enabled.
-`SanctionsScreenService` becomes a thin orchestrator over the active provider(s) instead of
-querying the repository directly.
+Production overrides providers/source/integrity floor in the profile, not through hopeful operator
+convention. `ARGUS_OFAC_USER_AGENT` should identify the operating system/team but contain no secret.
 
-## Integration with the tool + agent
+## Reviewable tests
 
-- `SanctionsScreenResponse` gains `riskScore`, `band`, and `signals[]` (categories + exposure)
-  alongside the existing `directHit`/`hits`. Backward compatible — existing fields stay.
-- `risk_rules` already consumes `sanctionsDirectHit` and `minHopsToFlagged`; extend it to fire
-  rules on **categories** (e.g. `MIXER` exposure ≤1 hop → +points → REVIEW; `SANCTIONS/DIRECT`
-  → BLOCK). This makes the vendor signals actually drive the decision, not just decorate it.
-- **Auditability**: persist each provider's `raw` verdict with the investigation step. A
-  compliance audit must be able to show *which source said what* — storing the vendor's raw
-  response is a compliance requirement, not a nicety.
+- `OfacSdnParserTest`: ETH/TRX/entity/program extraction and XXE rejection.
+- `OfacSdnParserLiveFileTest`: opt-in complete-feed parse; hermetic CI skips without a file.
+- `OfacSdnIngestionServiceTest`: mocked HTTP success/hash/atomic handoff and failure retention.
+- `OfacSdnProviderTest`: hit, missing and stale behavior.
+- `CompositeScreeningProviderTest`: authoritative hit, worst-case merge, optional/required failure.
+- `ScreeningToolsTests`: Spring/H2 proof for the labelled OFAC ETH and TRX snapshot entries.
+- `AgentLoopTest`: incomplete provider evidence forces REVIEW instead of CLEAR.
 
-## Testing
+## Extension point, not current implementation
 
-- `OfacSdnParserTest` — parse the checked-in SDN excerpt → expected addresses/entities.
-- `CompositeScreeningProviderTest` — OFAC hit wins; vendor error ⇒ `evidenceComplete=false`
-  ⇒ REVIEW; score/band merge = worst-case.
-- Vendor adapters — map a recorded JSON fixture → `ScreeningResult` (no live key).
-- Existing `sanctions_screen` tests keep passing (fixture provider is the default).
-
-## Build order
-
-1. `ScreeningProvider` interface + `ScreeningResult`/`RiskSignal` model; refactor the current
-   service into `LocalFixtureProvider` behind it (no behaviour change — pure structure).
-2. `OfacSdnProvider` + scheduled ingest + SDN fixture + parser test. **← real capability lands here.**
-3. `CompositeScreeningProvider` + fail-closed merge + config wiring.
-4. `TrmProvider` (cleanest public API) → `ChainalysisProvider` → `EllipticProvider`, each with a
-   recorded-fixture test.
-5. Extend `risk_rules` to consume categories; update `docs/capability-mapping.md` +
-   README ("real vs scaffolded": OFAC moves from gap → real).
-
-## What this demonstrates (for a compliance-eng JD)
-
-Real sanctions-list ingestion (OFAC SDN); fluency with **Chainalysis / TRM / Elliptic** API
-shapes and their risk-category taxonomy; provider **federation + normalisation** across
-disagreeing sources; **fail-closed** compliance semantics; raw-verdict **audit** retention;
-and config-driven pluggability — the exact "hands-on with KYT/screening tooling" signal a
-crypto compliance team screens for.
+Chainalysis, TRM Labs and Elliptic adapters can implement the same interface and normalize their
+mixer/darknet/scam/stolen-funds taxonomies into `RiskSignal`. They are **not implemented** because
+no licensed API/key or response contract is present in this repository. A production addition must
+include recorded-contract tests, bounded timeouts, raw-verdict retention/redaction policy, provider
+SLA/freshness semantics and the same required-provider fail-closed behavior.

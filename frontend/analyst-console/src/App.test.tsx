@@ -35,7 +35,7 @@ function anonymousResponse(): Response {
   return jsonResponse({ error: { code: 'UNAUTHENTICATED', message: 'Sign in to continue.' } }, 401);
 }
 
-function authenticatedResponse(expiresAt = '2026-08-15T12:00:00.000Z'): Response {
+function authenticatedResponse(expiresAt = new Date(Date.now() + 3_600_000).toISOString()): Response {
   return jsonResponse({
     state: 'authenticated',
     user: { username: 'analyst', role: 'ANALYST' },

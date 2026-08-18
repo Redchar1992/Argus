@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { totpCode } from '../../../scripts/totp-code.mjs';
 
 const CLEAN_WALLET = '0xc1ean000000000000000000000000000000c1ean';
+const OFAC_SNAPSHOT_WALLET = '0x098B716B8Aaf21512996dC57EB0615e2383E2f96';
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const DEMO_PASSWORD = 'demo-password-2026';
 
@@ -68,6 +69,45 @@ test.describe.serial('real local stack', () => {
     await expect(page.getByText('sanctions_screen', { exact: true })).toBeVisible();
     await expect(page.getByText('risk_rules', { exact: true })).toBeVisible();
     await expect(page.getByText('trace_transactions', { exact: true })).toHaveCount(0);
+  });
+
+  test('official OFAC snapshot evidence forces a deterministic block', async ({ page }) => {
+    await passwordSignIn(page, 'analyst', 'analyst12345');
+    await expect(page.getByText('Run an investigation')).toBeVisible();
+    await page.getByText(/official ofac snapshot/i).click();
+    await expect(page.getByPlaceholder(/enter a wallet address/i)).toHaveValue(OFAC_SNAPSHOT_WALLET);
+
+    const completedResponse = page.waitForResponse(async (response) => {
+      if (response.request().method() !== 'GET'
+          || !/\/bff\/api\/investigations\/[^/]+$/.test(response.url())
+          || !response.ok()) return false;
+      const body = await response.json() as { status?: string };
+      return body.status === 'COMPLETED';
+    });
+    await page.getByRole('button', { name: 'Investigate', exact: true }).click();
+    const investigation = await (await completedResponse).json() as {
+      decision: string;
+      steps: Array<{ toolName?: string; observation?: Record<string, unknown> }>;
+    };
+
+    await expect(page.locator('.verdict-badge')).toHaveText('BLOCK');
+    expect(investigation.decision).toBe('BLOCK');
+    const observation = investigation.steps.find((step) =>
+      step.toolName === 'sanctions_screen'
+      && step.observation
+      && Array.isArray(step.observation.providers))?.observation;
+    expect(observation?.directHit).toBe(true);
+    expect(observation?.evidenceComplete).toBe(true);
+    expect(observation?.hits).toEqual(expect.arrayContaining([
+      expect.objectContaining({ listSource: 'OFAC-SDN', entity: 'Lazarus Group' }),
+    ]));
+    expect(observation?.providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: 'ofac',
+        sanctioned: true,
+        datasetVersion: expect.stringMatching(/^snapshot-2026-08-07-/),
+      }),
+    ]));
   });
 
   test('mock identity source completes a real OIDC code + PKCE login', async ({ page, context }) => {

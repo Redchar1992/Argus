@@ -9,7 +9,7 @@ managed ingress, a secret manager, managed databases or an orchestrator such as 
 | Service | Production behavior |
 |---|---|
 | `auth-service` | Requires Postgres, mTLS key/trust stores, a non-demo RS256 auth signing ring and non-development identity secrets; disables demo users; Flyway migrates the `auth` schema and Hibernate uses `validate` only |
-| `screening-tools-service` | Requires Postgres plus auth/workload public rings; disables illustrative fixtures; Flyway migrates the `tools` schema and Hibernate uses `validate` only |
+| `screening-tools-service` | Requires Postgres plus auth/workload public rings and the complete official OFAC HTTPS feed; disables local fixtures; validates source/count/size/source-Digest/hash/freshness; Flyway migrates the `tools` schema and Hibernate uses `validate` only |
 | `case-service` | Requires Postgres plus auth/workload public rings; Flyway migrates the `cases` schema and Hibernate uses `validate` only |
 | `agent-orchestrator-service` | Requires Mongo, auth public keys, a non-demo workload signing ring, the external Anthropic provider and an API key; rejects memory traces and the local rule provider |
 | `api-gateway` | Requires an explicit public Origin and does not publish the BFF-only auth route |
@@ -87,6 +87,13 @@ directory.
 The exposed HTTP port is for static/container smoke checks only. Browser authentication assumes
 the configured HTTPS public origin and an external TLS ingress. Use `./scripts/demo-up.sh` for the
 fully interactive localhost review flow.
+
+On 2026-08-18 this exact topology was built with fresh disposable stores: all ten runtime
+containers became healthy and the production screening profile accepted 976 records from the
+complete official feed with a matching SHA-256. The Anthropic key was deliberately a non-secret
+placeholder and no model call was made, so this proves startup/data/transport wiring rather than
+external-LLM availability. See
+[`evidence/ofac-live-validation-2026-08-18.md`](evidence/ofac-live-validation-2026-08-18.md).
 
 ## Secret and infrastructure boundaries
 
