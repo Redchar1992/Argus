@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 // Browser API traffic remains same-origin. Vite forwards /bff to the Node identity
 // BFF, which alone holds the upstream JWT and calls the Java services.
 export default defineConfig({
+  base: process.env.VITE_BASE_PATH ?? '/',
   plugins: [react()],
   server: {
     port: 5173,

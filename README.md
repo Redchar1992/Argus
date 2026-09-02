@@ -22,6 +22,13 @@ maps each product capability to code; the built provider abstraction and officia
 [`docs/wallet-screening-providers.md`](docs/wallet-screening-providers.md);
 and the "What's real vs scaffolded" section below draws the line precisely.
 
+**[Open the zero-install GitHub Pages demo →](https://redchar1992.github.io/Argus/)**
+
+The hosted page is an explicitly labelled, self-contained browser demo with deterministic
+fixtures. It demonstrates the investigation timeline and decision UX without pretending to run
+the Java services, identity stack, live screening providers or an LLM in GitHub Pages. Use the
+local demo below for the complete system.
+
 ---
 
 ## The centerpiece: a real agentic loop

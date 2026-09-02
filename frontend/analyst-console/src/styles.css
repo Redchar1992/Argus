@@ -54,6 +54,14 @@ body {
 .secondary-btn:hover { border-color: var(--accent); color: var(--accent-2); }
 .secondary-btn:disabled { opacity: .55; cursor: wait; }
 
+.pages-demo-notice {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: -4px 0 16px; padding: 10px 13px; border: 1px solid #4a3b72;
+  border-radius: 10px; background: rgba(139,92,246,.08); color: var(--muted);
+  font-size: 12px;
+}
+.pages-demo-notice strong { color: var(--accent-2); }
+
 /* ── authentication / session guard ───────────────── */
 .auth-shell {
   min-height: 100vh; display: grid; place-items: center; padding: 28px;

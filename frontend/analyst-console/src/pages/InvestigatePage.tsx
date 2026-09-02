@@ -10,7 +10,8 @@ import type { AuthUser } from '../auth/authMachine';
 import { PasskeySettings } from '../components/PasskeySettings';
 import { MfaSettings } from '../components/MfaSettings';
 
-const REPO = 'https://github.com/Redchar1992/argus';
+const REPO = 'https://github.com/Redchar1992/Argus';
+const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === 'true';
 
 // Deterministic local fixtures plus one real public address from the labelled OFAC excerpt.
 const DEMO_WALLETS = [
@@ -96,19 +97,28 @@ export function InvestigatePage({ user, signingOut, onLogout }: InvestigatePageP
               <small>{user.role}</small>
             </span>
           </div>
-          <button className="secondary-btn" disabled={signingOut} onClick={() => void onLogout()}>
-            {signingOut ? t('auth.signingOut') : t('auth.signOut')}
-          </button>
+          {!STATIC_DEMO && (
+            <button className="secondary-btn" disabled={signingOut} onClick={() => void onLogout()}>
+              {signingOut ? t('auth.signingOut') : t('auth.signOut')}
+            </button>
+          )}
           <button className="lang-toggle" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
             {lang === 'en' ? '繁中' : 'EN'}
           </button>
         </div>
       </header>
 
-      <div className="identity-settings-row">
-        <MfaSettings />
-        <PasskeySettings />
-      </div>
+      {STATIC_DEMO ? (
+        <div className="pages-demo-notice" role="status">
+          <strong>GitHub Pages static demo</strong>
+          <span>Deterministic browser fixtures only; no live screening, identity service, backend or model call.</span>
+        </div>
+      ) : (
+        <div className="identity-settings-row">
+          <MfaSettings />
+          <PasskeySettings />
+        </div>
+      )}
 
       <Hero />
       <HowItWorks />

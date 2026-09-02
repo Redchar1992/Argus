@@ -3,6 +3,8 @@ import { LangProvider } from './i18n';
 import { InvestigatePage } from './pages/InvestigatePage';
 import { LoginPage } from './pages/LoginPage';
 
+const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === 'true';
+
 function AuthenticatedApp() {
   const { state, login, loginWithPasskey, verifyMfa, cancelMfa, recoverAccount, logout, retrySession } = useAuth();
 
@@ -38,9 +40,17 @@ function AuthenticatedApp() {
 export default function App() {
   return (
     <LangProvider>
-      <AuthProvider>
-        <AuthenticatedApp />
-      </AuthProvider>
+      {STATIC_DEMO ? (
+        <InvestigatePage
+          user={{ username: 'demo-analyst', role: 'ANALYST' }}
+          signingOut={false}
+          onLogout={async () => {}}
+        />
+      ) : (
+        <AuthProvider>
+          <AuthenticatedApp />
+        </AuthProvider>
+      )}
     </LangProvider>
   );
 }

@@ -9,12 +9,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && vite build",
+    "build:pages": "VITE_STATIC_DEMO=true VITE_BASE_PATH=/Argus/ npm run build",
     "preview": "vite preview",
     "test": "npm run test:unit",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:demo": "playwright test --config playwright.demo.config.ts"
+    "test:e2e:demo": "playwright test --config playwright.demo.config.ts",
+    "test:e2e:pages": "playwright test --config playwright.pages.config.ts"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
