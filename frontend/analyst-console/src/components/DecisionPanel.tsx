@@ -1,6 +1,7 @@
 import type { Investigation } from '../types/investigation';
 import { useI18n } from '../i18n';
 import { Hint } from './Hint';
+import { exportDemoInvestigation } from '../demo/staticInvestigations';
 
 const VERDICT_CLASS: Record<string, string> = {
   CLEAR: 'clear',
@@ -106,6 +107,24 @@ export function DecisionPanel({ inv }: { inv: Investigation }) {
       )}
 
       {inv.summary && <div className="summary-box">{inv.summary}</div>}
+
+      {inv.governance && (
+        <div className="governance-box">
+          <div className="factors-title">Governance & evidence</div>
+          <div className={`governance-state ${inv.governance.state === 'HUMAN_REVIEW' ? 'review' : 'approved'}`}>
+            {inv.governance.state === 'HUMAN_REVIEW' ? '✋ HUMAN_REVIEW' : '✓ AUTO_APPROVED'}
+          </div>
+          <p>{inv.governance.reason}</p>
+          <div className="provenance-grid">
+            <span>Policy</span><code>{inv.governance.policyId}@{inv.governance.policyVersion}</code>
+            <span>Budget</span><code>{inv.steps.length}/{inv.governance.maxSteps} steps · ≤{inv.governance.maxCostUnits} cost units</code>
+            <span>Tx state</span><code>{inv.transactionState ?? 'not applicable'}</code>
+          </div>
+          <button className="secondary-btn export-btn" onClick={() => exportDemoInvestigation(inv)}>
+            Export evidence JSON
+          </button>
+        </div>
+      )}
 
       <div className="summary-box" style={{ paddingTop: 12 }}>
         {t('dec.decidedBy')}: <span style={{ color: 'var(--text)' }}>{inv.llmProvider}</span>

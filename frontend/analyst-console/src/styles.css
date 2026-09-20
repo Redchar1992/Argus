@@ -348,6 +348,14 @@ body {
 .factor.high::before { background: var(--danger); }
 .factor.med::before { background: var(--warn); }
 .summary-box { margin-top: 16px; font-size: 13px; color: var(--muted); line-height: 1.55; border-top: 1px solid var(--line); padding-top: 14px; }
+.governance-box { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #0f0c17; }
+.governance-box p { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.governance-state { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; }
+.governance-state.review { color: var(--warn); background: rgba(241,196,15,.1); }
+.governance-state.approved { color: var(--ok); background: rgba(46,204,113,.1); }
+.provenance-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; font-size: 11px; color: var(--muted); }
+.provenance-grid code { color: var(--accent-2); overflow-wrap: anywhere; }
+.export-btn { margin-top: 12px; cursor: pointer; }
 
 /* ── layout grid ────────────────────────────────────── */
 .work-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; margin-top: 16px; align-items: start; }

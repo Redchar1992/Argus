@@ -26,6 +26,16 @@ export interface Investigation {
   createdAt: string | null;
   completedAt: string | null;
   steps: AgentStep[];
+  /** Optional governance metadata supplied by the deterministic Pages fixture. */
+  governance?: {
+    state: 'AUTO_APPROVED' | 'HUMAN_REVIEW';
+    reason: string;
+    policyId: string;
+    policyVersion: string;
+    maxCostUnits: number;
+    maxSteps: number;
+  };
+  transactionState?: 'DETECTED' | 'SCREENED' | 'AWAITING_REVIEW' | 'SETTLED';
 }
 
 export interface SubmitResponse {

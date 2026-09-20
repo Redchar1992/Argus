@@ -138,7 +138,34 @@ export async function getDemoInvestigation(id: string): Promise<Investigation> {
     createdAt: run.createdAt,
     completedAt: completed ? new Date().toISOString() : null,
     steps: visibleSteps,
+    governance: {
+      state: profile.decision === 'REVIEW' ? 'HUMAN_REVIEW' : 'AUTO_APPROVED',
+      reason: profile.decision === 'REVIEW'
+        ? 'Deterministic policy requires a human decision before any downstream action.'
+        : 'Required evidence is complete and the deterministic policy permits an automated close.',
+      policyId: 'wallet-screening-default',
+      policyVersion: '2026-08-18',
+      maxCostUnits: 6,
+      maxSteps: 6,
+    },
+    transactionState: profile.decision === 'REVIEW' ? 'AWAITING_REVIEW' : 'SETTLED',
   };
+}
+
+export function exportDemoInvestigation(inv: Investigation): void {
+  const evidence = {
+    artifactType: 'argus-investigation-evidence',
+    artifactVersion: 1,
+    generatedBy: 'pages-fixture (deterministic)',
+    ...inv,
+  };
+  const blob = new Blob([JSON.stringify(evidence, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${inv.id}-evidence.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function resetStaticInvestigationsForTest(): void {

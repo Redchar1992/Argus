@@ -18,6 +18,8 @@ describe('GitHub Pages static investigation demo', () => {
     expect(second.steps.length).toBeGreaterThan(first.steps.length);
     expect(completed).toMatchObject({ status: 'COMPLETED', decision: 'REVIEW', riskScore: 35 });
     expect(completed.steps.at(-1)?.phase).toBe('FINISH');
+    expect(completed.governance).toMatchObject({ state: 'HUMAN_REVIEW', maxSteps: 6, maxCostUnits: 6 });
+    expect(completed.transactionState).toBe('AWAITING_REVIEW');
   });
 
   it('never infers CLEAR for an address outside the fixture set', async () => {
