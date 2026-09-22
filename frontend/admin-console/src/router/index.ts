@@ -1,9 +1,11 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
 
+const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === 'true';
+
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-    { path: '/', redirect: '/tools' },
+    { path: '/', redirect: STATIC_DEMO ? '/review' : '/tools' },
     {
       path: '/tools',
       component: () => import('../views/ToolsView.vue'),

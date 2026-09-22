@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
 const route = useRoute();
+const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === 'true';
 </script>
 
 <template>
@@ -23,6 +24,13 @@ const route = useRoute();
       </span>
       <span class="sub">review queue · policies · tools · cases · audit</span>
     </el-header>
+    <el-alert
+      v-if="STATIC_DEMO"
+      class="demo-banner"
+      type="info"
+      :closable="false"
+      title="GitHub Pages admin demo — deterministic fixtures only; no live API, identity service or backend connection."
+    />
     <el-container>
       <el-aside width="200px">
         <el-menu :default-active="route.path" router>
@@ -78,5 +86,8 @@ const route = useRoute();
   color: var(--argus-muted, #8a93a3);
   margin-left: auto;
   font-size: 13px;
+}
+.demo-banner {
+  margin: 14px 18px 0;
 }
 </style>

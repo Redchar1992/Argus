@@ -12,6 +12,7 @@ import { PasskeySettings } from '../components/PasskeySettings';
 import { MfaSettings } from '../components/MfaSettings';
 
 const REPO = 'https://github.com/Redchar1992/Argus';
+const ADMIN_DEMO = '/Argus/admin/#/review';
 const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === 'true';
 
 // Deterministic local fixtures plus one real public address from the labelled OFAC excerpt.
@@ -130,6 +131,11 @@ export function InvestigatePage({ user, signingOut, onLogout }: InvestigatePageP
         <a className="link" href={REPO} target="_blank" rel="noreferrer">
           GitHub ↗
         </a>
+        {STATIC_DEMO && (
+          <a className="link" href={ADMIN_DEMO}>
+            Admin demo ↗
+          </a>
+        )}
         <span className="subbar-note">
           plan → act → observe → decide
           <Hint text={t('hint.loop')} />

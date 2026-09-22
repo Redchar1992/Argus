@@ -24,6 +24,11 @@ and the "What's real vs scaffolded" section below draws the line precisely.
 
 **[Open the zero-install GitHub Pages demo →](https://redchar1992.github.io/Argus/)**
 
+The same Pages deployment also includes a static admin-console walkthrough at
+[`/admin/`](https://redchar1992.github.io/Argus/admin/#/review). It demonstrates the Review Queue,
+policy/tool controls and audit projection with deterministic browser fixtures. It is intentionally
+not connected to a live backend or database; run the local stack below for real persistence.
+
 The hosted page is an explicitly labelled, self-contained browser demo with deterministic
 fixtures. It demonstrates the investigation timeline and decision UX without pretending to run
 the Java services, identity stack, live screening providers or an LLM in GitHub Pages. Use the
