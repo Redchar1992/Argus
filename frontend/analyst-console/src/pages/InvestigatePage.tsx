@@ -3,6 +3,7 @@ import { getInvestigation, submitInvestigation } from '../api/client';
 import type { Investigation } from '../types/investigation';
 import { AgentTimeline } from '../components/AgentTimeline';
 import { DecisionPanel } from '../components/DecisionPanel';
+import { ReviewGate } from '../components/ReviewGate';
 import { Hero, HowItWorks } from '../components/Hero';
 import { Hint } from '../components/Hint';
 import { useI18n } from '../i18n';
@@ -186,6 +187,7 @@ export function InvestigatePage({ user, signingOut, onLogout }: InvestigatePageP
 
           <div>
             <DecisionPanel inv={inv} />
+            <ReviewGate inv={inv} onChange={setInv} />
             {running && (
               <div className="alert info">
                 <strong>{t('inprogress.title')}</strong>

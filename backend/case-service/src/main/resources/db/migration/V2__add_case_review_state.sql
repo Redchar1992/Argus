@@ -1,0 +1,5 @@
+ALTER TABLE case_record ADD COLUMN review_status VARCHAR(32) NOT NULL DEFAULT 'AUTO_APPROVED';
+ALTER TABLE case_record ADD COLUMN review_decision VARCHAR(16);
+ALTER TABLE case_record ADD COLUMN review_note VARCHAR(4000);
+ALTER TABLE case_record ADD COLUMN reviewed_by VARCHAR(255);
+ALTER TABLE case_record ADD COLUMN reviewed_at TIMESTAMP(6) WITH TIME ZONE;

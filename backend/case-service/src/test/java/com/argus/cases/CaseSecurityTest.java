@@ -84,6 +84,92 @@ class CaseSecurityTest {
     }
 
     @Test
+    void analystCanResolveReviewCaseAndServiceCannotReviewIt() throws Exception {
+        mvc.perform(post("/api/cases")
+                        .header("Authorization", workloadToken("argus-case-service", "agent-orchestrator"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(caseBody("inv-review", "REVIEW")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewStatus").value("PENDING_REVIEW"));
+
+        mvc.perform(post("/api/cases/inv-review/review")
+                        .header("Authorization", workloadToken("argus-case-service", "agent-orchestrator"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"BLOCK\",\"note\":\"service must not self-approve\"}"))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(post("/api/cases/inv-review/review")
+                        .header("Authorization", userToken("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"CLEAR\",\"note\":\"Reviewed the trace and found no disqualifying evidence.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("REVIEW"))
+                .andExpect(jsonPath("$.reviewStatus").value("RESOLVED"))
+                .andExpect(jsonPath("$.reviewDecision").value("CLEAR"))
+                .andExpect(jsonPath("$.reviewedBy").value("tester"));
+
+        mvc.perform(post("/api/cases")
+                        .header("Authorization", workloadToken("argus-case-service", "agent-retry"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(caseBody("inv-review", "REVIEW")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewStatus").value("RESOLVED"))
+                .andExpect(jsonPath("$.reviewDecision").value("CLEAR"));
+
+        mvc.perform(post("/api/cases/inv-review/review")
+                        .header("Authorization", userToken("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"BLOCK\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void reviewerCanRequestMoreEvidenceBeforeResolving() throws Exception {
+        mvc.perform(post("/api/cases")
+                        .header("Authorization", workloadToken("argus-case-service", "agent-orchestrator"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(caseBody("inv-needs-info", "REVIEW")))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/api/cases/inv-needs-info/review")
+                        .header("Authorization", userToken("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"REQUEST_INFO\",\"note\":\"Request counterparty origin and transfer rationale.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewStatus").value("NEEDS_INFO"))
+                .andExpect(jsonPath("$.reviewDecision").doesNotExist());
+
+        mvc.perform(post("/api/cases/inv-needs-info/review")
+                        .header("Authorization", userToken("ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"BLOCK\",\"note\":\"Requested evidence was not provided.\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewStatus").value("RESOLVED"))
+                .andExpect(jsonPath("$.reviewDecision").value("BLOCK"));
+    }
+
+    @Test
+    void invalidReviewActionIsRejected() throws Exception {
+        mvc.perform(post("/api/cases")
+                        .header("Authorization", workloadToken("argus-case-service", "agent-orchestrator"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(caseBody("inv-invalid-review", "REVIEW")))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/api/cases/inv-invalid-review/review")
+                        .header("Authorization", userToken("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"BLOCK\"}"))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(post("/api/cases/inv-invalid-review/review")
+                        .header("Authorization", userToken("ANALYST"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"APPROVE\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void workloadForWrongAudienceIs401() throws Exception {
         mvc.perform(post("/api/cases")
                         .header("Authorization", workloadToken("argus-screening-tools", "analyst-jane"))
@@ -107,8 +193,12 @@ class CaseSecurityTest {
     }
 
     private static String caseBody(String id) {
+        return caseBody(id, "CLEAR");
+    }
+
+    private static String caseBody(String id, String decision) {
         return "{\"id\":\"" + id + "\",\"subjectAddress\":\"0xabc\","
-                + "\"decision\":\"CLEAR\",\"riskScore\":0,\"riskBand\":\"MINIMAL\","
+                + "\"decision\":\"" + decision + "\",\"riskScore\":0,\"riskBand\":\"MINIMAL\","
                 + "\"summary\":\"ok\",\"riskFactorsJson\":\"[]\","
                 + "\"createdBy\":\"attacker-controlled\"}";
     }

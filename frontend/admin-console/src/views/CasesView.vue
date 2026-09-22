@@ -24,6 +24,12 @@ function decisionType(d: string): string {
   return 'success';
 }
 
+function reviewType(state: string): string {
+  if (state === 'NEEDS_INFO') return 'info';
+  if (state === 'RESOLVED' || state === 'AUTO_APPROVED') return 'success';
+  return 'warning';
+}
+
 onMounted(load);
 </script>
 
@@ -51,6 +57,16 @@ onMounted(load);
       </el-table-column>
       <el-table-column prop="riskScore" label="Score" width="90" />
       <el-table-column prop="riskBand" label="Band" width="110" />
+      <el-table-column label="Review state" width="150">
+        <template #default="{ row }">
+          <el-tag :type="reviewType(row.reviewStatus)" size="small">{{ row.reviewStatus }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="Final decision" width="140">
+        <template #default="{ row }">
+          {{ row.reviewDecision || (row.decision !== 'REVIEW' ? row.decision : '—') }}
+        </template>
+      </el-table-column>
       <el-table-column prop="createdBy" label="By" width="120" />
     </el-table>
   </el-card>

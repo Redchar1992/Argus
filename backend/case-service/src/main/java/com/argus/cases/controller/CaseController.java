@@ -4,6 +4,7 @@ import com.argus.cases.dto.CaseDtos.AuditView;
 import com.argus.cases.dto.CaseDtos.CaseView;
 import com.argus.cases.dto.CaseDtos.PersistCaseRequest;
 import com.argus.cases.dto.CaseDtos.PolicyView;
+import com.argus.cases.dto.CaseDtos.ReviewCaseRequest;
 import com.argus.cases.dto.CaseDtos.UpdatePolicyRequest;
 import com.argus.cases.service.CaseService;
 import jakarta.validation.Valid;
@@ -52,6 +53,15 @@ public class CaseController {
     @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
     public CaseView one(@PathVariable String id) {
         return caseService.getCase(id);
+    }
+
+    /** Human review is deliberately separate from agent persistence and requires an analyst/admin role. */
+    @PostMapping("/api/cases/{id}/review")
+    @PreAuthorize("hasAnyRole('ANALYST', 'ADMIN')")
+    public CaseView review(@PathVariable String id,
+                           @Valid @RequestBody ReviewCaseRequest req,
+                           Authentication authentication) {
+        return caseService.review(id, req, authentication.getName());
     }
 
     /** The audit trail is compliance-sensitive: ADMIN only. */

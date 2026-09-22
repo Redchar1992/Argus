@@ -44,6 +44,21 @@ public class CaseRecord {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
+    @Column(name = "review_status", nullable = false, length = 32)
+    private String reviewStatus;
+
+    @Column(name = "review_decision", length = 16)
+    private String reviewDecision;
+
+    @Column(name = "review_note", length = 4000)
+    private String reviewNote;
+
+    @Column(name = "reviewed_by")
+    private String reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
+
     protected CaseRecord() {
     }
 
@@ -58,6 +73,8 @@ public class CaseRecord {
         this.riskFactorsJson = riskFactorsJson;
         this.createdBy = createdBy;
         this.createdAt = Instant.now();
+        this.reviewStatus = "REVIEW".equalsIgnoreCase(decision)
+                ? "PENDING_REVIEW" : "AUTO_APPROVED";
     }
 
     public String getId() {
@@ -94,5 +111,45 @@ public class CaseRecord {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getReviewStatus() {
+        return reviewStatus;
+    }
+
+    public void setReviewStatus(String reviewStatus) {
+        this.reviewStatus = reviewStatus;
+    }
+
+    public String getReviewDecision() {
+        return reviewDecision;
+    }
+
+    public void setReviewDecision(String reviewDecision) {
+        this.reviewDecision = reviewDecision;
+    }
+
+    public String getReviewNote() {
+        return reviewNote;
+    }
+
+    public void setReviewNote(String reviewNote) {
+        this.reviewNote = reviewNote;
+    }
+
+    public String getReviewedBy() {
+        return reviewedBy;
+    }
+
+    public void setReviewedBy(String reviewedBy) {
+        this.reviewedBy = reviewedBy;
+    }
+
+    public Instant getReviewedAt() {
+        return reviewedAt;
+    }
+
+    public void setReviewedAt(Instant reviewedAt) {
+        this.reviewedAt = reviewedAt;
     }
 }

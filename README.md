@@ -66,6 +66,25 @@ Demo wallets (seeded) produce four distinct outcomes, verified end-to-end:
 
 ---
 
+## Reviewable handoff: the agent does not own the final decision
+
+`REVIEW` is now a real intervention state rather than a label on the verdict:
+
+- `case-service` persists `PENDING_REVIEW → NEEDS_INFO → RESOLVED` independently from the
+  original agent decision, so a reviewer can clear or block a case without rewriting what the
+  agent actually returned.
+- `POST /api/cases/{id}/review` is restricted to `ANALYST` / `ADMIN`, supports `CLEAR`, `BLOCK`
+  and `REQUEST_INFO`, and appends a `CASE_REVIEWED` audit event with reviewer and note.
+- The Vue admin console exposes this as **Review Queue** with evidence inspection, reviewer notes
+  and explicit intervention buttons. The existing Cases view shows both the agent decision and
+  the human final decision.
+- The hosted Pages fixture contains the same human-gate interaction locally, explicitly labelled
+  as a browser-only demo; it does not claim to persist a production review.
+
+This separation is intentional: the model may recommend `REVIEW`, but policy and a human actor
+control whether the case can proceed. The live migration is
+`backend/case-service/src/main/resources/db/migration/V2__add_case_review_state.sql`.
+
 ## Architecture (one screen)
 
 ```

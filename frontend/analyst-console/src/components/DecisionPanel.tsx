@@ -111,10 +111,15 @@ export function DecisionPanel({ inv }: { inv: Investigation }) {
       {inv.governance && (
         <div className="governance-box">
           <div className="factors-title">Governance & evidence</div>
-          <div className={`governance-state ${inv.governance.state === 'HUMAN_REVIEW' ? 'review' : 'approved'}`}>
-            {inv.governance.state === 'HUMAN_REVIEW' ? '✋ HUMAN_REVIEW' : '✓ AUTO_APPROVED'}
+          <div className={`governance-state ${inv.reviewStatus === 'RESOLVED' || inv.governance.state !== 'HUMAN_REVIEW' ? 'approved' : 'review'}`}>
+            {inv.reviewStatus === 'RESOLVED'
+              ? `✓ HUMAN_${inv.reviewDecision ?? 'DECISION'}`
+              : inv.governance.state === 'HUMAN_REVIEW' ? `✋ ${inv.reviewStatus ?? 'HUMAN_REVIEW'}` : '✓ AUTO_APPROVED'}
           </div>
           <p>{inv.governance.reason}</p>
+          {inv.reviewDecision && (
+            <p className="review-result">Human decision: <strong>{inv.reviewDecision}</strong>{inv.reviewNote ? ` · ${inv.reviewNote}` : ''}</p>
+          )}
           <div className="provenance-grid">
             <span>Policy</span><code>{inv.governance.policyId}@{inv.governance.policyVersion}</code>
             <span>Budget</span><code>{inv.steps.length}/{inv.governance.maxSteps} steps · ≤{inv.governance.maxCostUnits} cost units</code>

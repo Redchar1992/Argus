@@ -148,6 +148,9 @@ export async function getDemoInvestigation(id: string): Promise<Investigation> {
       maxCostUnits: 6,
       maxSteps: 6,
     },
+    reviewStatus: profile.decision === 'REVIEW' ? 'PENDING_REVIEW' : 'AUTO_APPROVED',
+    reviewDecision: null,
+    reviewNote: null,
     transactionState: profile.decision === 'REVIEW' ? 'AWAITING_REVIEW' : 'SETTLED',
   };
 }

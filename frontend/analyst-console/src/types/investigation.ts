@@ -35,6 +35,10 @@ export interface Investigation {
     maxCostUnits: number;
     maxSteps: number;
   };
+  /** Human-gate projection used by the deterministic demo and the case-service contract. */
+  reviewStatus?: 'AUTO_APPROVED' | 'PENDING_REVIEW' | 'NEEDS_INFO' | 'RESOLVED';
+  reviewDecision?: 'CLEAR' | 'BLOCK' | null;
+  reviewNote?: string | null;
   transactionState?: 'DETECTED' | 'SCREENED' | 'AWAITING_REVIEW' | 'SETTLED';
 }
 

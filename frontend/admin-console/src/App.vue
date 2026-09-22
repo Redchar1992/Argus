@@ -21,13 +21,14 @@ const route = useRoute();
         <span class="logo">Argus</span>
         <span class="title-sep">Admin Console</span>
       </span>
-      <span class="sub">policies · tools · cases · audit</span>
+      <span class="sub">review queue · policies · tools · cases · audit</span>
     </el-header>
     <el-container>
       <el-aside width="200px">
         <el-menu :default-active="route.path" router>
           <el-menu-item index="/tools">Tools</el-menu-item>
           <el-menu-item index="/policies">Policies</el-menu-item>
+          <el-menu-item index="/review">Review Queue</el-menu-item>
           <el-menu-item index="/cases">Cases</el-menu-item>
           <el-menu-item index="/audit">Audit Log</el-menu-item>
         </el-menu>

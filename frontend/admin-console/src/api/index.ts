@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AuditEntry, CaseView, Policy, ToolStatus } from '../types';
+import type { AuditEntry, CaseView, Policy, ReviewAction, ToolStatus } from '../types';
 
 // case-service (policies, audit, cases) and tools-service (tool catalog) base URLs.
 // In an integrated deployment both sit behind the gateway; for standalone dev they
@@ -35,6 +35,9 @@ export const api = {
   },
   async getCases(): Promise<CaseView[]> {
     return (await caseHttp.get<CaseView[]>('/api/cases')).data;
+  },
+  async reviewCase(id: string, action: ReviewAction, note?: string): Promise<CaseView> {
+    return (await caseHttp.post<CaseView>(`/api/cases/${id}/review`, { action, note })).data;
   },
   async getTools(): Promise<ToolStatus[]> {
     return (await toolsHttp.get<ToolStatus[]>('/api/tools/catalog')).data;

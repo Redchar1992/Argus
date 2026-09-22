@@ -15,6 +15,11 @@ export const router = createRouter({
       meta: { title: 'Policies' },
     },
     {
+      path: '/review',
+      component: () => import('../views/ReviewView.vue'),
+      meta: { title: 'Review Queue' },
+    },
+    {
       path: '/cases',
       component: () => import('../views/CasesView.vue'),
       meta: { title: 'Cases' },

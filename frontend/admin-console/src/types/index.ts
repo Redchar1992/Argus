@@ -26,6 +26,14 @@ export interface CaseView {
   riskScore: number;
   riskBand: string;
   summary: string;
+  riskFactorsJson: string | null;
   createdBy: string;
   createdAt: string;
+  reviewStatus: 'AUTO_APPROVED' | 'PENDING_REVIEW' | 'NEEDS_INFO' | 'RESOLVED' | string;
+  reviewDecision: 'CLEAR' | 'BLOCK' | null;
+  reviewNote: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
 }
+
+export type ReviewAction = 'CLEAR' | 'BLOCK' | 'REQUEST_INFO';
